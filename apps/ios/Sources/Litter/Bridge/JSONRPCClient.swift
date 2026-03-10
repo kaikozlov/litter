@@ -84,7 +84,6 @@ actor JSONRPCClient {
 
         let req = JSONRPCRequest(id: id, method: method, params: AnyEncodable(params))
         let data = try JSONEncoder().encode(req)
-
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
                 pending[id] = cont

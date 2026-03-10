@@ -1242,7 +1242,7 @@ struct SessionSidebarView: View {
         workDir = cwd
         appState.currentCwd = cwd
         let model = appState.selectedModel.isEmpty ? nil : appState.selectedModel
-        let startedKey = await serverManager.startThread(
+        let startedKey = try? await serverManager.startThread(
             serverId: serverId,
             cwd: cwd,
             model: model,

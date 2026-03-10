@@ -340,52 +340,50 @@ final class ServerManager: ObservableObject {
         model: String? = nil,
         approvalPolicy: String = "never",
         sandboxMode: String? = nil
-    ) async -> ThreadKey? {
-        guard let conn = connections[serverId] else { return nil }
-        do {
-            let resp = try await conn.startThread(
-                cwd: cwd,
-                model: model,
-                approvalPolicy: approvalPolicy,
-                sandboxMode: sandboxMode
-            )
-            let threadId = resp.thread.id
-            let key = ThreadKey(serverId: serverId, threadId: threadId)
-            let state = ThreadState(
-                serverId: serverId,
-                threadId: threadId,
-                serverName: conn.server.name,
-                serverSource: conn.server.source
-            )
-            state.cwd = resp.cwd
-            state.model = resp.model
-            state.modelProvider = resp.modelProvider ?? resp.model
-            state.reasoningEffort = resp.reasoningEffort
-            state.rolloutPath = resp.thread.path
-            state.parentThreadId = sanitizedLineageId(resp.thread.parentThreadId)
-            state.rootThreadId = sanitizedLineageId(resp.thread.rootThreadId)
-            state.agentNickname = sanitizedLineageId(resp.thread.agentNickname)
-            state.agentRole = sanitizedLineageId(resp.thread.agentRole)
-            upsertAgentDirectory(
-                serverId: serverId,
-                threadId: threadId,
-                agentId: resp.thread.agentId,
-                nickname: state.agentNickname,
-                role: state.agentRole
-            )
-            state.updatedAt = Date()
-            threads[key] = state
-            threadTurnCounts[key] = 0
-            liveItemMessageIndices[key] = nil
-            liveTurnDiffMessageIndices[key] = nil
-            observeThread(state)
-            activeThreadKey = key
-            await refreshThreadContextWindow(for: key, cwd: resp.cwd)
-            await refreshPersistedContextUsage(for: key)
-            return key
-        } catch {
-            return nil
+    ) async throws -> ThreadKey {
+        guard let conn = connections[serverId] else {
+            throw NSError(domain: "Litter", code: 1, userInfo: [NSLocalizedDescriptionKey: "No connection for server"])
         }
+        let resp = try await conn.startThread(
+            cwd: cwd,
+            model: model,
+            approvalPolicy: approvalPolicy,
+            sandboxMode: sandboxMode
+        )
+        let threadId = resp.thread.id
+        let key = ThreadKey(serverId: serverId, threadId: threadId)
+        let state = ThreadState(
+            serverId: serverId,
+            threadId: threadId,
+            serverName: conn.server.name,
+            serverSource: conn.server.source
+        )
+        state.cwd = resp.cwd
+        state.model = resp.model
+        state.modelProvider = resp.modelProvider ?? resp.model
+        state.reasoningEffort = resp.reasoningEffort
+        state.rolloutPath = resp.thread.path
+        state.parentThreadId = sanitizedLineageId(resp.thread.parentThreadId)
+        state.rootThreadId = sanitizedLineageId(resp.thread.rootThreadId)
+        state.agentNickname = sanitizedLineageId(resp.thread.agentNickname)
+        state.agentRole = sanitizedLineageId(resp.thread.agentRole)
+        upsertAgentDirectory(
+            serverId: serverId,
+            threadId: threadId,
+            agentId: resp.thread.agentId,
+            nickname: state.agentNickname,
+            role: state.agentRole
+        )
+        state.updatedAt = Date()
+        threads[key] = state
+        threadTurnCounts[key] = 0
+        liveItemMessageIndices[key] = nil
+        liveTurnDiffMessageIndices[key] = nil
+        observeThread(state)
+        activeThreadKey = key
+        await refreshThreadContextWindow(for: key, cwd: resp.cwd)
+        await refreshPersistedContextUsage(for: key)
+        return key
     }
 
     func resumeThread(
@@ -794,14 +792,31 @@ final class ServerManager: ObservableObject {
     ) async {
         var key = activeThreadKey
         if key == nil {
-            if let serverId = connections.values.first(where: { $0.isConnected })?.id {
-                key = await startThread(
+            guard let serverId = connections.values.first(where: { $0.isConnected })?.id else { return }
+            do {
+                key = try await startThread(
                     serverId: serverId,
                     cwd: cwd,
                     model: model,
                     approvalPolicy: approvalPolicy,
                     sandboxMode: sandboxMode
                 )
+            } catch {
+                let conn = connections[serverId]
+                let errorKey = ThreadKey(serverId: serverId, threadId: "error-\(UUID().uuidString)")
+                let state = ThreadState(
+                    serverId: serverId,
+                    threadId: errorKey.threadId,
+                    serverName: conn?.server.name ?? "Server",
+                    serverSource: conn?.server.source ?? .local
+                )
+                state.messages.append(ChatMessage(role: .user, text: text, isFromUserTurnBoundary: true))
+                state.messages.append(ChatMessage(role: .system, text: error.localizedDescription))
+                state.status = .error(error.localizedDescription)
+                threads[errorKey] = state
+                observeThread(state)
+                activeThreadKey = errorKey
+                return
             }
         }
         guard let key, let thread = threads[key], let conn = connections[key.serverId] else { return }
@@ -819,6 +834,7 @@ final class ServerManager: ObservableObject {
                 effort: effort,
                 additionalInput: skillInputs
             )
+            NSLog("[send] sendTurn succeeded, turnId=%@", resp.turnId ?? "nil")
             thread.activeTurnId = resp.turnId
         } catch {
             thread.status = .error(error.localizedDescription)
@@ -2243,7 +2259,8 @@ final class ServerManager: ObservableObject {
     private func refreshPersistedContextUsage(for key: ThreadKey) async {
         guard let thread = threads[key],
               let conn = connections[key.serverId],
-              conn.isConnected else {
+              conn.isConnected,
+              conn.server.source != .local else {
             return
         }
 

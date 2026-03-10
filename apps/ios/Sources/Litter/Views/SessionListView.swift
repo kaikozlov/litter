@@ -202,7 +202,7 @@ struct SessionListView: View {
         guard !isResuming else { return }
         workDir = cwd
         let model = (serverManager.activeConnection?.models.first(where: { $0.isDefault })?.id)
-        let startedKey = await serverManager.startThread(serverId: server.id, cwd: cwd, model: model)
+        let startedKey = try? await serverManager.startThread(serverId: server.id, cwd: cwd, model: model)
         if startedKey != nil {
             _ = RecentDirectoryStore.shared.record(path: cwd, for: server.id)
         }
