@@ -985,7 +985,7 @@ final class ServerManager: ObservableObject {
 
     func handleNotification(serverId: String, method: String, data: Data) {
         switch method {
-        case "account/login/completed", "account/updated":
+        case "account/login/completed", "account/updated", "account/rateLimits/updated":
             connections[serverId]?.handleAccountNotification(method: method, data: data)
 
         case "sessionConfigured":
@@ -1175,6 +1175,7 @@ final class ServerManager: ObservableObject {
                     }
                 }
             }
+            Task { await connections[serverId]?.fetchRateLimits() }
 
         case "turn/diff/updated":
             handleTurnDiffNotification(serverId: serverId, data: data)

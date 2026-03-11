@@ -1397,3 +1397,35 @@ struct AccountLoginCompletedNotification: Decodable {
 struct AccountUpdatedNotification: Decodable {
     let authMode: String?   // "apiKey" | "chatgpt" | nil
 }
+
+// MARK: - Rate Limits
+
+struct RateLimitWindow: Decodable {
+    let usedPercent: Double
+    let windowDurationMins: Int?
+    let resetsAt: Double?
+}
+
+struct CreditsSnapshot: Decodable {
+    let hasCredits: Bool
+    let unlimited: Bool
+    let balance: String?
+}
+
+struct RateLimitSnapshot: Decodable {
+    let limitId: String?
+    let limitName: String?
+    let primary: RateLimitWindow?
+    let secondary: RateLimitWindow?
+    let credits: CreditsSnapshot?
+    let planType: String?
+}
+
+struct GetAccountRateLimitsResponse: Decodable {
+    let rateLimits: RateLimitSnapshot
+    let rateLimitsByLimitId: [String: RateLimitSnapshot]?
+}
+
+struct AccountRateLimitsUpdatedNotification: Decodable {
+    let rateLimits: RateLimitSnapshot
+}

@@ -180,6 +180,26 @@ struct ContextBadgeView: View, Equatable {
     }
 }
 
+struct RateLimitBadgeView: View, Equatable {
+    let label: String
+    let percent: Int
+
+    private var tint: Color {
+        if percent <= 10 { return LitterTheme.danger }
+        if percent <= 30 { return LitterTheme.warning }
+        return LitterTheme.textMuted
+    }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 7.5, weight: .semibold, design: .monospaced))
+                .foregroundColor(LitterTheme.textSecondary)
+            ContextBadgeView(percent: percent, tint: tint)
+        }
+    }
+}
+
 private struct BottomMarkerMaxYPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = .greatestFiniteMagnitude
 
@@ -623,6 +643,13 @@ private struct ConversationInputBar: View {
                 .padding(.top, 8)
             }
             composerRow
+                .overlay(alignment: .bottomTrailing) {
+                    if bottomInset > 20 {
+                        contextBar
+                            .offset(y: 16)
+                    }
+                }
+                .padding(.bottom, bottomInset)
         }
         .overlay(alignment: .bottom) {
             if showSlashPopup {
@@ -920,7 +947,67 @@ private struct ConversationInputBar: View {
         }
         .padding(.horizontal, 12)
         .padding(.top, 6)
-        .padding(.bottom, max(bottomInset, 8))
+        .padding(.bottom, 6)
+    }
+
+    @ViewBuilder
+    private var contextBar: some View {
+        let rateLimits = serverManager.activeConnection?.rateLimits
+        let contextPct = contextPercent(thread: serverManager.activeThread)
+        let hasAnything = rateLimits?.primary != nil || rateLimits?.secondary != nil || contextPct != nil
+
+        if hasAnything {
+            HStack(spacing: 4) {
+                if let primary = rateLimits?.primary {
+                    RateLimitBadgeView(
+                        label: formatWindowLabel(primary),
+                        percent: normalizedPercent(primary.usedPercent)
+                    )
+                }
+                if let secondary = rateLimits?.secondary {
+                    RateLimitBadgeView(
+                        label: formatWindowLabel(secondary),
+                        percent: normalizedPercent(secondary.usedPercent)
+                    )
+                }
+                if let percent = contextPct {
+                    ContextBadgeView(percent: Int(percent), tint: contextTint(percent: percent))
+                }
+            }
+            .padding(.trailing, 40)
+        }
+    }
+
+    private func normalizedPercent(_ raw: Double) -> Int {
+        if raw > 1 { return min(Int(raw), 100) }
+        return min(Int(raw * 100), 100)
+    }
+
+    private func formatWindowLabel(_ window: RateLimitWindow) -> String {
+        guard let mins = window.windowDurationMins else { return "" }
+        if mins >= 1440 { return "\(mins / 1440)d" }
+        if mins >= 60 { return "\(mins / 60)h" }
+        return "\(mins)m"
+    }
+
+    private func contextPercent(thread: ThreadState?) -> Int64? {
+        guard let thread, let contextWindow = thread.modelContextWindow else { return nil }
+        let baseline: Int64 = 12_000
+        guard contextWindow > baseline else { return 0 }
+        let totalTokens = thread.contextTokensUsed ?? baseline
+        let effectiveWindow = contextWindow - baseline
+        let usedTokens = max(0, totalTokens - baseline)
+        let remainingTokens = max(0, effectiveWindow - usedTokens)
+        let percent = Int64((Double(remainingTokens) / Double(effectiveWindow) * 100).rounded())
+        return min(max(percent, 0), 100)
+    }
+
+    private func contextTint(percent: Int64) -> Color {
+        switch percent {
+        case ...15: return LitterTheme.danger
+        case ...35: return LitterTheme.warning
+        default: return LitterTheme.accentStrong
+        }
     }
 
     private var slashSuggestionPopup: some View {

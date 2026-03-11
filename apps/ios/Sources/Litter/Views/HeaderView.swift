@@ -2,8 +2,6 @@ import SwiftUI
 import Inject
 
 struct HeaderView: View {
-    private static let contextBaselineTokens: Int64 = 12_000
-
     @ObserveInjection var inject
     @EnvironmentObject var serverManager: ServerManager
     @EnvironmentObject var appState: AppState
@@ -57,14 +55,11 @@ struct HeaderView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
 
-                        HStack(spacing: 6) {
-                            Text(sessionDirectoryLabel)
-                                .font(LitterFont.styled(.caption2, weight: .semibold))
-                                .foregroundColor(LitterTheme.textSecondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            ContextBadgeView(percent: Int(sessionContextPercent ?? 100), tint: sessionContextTint)
-                        }
+                        Text(sessionDirectoryLabel)
+                            .font(LitterFont.styled(.caption2, weight: .semibold))
+                            .foregroundColor(LitterTheme.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
@@ -187,20 +182,6 @@ struct HeaderView: View {
         return "default"
     }
 
-    private var sessionContextTint: Color {
-        guard let percent = sessionContextPercent else {
-            return LitterTheme.textSecondary
-        }
-        switch percent {
-        case ...15:
-            return LitterTheme.danger
-        case ...35:
-            return LitterTheme.warning
-        default:
-            return LitterTheme.accentStrong
-        }
-    }
-
     private var sessionDirectoryLabel: String {
         let currentDirectory = serverManager.activeThread?.cwd.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !currentDirectory.isEmpty {
@@ -213,19 +194,6 @@ struct HeaderView: View {
         }
 
         return "~"
-    }
-
-    private var sessionContextPercent: Int64? {
-        guard let thread = serverManager.activeThread,
-              let contextWindow = thread.modelContextWindow else {
-            return nil
-        }
-
-        let totalTokens = thread.contextTokensUsed ?? Self.contextBaselineTokens
-        return percentOfContextWindowRemaining(
-            totalTokens: totalTokens,
-            contextWindow: contextWindow
-        )
     }
 
     private func loadModelsIfNeeded() async {
@@ -297,18 +265,6 @@ struct HeaderView: View {
         }
         .accessibilityIdentifier("header.reloadButton")
         .disabled(isReloading || !serverManager.hasAnyConnection)
-    }
-
-    private func percentOfContextWindowRemaining(totalTokens: Int64, contextWindow: Int64) -> Int64 {
-        let baseline = Self.contextBaselineTokens
-        guard contextWindow > baseline else { return 0 }
-
-        let effectiveWindow = contextWindow - baseline
-        let usedTokens = max(0, totalTokens - baseline)
-        let remainingTokens = max(0, effectiveWindow - usedTokens)
-        let remainingFraction = Double(remainingTokens) / Double(effectiveWindow)
-        let percent = Int64((remainingFraction * 100).rounded())
-        return min(max(percent, 0), 100)
     }
 
 }

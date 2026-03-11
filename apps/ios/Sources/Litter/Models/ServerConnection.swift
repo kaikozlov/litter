@@ -16,6 +16,7 @@ final class ServerConnection: ObservableObject, Identifiable {
     @Published var loginCompleted = false
     @Published var models: [CodexModel] = []
     @Published var modelsLoaded = false
+    @Published var rateLimits: RateLimitSnapshot?
 
     let client = JSONRPCClient()
     private var serverURL: URL?
@@ -76,6 +77,7 @@ final class ServerConnection: ObservableObject, Identifiable {
             connectionPhase = "ready"
             Task { [weak self] in
                 await self?.checkAuth()
+                await self?.fetchRateLimits()
             }
         } catch {
             connectionPhase = "error: \(error.localizedDescription)"
@@ -86,6 +88,7 @@ final class ServerConnection: ObservableObject, Identifiable {
         Task { await client.disconnect() }
         isConnected = false
         serverURL = nil
+        rateLimits = nil
     }
 
     func forwardOAuthCallback(_ url: URL) {
@@ -438,6 +441,18 @@ final class ServerConnection: ObservableObject, Identifiable {
         oauthURL = nil
     }
 
+    // MARK: - Rate Limits
+
+    func fetchRateLimits() async {
+        struct EmptyParams: Encodable {}
+        guard let resp = try? await client.sendRequest(
+            method: "account/rateLimits/read",
+            params: EmptyParams(),
+            responseType: GetAccountRateLimitsResponse.self
+        ) else { return }
+        rateLimits = resp.rateLimits
+    }
+
     // MARK: - Account Notifications
 
     func handleAccountNotification(method: String, data: Data) {
@@ -452,6 +467,10 @@ final class ServerConnection: ObservableObject, Identifiable {
             }
         case "account/updated":
             Task { await self.checkAuth() }
+        case "account/rateLimits/updated":
+            if let notif = try? JSONDecoder().decode(AccountRateLimitsUpdatedNotification.self, from: extractParams(data)) {
+                rateLimits = notif.rateLimits
+            }
         default:
             break
         }
