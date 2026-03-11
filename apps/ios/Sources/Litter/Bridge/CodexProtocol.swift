@@ -1384,6 +1384,16 @@ struct GetAccountResponse: Decodable {
     }
 }
 
+struct GetAuthStatusParams: Encodable {
+    let includeToken: Bool
+    let refreshToken: Bool
+}
+
+struct GetAuthStatusResponse: Decodable {
+    let authMethod: String?
+    let authToken: String?
+}
+
 struct CancelLoginParams: Encodable {
     let loginId: String
 }

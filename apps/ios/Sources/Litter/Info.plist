@@ -38,6 +38,8 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Codex discovers coding agents and SSH servers on your local network.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Litter uses the microphone for voice-to-text input.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>BerkeleyMono-Regular.otf</string>

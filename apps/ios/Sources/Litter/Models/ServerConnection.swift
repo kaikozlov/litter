@@ -390,6 +390,19 @@ final class ServerConnection: ObservableObject, Identifiable {
         }
     }
 
+    func getAuthToken() async -> (method: String?, token: String?) {
+        do {
+            let resp: GetAuthStatusResponse = try await client.sendRequest(
+                method: "getAuthStatus",
+                params: GetAuthStatusParams(includeToken: true, refreshToken: false),
+                responseType: GetAuthStatusResponse.self
+            )
+            return (resp.authMethod, resp.authToken)
+        } catch {
+            return (nil, nil)
+        }
+    }
+
     func loginWithChatGPT() async {
         do {
             let resp: LoginStartResponse = try await client.sendRequest(

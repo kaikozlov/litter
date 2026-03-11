@@ -608,6 +608,8 @@ private struct ConversationInputBar: View {
     @State private var skillsLoading = false
     @State private var mentionSkillPathsByName: [String: String] = [:]
     @State private var hasAttemptedSkillMentionLoad = false
+    @StateObject private var voiceManager = VoiceTranscriptionManager()
+    @State private var showMicPermissionAlert = false
 
     private var hasText: Bool {
         !inputText.trimmingCharacters(in: .whitespaces).isEmpty
@@ -677,7 +679,18 @@ private struct ConversationInputBar: View {
             hideComposerPopups()
             inputFocused.wrappedValue = true
         }
+        .alert("Microphone Access", isPresented: $showMicPermissionAlert) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Microphone permission is required for voice input. Enable it in Settings.")
+        }
         .onDisappear {
+            if voiceManager.isRecording { voiceManager.cancelRecording() }
             popupRefreshTask?.cancel()
             popupRefreshTask = nil
             fileSearchTask?.cancel()
@@ -887,12 +900,15 @@ private struct ConversationInputBar: View {
 
     private var composerRow: some View {
         HStack(alignment: .center, spacing: 8) {
-            Button { showAttachMenu = true } label: {
-                Image(systemName: "plus")
-                    .font(.system(.subheadline, weight: .semibold))
-                    .foregroundColor(LitterTheme.textPrimary)
-                    .frame(width: 32, height: 32)
-                    .modifier(GlassCircleModifier())
+            if !voiceManager.isRecording && !voiceManager.isTranscribing && !isTurnActive {
+                Button { showAttachMenu = true } label: {
+                    Image(systemName: "plus")
+                        .font(.system(.body, weight: .semibold))
+                        .foregroundColor(LitterTheme.textPrimary)
+                        .frame(width: 36, height: 36)
+                        .modifier(GlassCircleModifier())
+                }
+                .transition(.scale.combined(with: .opacity))
             }
 
             HStack(spacing: 0) {
@@ -903,19 +919,10 @@ private struct ConversationInputBar: View {
                     .focused(inputFocused)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
-                    .padding(.leading, 14)
-                    .padding(.vertical, 8)
+                    .padding(.leading, 16)
+                    .padding(.vertical, 10)
 
-                if isTurnActive {
-                    Button {
-                        Task { await serverManager.interrupt() }
-                    } label: {
-                        Image(systemName: "stop.circle.fill")
-                            .font(.system(.title2))
-                            .foregroundColor(LitterTheme.danger)
-                    }
-                    .padding(.trailing, 4)
-                } else if hasText {
+                if hasText {
                     Button {
                         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !text.isEmpty else { return }
@@ -940,11 +947,68 @@ private struct ConversationInputBar: View {
                             .foregroundColor(LitterTheme.accent)
                     }
                     .padding(.trailing, 4)
+                } else if voiceManager.isRecording {
+                    AudioWaveformView(level: voiceManager.audioLevel)
+                        .frame(width: 48, height: 20)
+                    Button {
+                        Task {
+                            let auth = await serverManager.activeConnection?.getAuthToken()
+                            if let text = await voiceManager.stopAndTranscribe(
+                                authMethod: auth?.method, authToken: auth?.token
+                            ), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                inputText = text
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "stop.circle.fill")
+                            .font(.system(.title2))
+                            .foregroundColor(LitterTheme.accentStrong)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .padding(.trailing, 4)
+                } else if voiceManager.isTranscribing {
+                    ProgressView()
+                        .tint(LitterTheme.accent)
+                        .padding(.trailing, 8)
+                } else {
+                    Button {
+                        Task {
+                            let granted = await voiceManager.requestMicPermission()
+                            guard granted else {
+                                showMicPermissionAlert = true
+                                return
+                            }
+                            voiceManager.startRecording()
+                        }
+                    } label: {
+                        Image(systemName: "mic.fill")
+                            .font(.system(.subheadline))
+                            .foregroundColor(LitterTheme.textSecondary)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .padding(.trailing, 4)
                 }
             }
-            .frame(minHeight: 32)
-            .modifier(GlassCapsuleModifier())
+            .frame(minHeight: 36)
+            .modifier(GlassRoundedRectModifier(cornerRadius: 20))
+
+            if isTurnActive {
+                Button {
+                    Task { await serverManager.interrupt() }
+                } label: {
+                    Text("Cancel")
+                        .font(.system(.subheadline, weight: .medium))
+                        .foregroundColor(LitterTheme.textPrimary)
+                        .padding(.horizontal, 14)
+                        .frame(height: 36)
+                        .modifier(GlassCapsuleModifier())
+                }
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
+        .animation(.spring(response: 0.3, dampingFraction: 0.86), value: isTurnActive)
         .padding(.horizontal, 12)
         .padding(.top, 6)
         .padding(.bottom, 6)
