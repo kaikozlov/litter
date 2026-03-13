@@ -240,6 +240,9 @@ struct LockScreenCardView: View {
     private var mutedText: Color { tertiaryText.opacity(0.7) }
     private var chipBgBase: Color { colorScheme == .dark ? .white : .black }
     private var completedBadgeFg: Color { secondaryText }
+    private var dangerText: Color { LitterPalette.danger.color(for: colorScheme) }
+    private var warningText: Color { LitterPalette.warning.color(for: colorScheme) }
+    private var successText: Color { LitterPalette.success.color(for: colorScheme) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -328,9 +331,9 @@ struct LockScreenCardView: View {
     private var snippetColor: Color {
         if state.outputSnippet != nil { return secondaryText }
         switch state.phase {
-        case .thinking, .toolCall: return amberColor.opacity(0.7)
+        case .thinking, .toolCall: return warningText.opacity(0.7)
         case .completed: return secondaryText
-        case .failed: return dangerColor.opacity(0.7)
+        case .failed: return dangerText.opacity(0.7)
         }
     }
 
@@ -345,16 +348,16 @@ struct LockScreenCardView: View {
         }()
         let fg: Color = {
             switch state.phase {
-            case .thinking, .toolCall: return amberColor
+            case .thinking, .toolCall: return warningText
             case .completed: return completedBadgeFg
-            case .failed: return dangerColor
+            case .failed: return dangerText
             }
         }()
         let bg: Color = {
             switch state.phase {
-            case .thinking, .toolCall: return amberColor.opacity(colorScheme == .dark ? 0.12 : 0.15)
+            case .thinking, .toolCall: return warningText.opacity(colorScheme == .dark ? 0.12 : 0.15)
             case .completed: return chipBgBase.opacity(0.06)
-            case .failed: return dangerColor.opacity(colorScheme == .dark ? 0.12 : 0.15)
+            case .failed: return dangerText.opacity(colorScheme == .dark ? 0.12 : 0.15)
             }
         }()
         return Text(text)
@@ -380,8 +383,8 @@ struct LockScreenCardView: View {
 
     private var ctxBadge: some View {
         let p = state.contextPercent
-        let fg: Color = p >= 80 ? dangerColor : p >= 60 ? amberColor : tertiaryText
-        let bg: Color = p >= 80 ? dangerColor.opacity(0.1) : p >= 60 ? amberColor.opacity(0.1) : chipBgBase.opacity(0.05)
+        let fg: Color = p >= 80 ? dangerText : p >= 60 ? warningText : tertiaryText
+        let bg: Color = p >= 80 ? dangerText.opacity(0.1) : p >= 60 ? warningText.opacity(0.1) : chipBgBase.opacity(0.05)
         return Text("\(p)%")
             .font(.system(size: 9, weight: .semibold, design: .monospaced))
             .foregroundStyle(fg)
