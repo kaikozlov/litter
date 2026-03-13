@@ -286,7 +286,10 @@ private struct ConversationMessageList: View {
 
                     if shouldShowScrollToBottom {
                         ScrollToBottomIndicator {
-                            scheduleScrollToBottom(proxy, delay: 0, force: true, animated: true)
+                            withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.9)) {
+                                proxy.scrollTo("bottom", anchor: .bottom)
+                            }
+                            isNearBottom = true
                         }
                         .padding(.trailing, 14)
                         .padding(.bottom, 10)
@@ -422,7 +425,7 @@ private struct ScrollToBottomIndicator: View {
             .padding(.vertical, 8)
             .modifier(GlassCapsuleModifier())
         }
-        .buttonStyle(.plain)
+        .contentShape(Capsule())
         .onAppear {
             withAnimation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true)) {
                 bob = true
