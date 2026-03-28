@@ -827,6 +827,7 @@ struct DirectoryPickerView: View {
     }
 }
 
+#if DEBUG
 #Preview("Directory Picker") {
     NavigationStack {
         DirectoryPickerView(
@@ -837,3 +838,4 @@ struct DirectoryPickerView: View {
         .environment(LitterPreviewData.makeDiscoveryAppModel())
     }
 }
+#endif
