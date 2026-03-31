@@ -2062,39 +2062,40 @@ enum ComposerSlashCommand: CaseIterable {
 }
 
 enum ComposerPermissionPreset: CaseIterable, Identifiable {
-    case readOnly
-    case auto
+    case inheritServerConfig
+    case supervised
     case fullAccess
 
     var id: String { title }
 
     var title: String {
         switch self {
-        case .readOnly: return "Read Only"
-        case .auto: return "Auto"
+        case .inheritServerConfig: return "Inherit Server Config"
+        case .supervised: return "Supervised"
         case .fullAccess: return "Full Access"
         }
     }
 
     var description: String {
         switch self {
-        case .readOnly: return "Ask before commands and run in read-only sandbox"
-        case .auto: return "No prompts and workspace-write sandbox"
+        case .inheritServerConfig: return "Use the server's configured approval and sandbox settings"
+        case .supervised: return "Ask before commands and run in a workspace-write sandbox"
         case .fullAccess: return "No prompts and danger-full-access sandbox"
         }
     }
 
     var approvalPolicy: String {
         switch self {
-        case .readOnly: return "on-request"
-        case .auto, .fullAccess: return "never"
+        case .inheritServerConfig: return "inherit"
+        case .supervised: return "on-request"
+        case .fullAccess: return "never"
         }
     }
 
     var sandboxMode: String {
         switch self {
-        case .readOnly: return "read-only"
-        case .auto: return "workspace-write"
+        case .inheritServerConfig: return "inherit"
+        case .supervised: return "workspace-write"
         case .fullAccess: return "danger-full-access"
         }
     }

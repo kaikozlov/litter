@@ -44,40 +44,38 @@ import com.litter.android.ui.LocalAppModel
 import com.litter.android.ui.LitterTheme
 import kotlinx.coroutines.launch
 import uniffi.codex_mobile_client.AbsolutePath
-import uniffi.codex_mobile_client.AppAskForApproval
 import uniffi.codex_mobile_client.AppListExperimentalFeaturesRequest
 import uniffi.codex_mobile_client.AppListSkillsRequest
 import uniffi.codex_mobile_client.AppWriteConfigValueRequest
 import uniffi.codex_mobile_client.ExperimentalFeature
 import uniffi.codex_mobile_client.AppMergeStrategy
-import uniffi.codex_mobile_client.AppSandboxMode
 import uniffi.codex_mobile_client.SkillMetadata
 
 private data class ComposerPermissionPreset(
     val title: String,
     val description: String,
-    val approvalPolicy: AppAskForApproval,
-    val sandboxMode: AppSandboxMode,
+    val approvalPolicy: String,
+    val sandboxMode: String,
 )
 
 private val composerPermissionPresets = listOf(
     ComposerPermissionPreset(
-        title = "Read Only",
-        description = "Ask before commands and run in read-only sandbox",
-        approvalPolicy = AppAskForApproval.OnRequest,
-        sandboxMode = AppSandboxMode.READ_ONLY,
+        title = "Inherit Server Config",
+        description = "Use the server's configured approval and sandbox settings",
+        approvalPolicy = "inherit",
+        sandboxMode = "inherit",
     ),
     ComposerPermissionPreset(
-        title = "Auto",
-        description = "No prompts and workspace-write sandbox",
-        approvalPolicy = AppAskForApproval.Never,
-        sandboxMode = AppSandboxMode.WORKSPACE_WRITE,
+        title = "Supervised",
+        description = "Ask before commands and run in a workspace-write sandbox",
+        approvalPolicy = "on-request",
+        sandboxMode = "workspace-write",
     ),
     ComposerPermissionPreset(
         title = "Full Access",
         description = "No prompts and danger-full-access sandbox",
-        approvalPolicy = AppAskForApproval.Never,
-        sandboxMode = AppSandboxMode.DANGER_FULL_ACCESS,
+        approvalPolicy = "never",
+        sandboxMode = "danger-full-access",
     ),
 )
 
@@ -85,8 +83,6 @@ private val composerPermissionPresets = listOf(
 fun ComposerPermissionsSheet(onDismiss: () -> Unit) {
     val appModel = LocalAppModel.current
     val launchState by appModel.launchState.snapshot.collectAsState()
-    val selectedApproval = remember(launchState.approvalPolicy) { appModel.launchState.approvalPolicyValue() }
-    val selectedSandbox = remember(launchState.sandboxMode) { appModel.launchState.sandboxModeValue() }
 
     Column(
         modifier = Modifier
@@ -97,28 +93,16 @@ fun ComposerPermissionsSheet(onDismiss: () -> Unit) {
     ) {
         SheetHeader(title = "Permissions", onDismiss = onDismiss)
         composerPermissionPresets.forEachIndexed { index, preset ->
-            val isSelected = preset.approvalPolicy == selectedApproval && preset.sandboxMode == selectedSandbox
+            val isSelected =
+                preset.approvalPolicy == launchState.approvalPolicy &&
+                    preset.sandboxMode == launchState.sandboxMode
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(LitterTheme.surface.copy(alpha = 0.72f), RoundedCornerShape(12.dp))
                     .clickable {
-                        appModel.launchState.updateApprovalPolicy(
-                            when (preset.approvalPolicy) {
-                                AppAskForApproval.OnRequest -> "on-request"
-                                AppAskForApproval.Never -> "never"
-                                AppAskForApproval.OnFailure -> "on-failure"
-                                AppAskForApproval.UnlessTrusted -> "unless-trusted"
-                                is AppAskForApproval.Granular -> null
-                            },
-                        )
-                        appModel.launchState.updateSandboxMode(
-                            when (preset.sandboxMode) {
-                                AppSandboxMode.READ_ONLY -> "read-only"
-                                AppSandboxMode.WORKSPACE_WRITE -> "workspace-write"
-                                AppSandboxMode.DANGER_FULL_ACCESS -> "danger-full-access"
-                            },
-                        )
+                        appModel.launchState.updateApprovalPolicy(preset.approvalPolicy)
+                        appModel.launchState.updateSandboxMode(preset.sandboxMode)
                         onDismiss()
                     }
                     .padding(horizontal = 14.dp, vertical = 12.dp),

@@ -30,8 +30,8 @@ final class AppState {
     }
 
     init() {
-        approvalPolicy = UserDefaults.standard.string(forKey: Self.approvalPolicyKey) ?? "never"
-        sandboxMode = UserDefaults.standard.string(forKey: Self.sandboxModeKey) ?? "workspace-write"
+        approvalPolicy = UserDefaults.standard.string(forKey: Self.approvalPolicyKey) ?? "inherit"
+        sandboxMode = UserDefaults.standard.string(forKey: Self.sandboxModeKey) ?? "inherit"
     }
 
     func toggleSessionFolder(_ folderPath: String) {

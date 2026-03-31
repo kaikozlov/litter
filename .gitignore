@@ -68,3 +68,4 @@ node_modules/
 .factory/
 .claude/
 shared/third_party/codex/
+.wrangler/

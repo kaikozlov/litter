@@ -95,7 +95,7 @@ private val SLASH_COMMANDS = listOf(
     SlashCommand("review", "Start a code review"),
     SlashCommand("resume", "Browse sessions"),
     SlashCommand("skills", "List available skills"),
-    SlashCommand("permissions", "Change approval policy"),
+    SlashCommand("permissions", "Change permissions"),
     SlashCommand("experimental", "Toggle experimental features"),
 )
 

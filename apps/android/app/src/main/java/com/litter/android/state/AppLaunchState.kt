@@ -26,8 +26,8 @@ data class AppLaunchStateSnapshot(
 private const val PREFS_NAME = "litter.launchState"
 private const val APPROVAL_POLICY_KEY = "litter.approvalPolicy"
 private const val SANDBOX_MODE_KEY = "litter.sandboxMode"
-private const val DEFAULT_APPROVAL_POLICY = "never"
-private const val DEFAULT_SANDBOX_MODE = "workspace-write"
+private const val DEFAULT_APPROVAL_POLICY = "inherit"
+private const val DEFAULT_SANDBOX_MODE = "inherit"
 
 class AppLaunchState(context: Context) {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
