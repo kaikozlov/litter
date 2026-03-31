@@ -36,7 +36,23 @@
         <activity
             android:name="com.litter.android.auth.ChatGPTOAuthActivity"
             android:exported="false"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="com.litter.android.auth.ChatGPTOAuthRedirectActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="litterauth"
+                    android:host="chatgpt-auth-complete" />
+            </intent-filter>
+        </activity>
 
         <service
             android:name="com.litter.android.state.TurnForegroundService"

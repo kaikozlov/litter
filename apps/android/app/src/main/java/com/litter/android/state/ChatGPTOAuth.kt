@@ -5,12 +5,15 @@ import android.net.Uri
 import android.util.Base64
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.IOException
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
+import java.net.UnknownHostException
 import java.net.URL
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -136,6 +139,30 @@ object ChatGPTOAuth {
     }
 
     private suspend fun exchangeToken(body: String): ChatGPTOAuthTokenBundle = withContext(Dispatchers.IO) {
+        var networkFailure: IOException? = null
+        repeat(3) { attemptIndex ->
+            try {
+                return@withContext exchangeTokenOnce(body)
+            } catch (error: UnknownHostException) {
+                networkFailure = error
+                if (attemptIndex == 2) {
+                    throw ChatGPTOAuthException(
+                        "ChatGPT token exchange could not reach auth.openai.com. Check the device connection and try again.",
+                    )
+                }
+                delay(500L * (attemptIndex + 1))
+            } catch (error: IOException) {
+                networkFailure = error
+                if (attemptIndex == 2) {
+                    throw error
+                }
+                delay(500L * (attemptIndex + 1))
+            }
+        }
+        throw networkFailure ?: ChatGPTOAuthException("ChatGPT token exchange failed before it could start.")
+    }
+
+    private fun exchangeTokenOnce(body: String): ChatGPTOAuthTokenBundle {
         val url = URL("$authIssuer/oauth/token")
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -177,7 +204,7 @@ object ChatGPTOAuth {
                 throw ChatGPTOAuthException("ChatGPT login did not include an account identifier.")
             }
 
-            ChatGPTOAuthTokenBundle(
+            return ChatGPTOAuthTokenBundle(
                 accessToken = accessToken,
                 idToken = idToken,
                 refreshToken = refreshToken,

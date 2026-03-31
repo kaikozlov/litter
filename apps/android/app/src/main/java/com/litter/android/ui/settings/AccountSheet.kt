@@ -38,6 +38,7 @@ import com.litter.android.state.ChatGPTOAuthTokenStore
 import com.litter.android.state.OpenAIApiKeyStore
 import com.litter.android.ui.LocalAppModel
 import com.litter.android.ui.LitterTheme
+import com.litter.android.util.LLog
 import kotlinx.coroutines.launch
 import uniffi.codex_mobile_client.Account
 import uniffi.codex_mobile_client.AppRefreshAccountRequest
@@ -69,14 +70,17 @@ fun AccountSheet(
         contract = ActivityResultContracts.StartActivityForResult(),
     ) { result ->
         isAuthWorking = false
+        LLog.d("ChatGPTOAuth", "account sheet auth result", fields = mapOf("resultCode" to result.resultCode))
         if (result.resultCode == Activity.RESULT_OK) {
             val tokens = ChatGPTOAuthActivity.parseResult(result.data)
             if (tokens == null) {
                 error = "ChatGPT login returned incomplete credentials."
+                LLog.w("ChatGPTOAuth", "account sheet auth result missing tokens")
                 return@rememberLauncherForActivityResult
             }
             scope.launch {
                 try {
+                    LLog.d("ChatGPTOAuth", "account sheet loginAccount starting")
                     appModel.client.loginAccount(
                         serverId,
                         AppLoginAccountRequest.ChatgptAuthTokens(
@@ -87,12 +91,15 @@ fun AccountSheet(
                     )
                     appModel.refreshSnapshot()
                     error = null
+                    LLog.i("ChatGPTOAuth", "account sheet loginAccount succeeded")
                 } catch (e: Exception) {
                     error = e.localizedMessage ?: e.message
+                    LLog.e("ChatGPTOAuth", "account sheet loginAccount failed", e)
                 }
             }
         } else {
             error = result.data?.getStringExtra(ChatGPTOAuthActivity.EXTRA_ERROR)
+            error?.let { LLog.w("ChatGPTOAuth", "account sheet auth canceled", fields = mapOf("error" to it)) }
         }
     }
 

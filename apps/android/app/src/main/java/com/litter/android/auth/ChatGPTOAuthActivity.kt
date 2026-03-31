@@ -1,21 +1,19 @@
 package com.litter.android.auth
 
-import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
-import android.webkit.CookieManager
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,33 +25,45 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.lifecycleScope
 import com.litter.android.state.ChatGPTOAuth
 import com.litter.android.state.ChatGPTOAuthTokenBundle
 import com.litter.android.ui.LitterAppTheme
 import com.litter.android.ui.LitterTheme
+import com.litter.android.util.LLog
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class ChatGPTOAuthActivity : ComponentActivity() {
     private lateinit var attempt: ChatGPTOAuth.AuthAttempt
-    private var isCompleting = false
+    private var isCompleting by mutableStateOf(false)
+    private var authJob: Job? = null
+    private var loopbackServer: ChatGPTOAuthLoopbackServer? = null
+    private var pendingTokens: ChatGPTOAuthTokenBundle? = null
+    private var pageError by mutableStateOf<String?>(null)
+    private var isLaunchingBrowser by mutableStateOf(false)
+    private var browserOpened by mutableStateOf(false)
+    private var didReceiveBrowserReturn by mutableStateOf(false)
+    private var browserReturnGeneration = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -65,36 +75,145 @@ class ChatGPTOAuthActivity : ComponentActivity() {
             return
         }
         attempt = authAttempt
+        browserReturnGeneration = ChatGPTOAuthAppReturnSignal.snapshot()
+        LLog.i("ChatGPTOAuth", "auth activity created")
 
         setContent {
             LitterAppTheme {
                 ChatGPTOAuthActivityScreen(
-                    attempt = attempt,
+                    pageError = pageError,
+                    isLaunchingBrowser = isLaunchingBrowser,
+                    isCompleting = isCompleting,
+                    browserOpened = browserOpened,
                     onClose = {
+                        authJob?.cancel()
+                        loopbackServer?.close()
                         setResult(Activity.RESULT_CANCELED)
                         finish()
                     },
-                    onCallback = ::handleCallback,
+                    onOpenBrowser = ::launchBrowser,
                 )
             }
         }
+
+        beginAuthorization()
     }
 
-    private fun handleCallback(callbackUri: Uri) {
-        if (isCompleting) return
-        isCompleting = true
-        lifecycleScope.launch {
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == ACTION_BROWSER_RETURN) {
+            didReceiveBrowserReturn = true
+            browserOpened = false
+            LLog.d("ChatGPTOAuth", "browser returned to app")
+            finishIfReady()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val currentGeneration = ChatGPTOAuthAppReturnSignal.snapshot()
+        if (!didReceiveBrowserReturn && currentGeneration > browserReturnGeneration) {
+            didReceiveBrowserReturn = true
+            browserOpened = false
+            LLog.d("ChatGPTOAuth", "browser returned to app")
+            finishIfReady()
+        }
+    }
+
+    override fun onDestroy() {
+        authJob?.cancel()
+        loopbackServer?.close()
+        super.onDestroy()
+    }
+
+    private fun beginAuthorization() {
+        if (authJob != null) return
+
+        authJob = lifecycleScope.launch {
             try {
-                val tokens = ChatGPTOAuth.completeAuthorization(
+                pageError = null
+                isLaunchingBrowser = true
+                val receiver = withContext(Dispatchers.IO) {
+                    ChatGPTOAuthLoopbackServer.create(
+                        redirectUri = attempt.redirectUri,
+                        appReturnUri = APP_RETURN_URI,
+                    )
+                }
+                loopbackServer = receiver
+                LLog.d("ChatGPTOAuth", "loopback server started")
+
+                if (!launchBrowser()) {
+                    receiver.close()
+                    loopbackServer = null
+                    isLaunchingBrowser = false
+                    authJob = null
+                    return@launch
+                }
+
+                browserOpened = true
+                isLaunchingBrowser = false
+                LLog.d("ChatGPTOAuth", "browser launched")
+                val callbackUri = withContext(Dispatchers.IO) {
+                    receiver.awaitCallback()
+                }
+                LLog.d("ChatGPTOAuth", "oauth localhost callback received")
+
+                if (isCompleting) return@launch
+                isCompleting = true
+                pendingTokens = ChatGPTOAuth.completeAuthorization(
                     context = applicationContext,
                     callbackUri = callbackUri,
                     attempt = attempt,
                 )
-                setResult(Activity.RESULT_OK, resultIntent(tokens))
-                finish()
+                LLog.i("ChatGPTOAuth", "token exchange completed")
+                finishIfReady()
+            } catch (_: CancellationException) {
+                // Activity closed or recreated.
             } catch (e: Exception) {
+                LLog.e("ChatGPTOAuth", "auth flow failed", e)
                 finishWithError(e.localizedMessage ?: e.message ?: "ChatGPT login failed.")
+            } finally {
+                isLaunchingBrowser = false
+                loopbackServer?.close()
+                loopbackServer = null
+                authJob = null
             }
+        }
+    }
+
+    private fun finishIfReady() {
+        val tokens = pendingTokens ?: return
+        if (!didReceiveBrowserReturn && ChatGPTOAuthAppReturnSignal.snapshot() > browserReturnGeneration) {
+            didReceiveBrowserReturn = true
+            browserOpened = false
+            LLog.d("ChatGPTOAuth", "browser return observed while finalizing")
+        }
+        if (!didReceiveBrowserReturn) return
+        LLog.i("ChatGPTOAuth", "finishing auth activity with tokens")
+        setResult(Activity.RESULT_OK, resultIntent(tokens))
+        finish()
+    }
+
+    private fun launchBrowser(): Boolean {
+        val authUri = Uri.parse(attempt.authorizeUrl)
+        return try {
+            CustomTabsIntent.Builder()
+                .setShowTitle(true)
+                .build()
+                .launchUrl(this, authUri)
+            true
+        } catch (_: ActivityNotFoundException) {
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, authUri))
+                true
+            } catch (e: Exception) {
+                pageError = e.localizedMessage ?: e.message ?: "No browser is available for ChatGPT login."
+                false
+            }
+        } catch (e: Exception) {
+            pageError = e.localizedMessage ?: e.message ?: "ChatGPT login could not open a browser."
+            false
         }
     }
 
@@ -121,6 +240,12 @@ class ChatGPTOAuthActivity : ComponentActivity() {
     }
 
     companion object {
+        const val ACTION_BROWSER_RETURN = "com.litter.android.auth.CHATGPT_BROWSER_RETURN"
+        private const val APP_RETURN_HOST = "chatgpt-auth-complete"
+        private val APP_RETURN_URI: Uri = Uri.Builder()
+            .scheme("litterauth")
+            .authority(APP_RETURN_HOST)
+            .build()
         private const val EXTRA_STATE = "chatgpt_auth_state"
         private const val EXTRA_CODE_VERIFIER = "chatgpt_auth_code_verifier"
         private const val EXTRA_REDIRECT_URI = "chatgpt_auth_redirect_uri"
@@ -160,14 +285,13 @@ class ChatGPTOAuthActivity : ComponentActivity() {
 
 @Composable
 private fun ChatGPTOAuthActivityScreen(
-    attempt: ChatGPTOAuth.AuthAttempt,
+    pageError: String?,
+    isLaunchingBrowser: Boolean,
+    isCompleting: Boolean,
+    browserOpened: Boolean,
     onClose: () -> Unit,
-    onCallback: (Uri) -> Unit,
+    onOpenBrowser: () -> Boolean,
 ) {
-    var pageError by remember(attempt) { mutableStateOf<String?>(null) }
-    var isCompleting by remember(attempt) { mutableStateOf(false) }
-    var webViewRef by remember { mutableStateOf<WebView?>(null) }
-
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -207,36 +331,58 @@ private fun ChatGPTOAuthActivityScreen(
             }
         }
 
-        pageError?.let { message ->
-            Text(
-                text = message,
-                color = LitterTheme.danger,
-                fontSize = 12.sp,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .zIndex(1f)
-                    .padding(start = 56.dp, top = 88.dp, end = 12.dp),
-            )
-        }
-
-        ChatGPTOAuthWebView(
-            attempt = attempt,
+        Column(
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = if (pageError == null) 112.dp else 132.dp),
-            onCreated = { webViewRef = it },
-            onCallback = { callbackUri ->
-                if (isCompleting) return@ChatGPTOAuthWebView
-                isCompleting = true
-                pageError = null
-                onCallback(callbackUri)
-            },
-            onPageError = { error ->
-                if (!isCompleting) {
-                    pageError = error
-                }
-            },
-        )
+                .padding(horizontal = 28.dp),
+        ) {
+            if (isLaunchingBrowser || isCompleting) {
+                CircularProgressIndicator(color = LitterTheme.accent)
+                Spacer(Modifier.height(20.dp))
+            }
+
+            Text(
+                text = if (browserOpened) {
+                    "Continue the ChatGPT login in your browser."
+                } else {
+                    "Opening a secure browser for ChatGPT login."
+                },
+                color = LitterTheme.textPrimary,
+                fontSize = 18.sp,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = if (browserOpened) {
+                    "After the login finishes, this screen will complete automatically. If the browser closed early, you can open it again below."
+                } else {
+                    "Google blocks sign-in inside embedded web views, so Litter uses your browser for this flow."
+                },
+                color = LitterTheme.textSecondary,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+            )
+
+            pageError?.let { message ->
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = message,
+                    color = LitterTheme.danger,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+            Button(
+                onClick = { onOpenBrowser() },
+                enabled = !isLaunchingBrowser && !isCompleting,
+            ) {
+                Text(if (browserOpened) "Open browser again" else "Open browser")
+            }
+        }
 
         if (isCompleting) {
             Box(
@@ -252,77 +398,4 @@ private fun ChatGPTOAuthActivityScreen(
             }
         }
     }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            webViewRef?.stopLoading()
-            webViewRef?.destroy()
-        }
-    }
-}
-
-@SuppressLint("SetJavaScriptEnabled")
-@Composable
-private fun ChatGPTOAuthWebView(
-    attempt: ChatGPTOAuth.AuthAttempt,
-    modifier: Modifier = Modifier,
-    onCreated: (WebView) -> Unit,
-    onCallback: (Uri) -> Unit,
-    onPageError: (String) -> Unit,
-) {
-    AndroidView(
-        modifier = modifier,
-        factory = { context ->
-            CookieManager.getInstance().setAcceptCookie(true)
-
-            WebView(context).apply {
-                onCreated(this)
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.loadsImagesAutomatically = true
-                settings.userAgentString = settings.userAgentString + " LitterAndroid/1.0"
-                setBackgroundColor(android.graphics.Color.BLACK)
-                webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(
-                        view: WebView?,
-                        request: WebResourceRequest?,
-                    ): Boolean {
-                        val uri = request?.url ?: return false
-                        if (!ChatGPTOAuth.isCallbackUri(uri)) {
-                            return false
-                        }
-                        onCallback(uri)
-                        return true
-                    }
-
-                    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                        val uri = url?.let(Uri::parse) ?: return
-                        if (ChatGPTOAuth.isCallbackUri(uri)) {
-                            onCallback(uri)
-                        }
-                    }
-
-                    override fun onReceivedError(
-                        view: WebView?,
-                        request: WebResourceRequest?,
-                        error: android.webkit.WebResourceError?,
-                    ) {
-                        val failingUrl = request?.url?.toString().orEmpty()
-                        if (request?.isForMainFrame == true &&
-                            failingUrl != "about:blank" &&
-                            !failingUrl.startsWith("data:")
-                        ) {
-                            onPageError(error?.description?.toString() ?: "ChatGPT login failed to load.")
-                        }
-                    }
-                }
-                loadUrl(attempt.authorizeUrl)
-            }
-        },
-        update = { webView ->
-            if (webView.url.isNullOrBlank()) {
-                webView.loadUrl(attempt.authorizeUrl)
-            }
-        },
-    )
 }

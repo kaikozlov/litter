@@ -92,6 +92,7 @@ import com.litter.android.ui.WallpaperManager
 import com.litter.android.ui.LitterTheme
 import com.litter.android.ui.LitterThemeIndexEntry
 import com.litter.android.ui.LitterThemeManager
+import com.litter.android.util.LLog
 import kotlinx.coroutines.launch
 import uniffi.codex_mobile_client.Account
 import uniffi.codex_mobile_client.AppServerSnapshot
@@ -876,15 +877,18 @@ private fun AccountSection(server: uniffi.codex_mobile_client.AppServerSnapshot)
         contract = ActivityResultContracts.StartActivityForResult(),
     ) { result ->
         isAuthWorking = false
+        LLog.d("ChatGPTOAuth", "settings auth result", fields = mapOf("resultCode" to result.resultCode))
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             val tokens = ChatGPTOAuthActivity.parseResult(result.data)
             if (tokens == null) {
                 authError = "ChatGPT login returned incomplete credentials."
+                LLog.w("ChatGPTOAuth", "settings auth result missing tokens")
                 return@rememberLauncherForActivityResult
             }
             scope.launch {
                 isAuthWorking = true
                 try {
+                    LLog.d("ChatGPTOAuth", "settings loginAccount starting")
                     appModel.client.loginAccount(
                         server.serverId,
                         AppLoginAccountRequest.ChatgptAuthTokens(
@@ -895,13 +899,16 @@ private fun AccountSection(server: uniffi.codex_mobile_client.AppServerSnapshot)
                     )
                     appModel.refreshSnapshot()
                     authError = null
+                    LLog.i("ChatGPTOAuth", "settings loginAccount succeeded")
                 } catch (e: Exception) {
                     authError = e.localizedMessage ?: e.message
+                    LLog.e("ChatGPTOAuth", "settings loginAccount failed", e)
                 }
                 isAuthWorking = false
             }
         } else {
             authError = result.data?.getStringExtra(ChatGPTOAuthActivity.EXTRA_ERROR)
+            authError?.let { LLog.w("ChatGPTOAuth", "settings auth canceled", fields = mapOf("error" to it)) }
         }
     }
 
