@@ -14,10 +14,9 @@ pub fn thread_permission_preset(
     sandbox_policy: Option<AppSandboxPolicy>,
 ) -> AppThreadPermissionPreset {
     match (approval_policy, sandbox_policy) {
-        (
-            Some(AppAskForApproval::OnRequest),
-            Some(AppSandboxPolicy::WorkspaceWrite { .. }),
-        ) => AppThreadPermissionPreset::Supervised,
+        (Some(AppAskForApproval::OnRequest), Some(AppSandboxPolicy::WorkspaceWrite { .. })) => {
+            AppThreadPermissionPreset::Supervised
+        }
         (Some(AppAskForApproval::Never), Some(AppSandboxPolicy::DangerFullAccess)) => {
             AppThreadPermissionPreset::FullAccess
         }
@@ -37,7 +36,7 @@ pub fn thread_permissions_are_authoritative(
 #[cfg(test)]
 mod tests {
     use super::{
-        thread_permission_preset, thread_permissions_are_authoritative, AppThreadPermissionPreset,
+        AppThreadPermissionPreset, thread_permission_preset, thread_permissions_are_authoritative,
     };
     use crate::types::{AppAskForApproval, AppReadOnlyAccess, AppSandboxPolicy};
 

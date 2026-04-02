@@ -1061,18 +1061,15 @@ struct SessionsScreen: View {
         do {
             let resumeKey = await appModel.hydrateThreadPermissions(for: thread.key, appState: appState)
                 ?? thread.key
-            let nextKey = try await appModel.client.resumeThread(
-                serverId: resumeKey.serverId,
-                params: launchConfig(for: resumeKey).threadResumeRequest(
-                    threadId: resumeKey.threadId,
-                    cwdOverride: thread.cwd
-                )
+            let nextKey = try await appModel.resumeThreadPreferringIPC(
+                key: resumeKey,
+                launchConfig: launchConfig(for: resumeKey),
+                cwdOverride: thread.cwd
             )
             if !thread.cwd.isEmpty {
                 RecentDirectoryStore.shared.record(path: thread.cwd, for: thread.key.serverId)
             }
-            appModel.store.setActiveThread(key: nextKey)
-            await appModel.refreshSnapshot()
+            appModel.activateThread(nextKey)
             openedKey = nextKey
         } catch {
             sessionActionErrorMessage = error.localizedDescription

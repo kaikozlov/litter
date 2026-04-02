@@ -108,7 +108,7 @@ struct ChatMessage: Identifiable, Equatable {
         hasher.combine(agentRole)
         hasher.combine(images.count)
         for image in images {
-            hasher.combine(image.data)
+            hasher.combine(image.cacheKey)
         }
         if let widgetState {
             hasher.combine(widgetState.callId)
@@ -143,8 +143,29 @@ struct WidgetState: Equatable {
 }
 
 struct ChatImage: Identifiable, Equatable {
-    let id = UUID()
-    let data: Data
+    let id: String
+    let source: String
+    let cacheKey: String
+
+    init(source: String) {
+        self.source = source
+        self.cacheKey = Self.makeCacheKey(for: source)
+        self.id = self.cacheKey
+    }
+
+    init(data: Data, mimeType: String) {
+        self.init(source: "data:\(mimeType);base64,\(data.base64EncodedString())")
+    }
+
+    static func == (lhs: ChatImage, rhs: ChatImage) -> Bool {
+        lhs.cacheKey == rhs.cacheKey
+    }
+
+    private static func makeCacheKey(for source: String) -> String {
+        var hasher = Hasher()
+        hasher.combine(source)
+        return String(hasher.finalize())
+    }
 }
 
 enum ConversationStatus: Equatable {

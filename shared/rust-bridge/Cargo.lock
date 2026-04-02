@@ -1840,8 +1840,10 @@ dependencies = [
 name = "codex-debug-cli"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "clap",
  "codex-app-server-protocol",
+ "codex-ipc",
  "codex-mobile-client",
  "serde",
  "serde_json",

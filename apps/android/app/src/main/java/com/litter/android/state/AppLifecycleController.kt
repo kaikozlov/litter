@@ -3,7 +3,11 @@ package com.litter.android.state
 import android.content.Context
 import com.litter.android.ui.ExperimentalFeatures
 import com.litter.android.util.LLog
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
+import uniffi.codex_mobile_client.AppRefreshAccountRequest
 import uniffi.codex_mobile_client.ThreadKey
 import uniffi.codex_mobile_client.AppServerHealth
 
@@ -51,51 +55,54 @@ class AppLifecycleController {
                 .filter { it.health != AppServerHealth.DISCONNECTED }
                 .mapTo(mutableSetOf()) { it.serverId }
             val saved = reconnectCandidates(
-                savedServers = SavedServerStore.load(context),
+                savedServers = SavedServerStore.remembered(context),
                 activeServerIds = activeServerIds,
             )
-            for (server in saved) {
-                try {
-                    when {
-                        server.websocketURL != null -> {
-                            appModel.serverBridge.connectRemoteUrlServer(
-                                serverId = server.id,
-                                displayName = server.name,
-                                websocketUrl = server.websocketURL!!,
-                            )
-                        }
-                        server.resolvedPreferredConnectionMode == "ssh" -> {
-                            val credential =
-                                sshCredentials.load(server.hostname, server.resolvedSshPort) ?: continue
-                            reconnectSshServer(appModel, server, credential)
-                        }
-                        server.directCodexPort != null -> {
-                            appModel.serverBridge.connectRemoteServer(
-                                serverId = server.id,
-                                displayName = server.name,
-                                host = server.hostname,
-                                port = server.directCodexPort!!.toUShort(),
-                            )
-                        }
-                        else -> {
-                            LLog.t(
+            coroutineScope {
+                saved.map { server ->
+                    async {
+                        try {
+                            when {
+                                server.websocketURL != null -> {
+                                    appModel.serverBridge.connectRemoteUrlServer(
+                                        serverId = server.id,
+                                        displayName = server.name,
+                                        websocketUrl = server.websocketURL!!,
+                                    )
+                                }
+                                server.resolvedPreferredConnectionMode == "ssh" -> {
+                                    val credential =
+                                        sshCredentials.load(server.hostname, server.resolvedSshPort) ?: return@async
+                                    reconnectSshServer(appModel, server, credential)
+                                }
+                                server.directCodexPort != null -> {
+                                    appModel.serverBridge.connectRemoteServer(
+                                        serverId = server.id,
+                                        displayName = server.name,
+                                        host = server.hostname,
+                                        port = server.directCodexPort!!.toUShort(),
+                                    )
+                                }
+                                else -> {
+                                    LLog.t(
+                                        "AppLifecycleController",
+                                        "skipping reconnect; no valid saved transport",
+                                        fields = mapOf("serverId" to server.id),
+                                    )
+                                    return@async
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Best-effort reconnection — server may be offline
+                            LLog.e(
                                 "AppLifecycleController",
-                                "skipping reconnect; no valid saved transport",
-                                fields = mapOf("serverId" to server.id),
+                                "saved server reconnect failed",
+                                e,
+                                fields = mapOf("serverId" to server.id, "host" to server.hostname, "os" to server.os),
                             )
-                            continue
                         }
                     }
-                    activeServerIds.add(server.id)
-                } catch (e: Exception) {
-                    // Best-effort reconnection — server may be offline
-                    LLog.e(
-                        "AppLifecycleController",
-                        "saved server reconnect failed",
-                        e,
-                        fields = mapOf("serverId" to server.id, "host" to server.hostname, "os" to server.os),
-                    )
-                }
+                }.awaitAll()
             }
             appModel.refreshSnapshot()
         } finally {
@@ -122,7 +129,7 @@ class AppLifecycleController {
         val ipcSocketPathOverride = ExperimentalFeatures.ipcSocketPathOverride()
         when (credential.method) {
             SshAuthMethod.PASSWORD -> {
-                appModel.ssh.sshConnectRemoteServer(
+                appModel.ssh.sshStartRemoteServerConnect(
                     serverId = server.id,
                     displayName = server.name,
                     host = server.hostname,
@@ -137,7 +144,7 @@ class AppLifecycleController {
                 )
             }
             SshAuthMethod.KEY -> {
-                appModel.ssh.sshConnectRemoteServer(
+                appModel.ssh.sshStartRemoteServerConnect(
                     serverId = server.id,
                     displayName = server.name,
                     host = server.hostname,
@@ -182,12 +189,80 @@ class AppLifecycleController {
         }
     }
 
+    private suspend fun reconnectActiveSshServers(
+        context: Context,
+        appModel: AppModel,
+        serverIds: Set<String>,
+    ) {
+        if (serverIds.isEmpty()) {
+            return
+        }
+
+        val sshCredentials = SshCredentialStore(context)
+        val savedServers = SavedServerStore.remembered(context)
+            .filter { it.resolvedPreferredConnectionMode == "ssh" && it.id in serverIds }
+
+        coroutineScope {
+            savedServers.map { server ->
+                async {
+                    val credential = sshCredentials.load(server.hostname, server.resolvedSshPort) ?: return@async
+                    try {
+                        reconnectSshServer(appModel, server, credential)
+                    } catch (e: Exception) {
+                        LLog.w(
+                            "AppLifecycleController",
+                            "active SSH server reconnect failed",
+                            fields = mapOf("serverId" to server.id, "error" to e.message),
+                        )
+                    }
+                }
+            }.awaitAll()
+        }
+
+        appModel.refreshSnapshot()
+    }
+
+    private suspend fun probeActiveRemoteServers(appModel: AppModel) {
+        val serverIds = appModel.store.snapshot()
+            .servers
+            .filter { !it.isLocal && it.health == AppServerHealth.CONNECTED }
+            .map { it.serverId }
+            .distinct()
+
+        if (serverIds.isEmpty()) {
+            return
+        }
+
+        for (serverId in serverIds) {
+            try {
+                appModel.client.refreshAccount(
+                    serverId,
+                    AppRefreshAccountRequest(refreshToken = false),
+                )
+            } catch (e: Exception) {
+                LLog.w(
+                    "AppLifecycleController",
+                    "active remote server probe failed",
+                    fields = mapOf("serverId" to serverId, "error" to e.message),
+                )
+            }
+        }
+
+        appModel.refreshSnapshot()
+    }
+
     /**
      * Called when the app enters the foreground.
      */
     suspend fun onResume(context: Context, appModel: AppModel) {
+        val preResumeActiveSshServerIds = appModel.store.snapshot()
+            .servers
+            .filter { !it.isLocal && it.health != AppServerHealth.DISCONNECTED }
+            .mapTo(mutableSetOf()) { it.serverId }
         ensureLocalServerConnected(appModel)
         reconnectSavedServers(context, appModel)
+        reconnectActiveSshServers(context, appModel, preResumeActiveSshServerIds)
+        probeActiveRemoteServers(appModel)
         backgroundedTurnKeys.clear()
     }
 

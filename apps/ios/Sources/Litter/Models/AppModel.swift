@@ -4,6 +4,13 @@ import Observation
 @MainActor
 @Observable
 final class AppModel {
+    private struct PendingStreamingDeltaEvent: Sendable {
+        let key: ThreadKey
+        let itemId: String
+        let kind: ThreadStreamingDeltaKind
+        var text: String
+    }
+
     /// Pre-built Rust objects initialized off the main thread to avoid
     /// priority inversion (tokio runtime init blocks at default QoS).
     private struct RustBridges: @unchecked Sendable {
@@ -51,6 +58,13 @@ final class AppModel {
     @ObservationIgnored private var subscription: AppStoreSubscription?
     @ObservationIgnored private var updateTask: Task<Void, Never>?
     @ObservationIgnored private var loadingModelServerIds: Set<String> = []
+    @ObservationIgnored private var pendingThreadRefreshKeys: Set<ThreadKey> = []
+    @ObservationIgnored private var pendingThreadRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var pendingActiveThreadHydrationKey: ThreadKey?
+    @ObservationIgnored private var pendingActiveThreadHydrationTask: Task<Void, Never>?
+    @ObservationIgnored private var pendingSnapshotRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var pendingStreamingDeltaEvents: [PendingStreamingDeltaEvent] = []
+    @ObservationIgnored private var pendingStreamingDeltaTask: Task<Void, Never>?
 
     init(
         store: AppStore? = nil,
@@ -69,6 +83,10 @@ final class AppModel {
 
     deinit {
         updateTask?.cancel()
+        pendingThreadRefreshTask?.cancel()
+        pendingActiveThreadHydrationTask?.cancel()
+        pendingSnapshotRefreshTask?.cancel()
+        pendingStreamingDeltaTask?.cancel()
     }
 
     func start() {
@@ -94,15 +112,108 @@ final class AppModel {
     func stop() {
         updateTask?.cancel()
         updateTask = nil
+        pendingThreadRefreshTask?.cancel()
+        pendingThreadRefreshTask = nil
+        pendingThreadRefreshKeys.removeAll()
+        pendingActiveThreadHydrationTask?.cancel()
+        pendingActiveThreadHydrationTask = nil
+        pendingActiveThreadHydrationKey = nil
+        pendingSnapshotRefreshTask?.cancel()
+        pendingSnapshotRefreshTask = nil
+        pendingStreamingDeltaTask?.cancel()
+        pendingStreamingDeltaTask = nil
+        pendingStreamingDeltaEvents.removeAll()
         subscription = nil
     }
 
     func refreshSnapshot() async {
+        pendingSnapshotRefreshTask?.cancel()
+        pendingSnapshotRefreshTask = nil
+        await performSnapshotRefresh()
+    }
+
+    private func performSnapshotRefresh() async {
         do {
             applySnapshot(try await store.snapshot())
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    private func scheduleSnapshotRefreshDebounced() {
+        guard pendingSnapshotRefreshTask == nil else { return }
+        pendingSnapshotRefreshTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 75_000_000)
+            } catch {
+                return
+            }
+            guard let self else { return }
+            self.pendingSnapshotRefreshTask = nil
+            await self.performSnapshotRefresh()
+        }
+    }
+
+    func activateThread(_ key: ThreadKey?) {
+        updateActiveThread(key)
+        store.setActiveThread(key: key)
+        scheduleDeferredActiveThreadHydrationIfNeeded(for: key)
+    }
+
+    func resumeThreadPreferringIPC(
+        key: ThreadKey,
+        launchConfig: AppThreadLaunchConfig,
+        cwdOverride: String?
+    ) async throws -> ThreadKey {
+        let trimmedCwdOverride = cwdOverride?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requiresDistinctCwdOverride = requiresResumeCwdOverride(
+            for: key,
+            cwdOverride: trimmedCwdOverride
+        )
+        let requiresResumeOverrides =
+            launchConfig.model != nil ||
+            launchConfig.approvalPolicy != nil ||
+            launchConfig.sandbox != nil ||
+            !(launchConfig.developerInstructions?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) ||
+            requiresDistinctCwdOverride ||
+            !launchConfig.persistExtendedHistory
+
+        if !requiresResumeOverrides,
+           snapshot?.serverSnapshot(for: key.serverId)?.isIpcConnected == true {
+            do {
+                try await store.externalResumeThread(key: key, hostId: nil)
+                return key
+            } catch {
+                // Fall back to the app-server resume path when the desktop
+                // follower is unavailable or not ready yet.
+            }
+        }
+
+        return try await client.resumeThread(
+            serverId: key.serverId,
+            params: launchConfig.threadResumeRequest(
+                threadId: key.threadId,
+                cwdOverride: requiresDistinctCwdOverride ? trimmedCwdOverride : nil
+            )
+        )
+    }
+
+    private func requiresResumeCwdOverride(
+        for key: ThreadKey,
+        cwdOverride: String?
+    ) -> Bool {
+        guard let normalizedOverride = cwdOverride, !normalizedOverride.isEmpty else {
+            return false
+        }
+
+        let existingCwd =
+            snapshot?.threadSnapshot(for: key)?.info.cwd?.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? snapshot?.sessionSummary(for: key)?.cwd.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let existingCwd, !existingCwd.isEmpty else {
+            return true
+        }
+        return existingCwd != normalizedOverride
     }
 
     func restartLocalServer() async throws {
@@ -160,32 +271,19 @@ final class AppModel {
                 sessionSummary: sessionSummary,
                 agentDirectoryVersion: agentDirectoryVersion
             )
-        case .threadItemUpserted(let key, let item):
-            if !applyThreadItemUpsert(key: key, item: item) {
-                await refreshThreadSnapshot(key: key)
-            }
+        case .threadItemUpserted(let key, _):
+            scheduleThreadSnapshotRefresh(for: key)
         case .threadCommandExecutionUpdated(
             let key,
-            let itemId,
-            let status,
-            let exitCode,
-            let durationMs,
-            let processId
+            _,
+            _,
+            _,
+            _,
+            _
         ):
-            if !applyThreadCommandExecutionUpdated(
-                key: key,
-                itemId: itemId,
-                status: status,
-                exitCode: exitCode,
-                durationMs: durationMs,
-                processId: processId
-            ) {
-                await refreshThreadSnapshot(key: key)
-            }
+            scheduleThreadSnapshotRefresh(for: key)
         case .threadStreamingDelta(let key, let itemId, let kind, let text):
-            if !applyThreadStreamingDelta(key: key, itemId: itemId, kind: kind, text: text) {
-                await refreshThreadSnapshot(key: key)
-            }
+            enqueueThreadStreamingDelta(key: key, itemId: itemId, kind: kind, text: text)
         case .threadRemoved(let key, let agentDirectoryVersion):
             removeThreadSnapshot(for: key, agentDirectoryVersion: agentDirectoryVersion)
         case .activeThreadChanged(let key):
@@ -193,12 +291,13 @@ final class AppModel {
             if let key, snapshot?.threadSnapshot(for: key) == nil {
                 await refreshThreadSnapshot(key: key)
             }
+            scheduleDeferredActiveThreadHydrationIfNeeded(for: key)
         case .pendingApprovalsChanged:
             await refreshSnapshot()
         case .pendingUserInputsChanged:
             await refreshSnapshot()
         case .serverChanged:
-            await refreshSnapshot()
+            scheduleSnapshotRefreshDebounced()
         case .serverRemoved:
             await refreshSnapshot()
         case .fullResync:
@@ -238,6 +337,178 @@ final class AppModel {
             lastError = error.localizedDescription
             await refreshSnapshot()
         }
+    }
+
+    private func scheduleThreadSnapshotRefresh(for key: ThreadKey) {
+        pendingThreadRefreshKeys.insert(key)
+        guard pendingThreadRefreshTask == nil else { return }
+        pendingThreadRefreshTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 33_000_000)
+            guard let self else { return }
+            let keys = self.pendingThreadRefreshKeys
+            self.pendingThreadRefreshKeys.removeAll()
+            self.pendingThreadRefreshTask = nil
+            for key in keys {
+                await self.refreshThreadSnapshot(key: key)
+            }
+        }
+    }
+
+    private func enqueueThreadStreamingDelta(
+        key: ThreadKey,
+        itemId: String,
+        kind: ThreadStreamingDeltaKind,
+        text: String
+    ) {
+        guard !text.isEmpty else { return }
+
+        if let lastIndex = pendingStreamingDeltaEvents.indices.last,
+           pendingStreamingDeltaEvents[lastIndex].key == key,
+           pendingStreamingDeltaEvents[lastIndex].itemId == itemId,
+           pendingStreamingDeltaEvents[lastIndex].kind == kind {
+            pendingStreamingDeltaEvents[lastIndex].text += text
+        } else {
+            pendingStreamingDeltaEvents.append(
+                PendingStreamingDeltaEvent(
+                    key: key,
+                    itemId: itemId,
+                    kind: kind,
+                    text: text
+                )
+            )
+        }
+
+        guard pendingStreamingDeltaTask == nil else { return }
+        pendingStreamingDeltaTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 33_000_000)
+            guard let self else { return }
+            await self.flushPendingStreamingDeltas()
+        }
+    }
+
+    private func flushPendingStreamingDeltas() async {
+        let events = pendingStreamingDeltaEvents
+        pendingStreamingDeltaEvents.removeAll()
+        pendingStreamingDeltaTask = nil
+        guard !events.isEmpty else { return }
+
+        let refreshKeys = applyStreamingDeltaBatch(events)
+        for key in refreshKeys {
+            await refreshThreadSnapshot(key: key)
+        }
+    }
+
+    private func applyStreamingDeltaBatch(
+        _ events: [PendingStreamingDeltaEvent]
+    ) -> Set<ThreadKey> {
+        guard var snapshot else {
+            return Set(events.map(\.key))
+        }
+
+        var mutated = false
+        var refreshKeys: Set<ThreadKey> = []
+
+        for event in events {
+            guard let threadIndex = snapshot.threads.firstIndex(where: { $0.key == event.key }) else {
+                refreshKeys.insert(event.key)
+                continue
+            }
+            guard let itemIndex = snapshot.threads[threadIndex].hydratedConversationItems.firstIndex(where: { $0.id == event.itemId }) else {
+                refreshKeys.insert(event.key)
+                continue
+            }
+
+            var item = snapshot.threads[threadIndex].hydratedConversationItems[itemIndex]
+            guard let updatedContent = Self.applyingStreamingDelta(
+                kind: event.kind,
+                text: event.text,
+                to: item.content
+            ) else {
+                refreshKeys.insert(event.key)
+                continue
+            }
+
+            item.content = updatedContent
+            snapshot.threads[threadIndex].hydratedConversationItems[itemIndex] = item
+            mutated = true
+        }
+
+        if mutated {
+            self.snapshot = snapshot
+            lastError = nil
+        }
+
+        return refreshKeys
+    }
+
+    private func scheduleDeferredActiveThreadHydrationIfNeeded(for key: ThreadKey?) {
+        guard let key else {
+            pendingActiveThreadHydrationTask?.cancel()
+            pendingActiveThreadHydrationTask = nil
+            pendingActiveThreadHydrationKey = nil
+            return
+        }
+
+        guard let thread = snapshot?.threadSnapshot(for: key),
+              shouldAttemptDeferredHydration(for: thread) else {
+            if pendingActiveThreadHydrationKey == key {
+                pendingActiveThreadHydrationTask?.cancel()
+                pendingActiveThreadHydrationTask = nil
+                pendingActiveThreadHydrationKey = nil
+            }
+            return
+        }
+
+        guard pendingActiveThreadHydrationKey != key || pendingActiveThreadHydrationTask == nil else {
+            return
+        }
+
+        pendingActiveThreadHydrationTask?.cancel()
+        pendingActiveThreadHydrationKey = key
+        pendingActiveThreadHydrationTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let self else { return }
+            await self.hydrateActiveThreadIfNeeded(key: key)
+        }
+    }
+
+    private func hydrateActiveThreadIfNeeded(key: ThreadKey) async {
+        defer {
+            if pendingActiveThreadHydrationKey == key {
+                pendingActiveThreadHydrationTask = nil
+                pendingActiveThreadHydrationKey = nil
+            }
+        }
+
+        guard snapshot?.activeThread == key,
+              let thread = snapshot?.threadSnapshot(for: key),
+              shouldAttemptDeferredHydration(for: thread) else {
+            return
+        }
+
+        do {
+            let nextKey = try await client.readThread(
+                serverId: key.serverId,
+                params: AppReadThreadRequest(
+                    threadId: key.threadId,
+                    includeTurns: true
+                )
+            )
+            if let threadSnapshot = try await store.threadSnapshot(key: nextKey) {
+                applyThreadSnapshot(threadSnapshot)
+            } else {
+                await refreshThreadSnapshot(key: nextKey)
+            }
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    private func shouldAttemptDeferredHydration(for thread: AppThreadSnapshot) -> Bool {
+        guard thread.hydratedConversationItems.isEmpty else { return false }
+        let preview = thread.info.preview?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = thread.info.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !preview.isEmpty || !title.isEmpty || thread.hasActiveTurn
     }
 
     private func applyThreadSnapshot(_ thread: AppThreadSnapshot) {
@@ -291,11 +562,14 @@ final class AppModel {
 
         var thread = snapshot.threads[threadIndex]
         thread.info = state.info
+        thread.collaborationMode = state.collaborationMode
         thread.model = state.model
         thread.reasoningEffort = state.reasoningEffort
         thread.effectiveApprovalPolicy = state.effectiveApprovalPolicy
         thread.effectiveSandboxPolicy = state.effectiveSandboxPolicy
         thread.activeTurnId = state.activeTurnId
+        thread.activePlanProgress = state.activePlanProgress
+        thread.pendingPlanImplementationPrompt = state.pendingPlanImplementationPrompt
         thread.contextTokensUsed = state.contextTokensUsed
         thread.modelContextWindow = state.modelContextWindow
         thread.rateLimits = state.rateLimits
@@ -546,11 +820,16 @@ final class AppModel {
                 serverId: key.serverId,
                 params: AppReadThreadRequest(
                     threadId: key.threadId,
-                    includeTurns: true
+                    includeTurns: false
                 )
             )
-            await refreshSnapshot()
-            appState.hydratePermissions(from: snapshot?.threadSnapshot(for: nextKey))
+            if let threadSnapshot = try await store.threadSnapshot(key: nextKey) {
+                applyThreadSnapshot(threadSnapshot)
+                appState.hydratePermissions(from: threadSnapshot)
+            } else {
+                await refreshSnapshot()
+                appState.hydratePermissions(from: snapshot?.threadSnapshot(for: nextKey))
+            }
             return nextKey
         } catch {
             lastError = error.localizedDescription

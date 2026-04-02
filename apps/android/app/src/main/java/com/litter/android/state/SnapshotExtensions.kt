@@ -3,6 +3,7 @@ package com.litter.android.state
 import androidx.compose.ui.graphics.Color
 import uniffi.codex_mobile_client.AppServerHealth
 import uniffi.codex_mobile_client.AppServerSnapshot
+import uniffi.codex_mobile_client.AppSessionSummary
 import uniffi.codex_mobile_client.AppThreadSnapshot
 import uniffi.codex_mobile_client.HydratedConversationItemContent
 import uniffi.codex_mobile_client.AppConnectionStepKind
@@ -97,9 +98,17 @@ val AppThreadSnapshot.hasActiveTurn: Boolean
 val AppThreadSnapshot.resolvedModel: String
     get() = model ?: info.model ?: ""
 
-val AppThreadSnapshot.resolvedPreview: String
+val AppThreadSnapshot.displayTitle: String
     get() = info.title?.takeIf { it.isNotBlank() }
         ?: info.preview?.takeIf { it.isNotBlank() }
+        ?: "Untitled session"
+
+val AppThreadSnapshot.resolvedPreview: String
+    get() = displayTitle
+
+val AppSessionSummary.displayTitle: String
+    get() = title?.takeIf { it.isNotBlank() }
+        ?: preview?.takeIf { it.isNotBlank() }
         ?: "Untitled session"
 
 val AppThreadSnapshot.contextPercent: Int
@@ -119,6 +128,11 @@ val AppThreadSnapshot.latestAssistantSnippet: String?
                 val text = content.v1.text
                 if (text.isNotBlank()) {
                     return if (text.length > 120) text.takeLast(120) else text
+                }
+            } else if (content is HydratedConversationItemContent.CodeReview) {
+                val title = content.v1.findings.firstOrNull()?.title
+                if (!title.isNullOrBlank()) {
+                    return if (title.length > 120) title.take(120) else title
                 }
             }
         }

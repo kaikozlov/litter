@@ -17,9 +17,11 @@ struct ConversationTurnTimeline: View {
     var onOpenConversation: ((ThreadKey) -> Void)? = nil
 
     var body: some View {
+        let rows = rowDescriptors
+
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(rowDescriptors) { row in
-                rowView(row)
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                rowView(row, isLastRow: index == rows.indices.last)
                     .id(row.id)
             }
         }
@@ -37,7 +39,7 @@ struct ConversationTurnTimeline: View {
     }
 
     @ViewBuilder
-    private func rowView(_ row: ConversationTimelineRowDescriptor) -> some View {
+    private func rowView(_ row: ConversationTimelineRowDescriptor, isLastRow: Bool) -> some View {
         switch row {
         case .item(let item):
             ConversationTimelineItemRow(
@@ -56,7 +58,11 @@ struct ConversationTurnTimeline: View {
                 onOpenConversation: onOpenConversation
             )
         case .exploration(let id, let items):
-            ConversationExplorationGroupRow(id: id, items: items)
+            ConversationExplorationGroupRow(
+                id: id,
+                items: items,
+                showsCollapsedPreview: isLastRow
+            )
         case .subagentGroup(_, let merged, _):
             SubagentCardView(
                 data: merged,
@@ -141,7 +147,9 @@ private enum ConversationTimelineRowDescriptor: Identifiable, Equatable {
         }
 
         for item in items {
-            if case .multiAgentAction(let data) = item.content {
+            if item.isVisuallyEmptyNeutralItem {
+                continue
+            } else if case .multiAgentAction(let data) = item.content {
                 let tool = data.tool.lowercased()
                 if let currentTool = subagentTool, currentTool == tool {
                     subagentBuffer.append((item, data))
@@ -234,63 +242,98 @@ private struct ConversationTimelineItemRow: View {
     var onOpenConversation: ((ThreadKey) -> Void)? = nil
 
     var body: some View {
-        switch item.content {
-        case .user(let data):
-            userRow(data)
-        case .assistant(let data):
-            assistantRow(data)
-        case .reasoning(let data):
-            ConversationReasoningRow(data: data)
-        case .todoList(let data):
-            ConversationTodoListRow(data: data)
-        case .proposedPlan(let data):
-            ConversationProposedPlanRow(data: data, renderMode: renderMode)
-        case .commandExecution(let data):
-            ConversationCommandExecutionRow(item: item, data: data)
-        case .fileChange(let data):
-            ConversationToolCardRow(model: makeFileChangeModel(data))
-        case .turnDiff(let data):
-            ConversationTurnDiffRow(data: data)
-        case .mcpToolCall(let data):
-            ConversationToolCardRow(model: makeMcpModel(data))
-        case .dynamicToolCall(let data):
-            if CrossServerTools.isRichTool(data.tool) {
-                CrossServerToolResultView(data: data)
-            } else {
-                ConversationToolCardRow(model: makeDynamicToolModel(data))
+        Group {
+            switch item.content {
+            case .user(let data):
+                userRow(data)
+            case .assistant(let data):
+                assistantRow(data)
+            case .codeReview(let data):
+                ConversationCodeReviewRow(data: data)
+            case .reasoning(let data):
+                ConversationReasoningRow(data: data)
+            case .todoList(let data):
+                ConversationTodoListRow(data: data)
+            case .proposedPlan(let data):
+                ConversationProposedPlanRow(data: data, renderMode: renderMode)
+            case .commandExecution(let data):
+                ConversationCommandExecutionRow(item: item, data: data)
+            case .fileChange(let data):
+                ConversationToolCardRow(model: makeFileChangeModel(data))
+            case .turnDiff(let data):
+                ConversationTurnDiffRow(data: data)
+            case .mcpToolCall(let data):
+                ConversationToolCardRow(model: makeMcpModel(data))
+            case .dynamicToolCall(let data):
+                if CrossServerTools.isRichTool(data.tool) {
+                    CrossServerToolResultView(data: data)
+                } else {
+                    ConversationToolCardRow(model: makeDynamicToolModel(data))
+                }
+            case .multiAgentAction(let data):
+                SubagentCardView(
+                    data: data,
+                    serverId: serverId
+                )
+            case .webSearch(let data):
+                ConversationToolCardRow(model: makeWebSearchModel(data))
+            case .widget(let data):
+                WidgetContainerView(
+                    widget: data.widgetState,
+                    onMessage: handleWidgetMessage
+                )
+            case .userInputResponse(let data):
+                ConversationUserInputResponseRow(data: data)
+            case .divider(let kind):
+                ConversationDividerRow(kind: kind, isLiveTurn: isLiveTurn)
+            case .error(let data):
+                ConversationSystemCardRow(
+                    title: data.title.isEmpty ? "Error" : data.title,
+                    content: [data.message, data.details].compactMap { $0 }.joined(separator: "\n\n"),
+                    accent: LitterTheme.danger,
+                    iconName: "exclamationmark.triangle.fill",
+                    renderMode: renderMode
+                )
+            case .note(let data):
+                ConversationSystemCardRow(
+                    title: data.title,
+                    content: data.body,
+                    accent: LitterTheme.accent,
+                    iconName: "info.circle.fill",
+                    renderMode: renderMode
+                )
             }
-        case .multiAgentAction(let data):
-            SubagentCardView(
-                data: data,
-                serverId: serverId
-            )
-        case .webSearch(let data):
-            ConversationToolCardRow(model: makeWebSearchModel(data))
-        case .widget(let data):
-            WidgetContainerView(
-                widget: data.widgetState,
-                onMessage: handleWidgetMessage
-            )
-        case .userInputResponse(let data):
-            ConversationUserInputResponseRow(data: data)
-        case .divider(let kind):
-            ConversationDividerRow(kind: kind, isLiveTurn: isLiveTurn)
-        case .error(let data):
-            ConversationSystemCardRow(
-                title: data.title.isEmpty ? "Error" : data.title,
-                content: [data.message, data.details].compactMap { $0 }.joined(separator: "\n\n"),
-                accent: LitterTheme.danger,
-                iconName: "exclamationmark.triangle.fill",
-                renderMode: renderMode
-            )
-        case .note(let data):
-            ConversationSystemCardRow(
-                title: data.title,
-                content: data.body,
-                accent: LitterTheme.accent,
-                iconName: "info.circle.fill",
-                renderMode: renderMode
-            )
+        }
+        .onAppear {
+            notifyLiveContentRendered()
+        }
+        .onChange(of: item.renderDigest) { _, _ in
+            notifyLiveContentRendered()
+        }
+    }
+
+    private var shouldNotifyLiveContentRendered: Bool {
+        guard isLiveTurn else { return false }
+        switch item.content {
+        case .reasoning,
+             .commandExecution,
+             .fileChange,
+             .turnDiff,
+             .mcpToolCall,
+             .dynamicToolCall,
+             .multiAgentAction,
+             .webSearch,
+             .widget:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func notifyLiveContentRendered() {
+        guard shouldNotifyLiveContentRendered else { return }
+        DispatchQueue.main.async {
+            onStreamingSnapshotRendered?()
         }
     }
 
@@ -406,12 +449,7 @@ private struct ConversationTimelineItemRow: View {
 
     private func makeFileChangeModel(_ data: ConversationFileChangeData) -> ToolCallCardModel {
         let changedPaths = data.changes.map(\.path)
-        let summary: String
-        if let first = changedPaths.first {
-            summary = changedPaths.count == 1 ? "Changed \(workspaceTitle(for: first))" : "Changed \(changedPaths.count) files"
-        } else {
-            summary = "File changes"
-        }
+        let summary = fileChangeSummary(for: data)
 
         var sections: [ToolCallSection] = []
         if !changedPaths.isEmpty {
@@ -429,11 +467,83 @@ private struct ConversationTimelineItemRow: View {
         return ToolCallCardModel(
             kind: .fileChange,
             title: "File Change",
-            summary: summary,
+            summary: summary.plainText,
+            attributedSummary: summary.attributedText,
             status: data.status.toolCallStatus,
             duration: nil,
             sections: sections
         )
+    }
+
+    private func fileChangeSummary(for data: ConversationFileChangeData) -> (plainText: String, attributedText: AttributedString?) {
+        guard !data.changes.isEmpty else {
+            return ("File changes", nil)
+        }
+
+        let additions = data.changes.reduce(0) { $0 + $1.additions }
+        let deletions = data.changes.reduce(0) { $0 + $1.deletions }
+        let hasCountSummary = additions > 0 || deletions > 0
+
+        if data.changes.count == 1, let change = data.changes.first {
+            let verb = fileChangeVerb(for: change.kind)
+            let filename = workspaceTitle(for: change.path)
+            guard hasCountSummary else {
+                return ("\(verb) \(filename)", nil)
+            }
+
+            let plainText = "\(verb) \(filename) +\(additions) -\(deletions)"
+
+            var attributed = AttributedString()
+
+            var verbText = AttributedString("\(verb) ")
+            verbText.foregroundColor = LitterTheme.textSecondary
+            attributed.append(verbText)
+
+            var fileText = AttributedString(filename)
+            fileText.foregroundColor = LitterTheme.accent
+            attributed.append(fileText)
+
+            var additionsText = AttributedString(" +\(additions)")
+            additionsText.foregroundColor = LitterTheme.success
+            attributed.append(additionsText)
+
+            var deletionsText = AttributedString(" -\(deletions)")
+            deletionsText.foregroundColor = LitterTheme.danger
+            attributed.append(deletionsText)
+
+            return (plainText, attributed)
+        }
+
+        guard hasCountSummary else {
+            return ("Changed \(data.changes.count) files", nil)
+        }
+
+        let plainText = "Changed \(data.changes.count) files +\(additions) -\(deletions)"
+        var attributed = AttributedString("Changed \(data.changes.count) files")
+        attributed.foregroundColor = LitterTheme.textSystem
+
+        var additionsText = AttributedString(" +\(additions)")
+        additionsText.foregroundColor = LitterTheme.success
+        attributed.append(additionsText)
+
+        var deletionsText = AttributedString(" -\(deletions)")
+        deletionsText.foregroundColor = LitterTheme.danger
+        attributed.append(deletionsText)
+
+        return (plainText, attributed)
+    }
+
+    private func fileChangeVerb(for kind: String) -> String {
+        switch kind.lowercased() {
+        case "add":
+            return "Added"
+        case "delete":
+            return "Deleted"
+        case "update":
+            return "Edited"
+        default:
+            return "Changed"
+        }
     }
 
     private func makeMcpModel(_ data: ConversationMcpToolCallData) -> ToolCallCardModel {
@@ -520,12 +630,12 @@ private struct ConversationExplorationGroupRow: View {
 
     let id: String
     let items: [ConversationItem]
+    let showsCollapsedPreview: Bool
 
     @State private var expanded = false
 
     var body: some View {
         let entries = explorationEntries
-        let visibleEntries = expanded ? entries : Array(entries.prefix(2))
 
         VStack(alignment: .leading, spacing: 8) {
             Button(action: toggleExpanded) {
@@ -546,30 +656,75 @@ private struct ConversationExplorationGroupRow: View {
             }
             .buttonStyle(.plain)
 
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(visibleEntries) { entry in
-                    HStack(alignment: .top, spacing: 8) {
-                        Circle()
-                            .fill(entry.isInProgress ? LitterTheme.warning : LitterTheme.textMuted)
-                            .frame(width: explorationBulletSize, height: explorationBulletSize)
-                            .padding(.top, explorationBulletTopPadding)
-                        Text(verbatim: displayedLabel(for: entry))
-                            .litterFont(.caption)
-                            .foregroundColor(LitterTheme.textSecondary)
-                            .lineLimit(expanded ? nil : 1)
-                            .truncationMode(.tail)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+            if expanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(entries) { entry in
+                        HStack(alignment: .top, spacing: 8) {
+                            Circle()
+                                .fill(entry.isInProgress ? LitterTheme.warning : LitterTheme.textMuted)
+                                .frame(width: explorationBulletSize, height: explorationBulletSize)
+                                .padding(.top, explorationBulletTopPadding)
+                            Text(verbatim: entry.label)
+                                .litterFont(.caption)
+                                .foregroundColor(LitterTheme.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 }
-                if !expanded && entries.count > visibleEntries.count {
-                    Text("+\(entries.count - visibleEntries.count) more")
-                        .litterFont(.caption2)
-                        .foregroundColor(LitterTheme.textMuted)
+            } else if showsCollapsedPreview && !entries.isEmpty {
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(entries) { entry in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Circle()
+                                        .fill(entry.isInProgress ? LitterTheme.warning : LitterTheme.textMuted)
+                                        .frame(width: explorationBulletSize, height: explorationBulletSize)
+                                        .padding(.top, explorationBulletTopPadding)
+                                    Text(verbatim: displayedCollapsedLabel(for: entry))
+                                        .litterFont(.caption)
+                                        .foregroundColor(LitterTheme.textSecondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+
+                            Color.clear
+                                .frame(height: 1)
+                                .id(bottomAnchorId)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 8)
+                    }
+                    .frame(maxHeight: collapsedPreviewHeight)
+                    .background(LitterTheme.surface.opacity(0.6))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(alignment: .top) {
+                        LinearGradient(
+                            colors: [LitterTheme.surface.opacity(0.92), LitterTheme.surface.opacity(0)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 16)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .allowsHitTesting(false)
+                    }
+                    .onAppear {
+                        scrollToBottom(proxy)
+                    }
+                    .onChange(of: collapsedPreviewScrollSignature) { _, _ in
+                        scrollToBottom(proxy, animated: true)
+                    }
                 }
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+        .onChange(of: showsCollapsedPreview) { _, newValue in
+            guard !newValue else { return }
+            expanded = false
+        }
     }
 
     private var summaryText: String {
@@ -585,6 +740,20 @@ private struct ConversationExplorationGroupRow: View {
         5 * textScale
     }
 
+    private var collapsedPreviewHeight: CGFloat {
+        (LitterFont.uiMonoFont(size: 12 * textScale).lineHeight * 3) + 18
+    }
+
+    private var bottomAnchorId: String {
+        "\(id)-exploration-bottom"
+    }
+
+    private var collapsedPreviewScrollSignature: String {
+        explorationEntries
+            .map { "\($0.id)|\($0.label)|\($0.isInProgress)" }
+            .joined(separator: "\n")
+    }
+
     private var isActive: Bool {
         explorationEntries.contains(where: \.isInProgress)
     }
@@ -595,8 +764,7 @@ private struct ConversationExplorationGroupRow: View {
         }
     }
 
-    private func displayedLabel(for entry: ExplorationDisplayEntry) -> String {
-        guard !expanded else { return entry.label }
+    private func displayedCollapsedLabel(for entry: ExplorationDisplayEntry) -> String {
         let collapsed = entry.label
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
@@ -692,6 +860,18 @@ private struct ConversationExplorationGroupRow: View {
             return action.path.map { "Listed files in \(workspaceTitle(for: $0))" } ?? fallback
         case .unknown:
             return fallback
+        }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = false) {
+        DispatchQueue.main.async {
+            if animated {
+                withAnimation(.easeOut(duration: 0.16)) {
+                    proxy.scrollTo(bottomAnchorId, anchor: .bottom)
+                }
+            } else {
+                proxy.scrollTo(bottomAnchorId, anchor: .bottom)
+            }
         }
     }
 }
@@ -970,8 +1150,8 @@ private struct ConversationCommandOutputViewport: View {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(verbatim: output)
-                        .litterMonoFont(size: 11)
-                        .foregroundColor(LitterTheme.textBody)
+                        .litterMonoFont(size: 12)
+                        .foregroundColor(LitterTheme.textSecondary)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1021,7 +1201,7 @@ private struct ConversationCommandOutputViewport: View {
                 scrollToBottom(proxy)
             }
             .onChange(of: output) { _, _ in
-                scrollToBottom(proxy)
+                scrollToBottom(proxy, animated: true)
             }
         }
     }
@@ -1052,9 +1232,15 @@ private struct ConversationCommandOutputViewport: View {
         }
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = false) {
         DispatchQueue.main.async {
-            proxy.scrollTo(bottomAnchorId, anchor: .bottom)
+            if animated {
+                withAnimation(.easeOut(duration: 0.16)) {
+                    proxy.scrollTo(bottomAnchorId, anchor: .bottom)
+                }
+            } else {
+                proxy.scrollTo(bottomAnchorId, anchor: .bottom)
+            }
         }
     }
 }
@@ -1179,6 +1365,100 @@ private struct ConversationDividerRow: View {
     private var effectiveContextCompactionComplete: Bool {
         guard case .contextCompaction(let isComplete) = kind else { return true }
         return isComplete && !isLiveTurn
+    }
+}
+
+private struct ConversationCodeReviewRow: View {
+    let data: ConversationCodeReviewData
+    @State private var dismissedFindingIndices: Set<Int> = []
+
+    private var visibleFindings: [(index: Int, finding: ConversationCodeReviewFinding)] {
+        data.findings.enumerated().compactMap { index, finding in
+            dismissedFindingIndices.contains(index) ? nil : (index, finding)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(visibleFindings, id: \.index) { entry in
+                ConversationCodeReviewFindingCard(
+                    finding: entry.finding,
+                    onDismiss: { dismissedFindingIndices.insert(entry.index) }
+                )
+            }
+        }
+    }
+}
+
+private struct ConversationCodeReviewFindingCard: View {
+    let finding: ConversationCodeReviewFinding
+    let onDismiss: () -> Void
+
+    private var priorityLabel: String? {
+        finding.priority.map { "P\($0)" }
+    }
+
+    private var priorityTint: Color {
+        switch finding.priority {
+        case 0?, 1?:
+            return LitterTheme.danger
+        case 2?:
+            return LitterTheme.warning
+        case 3?:
+            return LitterTheme.textSecondary
+        default:
+            return LitterTheme.textSecondary
+        }
+    }
+
+    private var locationText: String? {
+        guard let location = finding.codeLocation else { return nil }
+        guard let lineRange = location.lineRange else { return location.absoluteFilePath }
+        if lineRange.start == lineRange.end {
+            return "\(location.absoluteFilePath):\(lineRange.start)"
+        }
+        return "\(location.absoluteFilePath):\(lineRange.start)-\(lineRange.end)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 10) {
+                if let priorityLabel {
+                    Text(priorityLabel)
+                        .litterFont(.caption2, weight: .bold)
+                        .foregroundColor(priorityTint)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(priorityTint.opacity(0.12), in: Capsule())
+                }
+
+                Text(finding.title)
+                    .litterFont(.headline, weight: .semibold)
+                    .foregroundColor(LitterTheme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button("Dismiss", action: onDismiss)
+                    .buttonStyle(.plain)
+                    .litterFont(.callout, weight: .medium)
+                    .foregroundColor(LitterTheme.textSecondary)
+            }
+
+            LitterMarkdownView(markdown: finding.body, style: .content, selectionEnabled: true)
+
+            if let locationText, !locationText.isEmpty {
+                Text(locationText)
+                    .litterFont(.footnote)
+                    .foregroundColor(LitterTheme.textSecondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(20)
+        .background(LitterTheme.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: 22))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(LitterTheme.border.opacity(0.7), lineWidth: 1)
+        )
     }
 }
 

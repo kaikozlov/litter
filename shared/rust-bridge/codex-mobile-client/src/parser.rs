@@ -4,6 +4,7 @@
 //! into `ToolCallCard` structs for rendering on both platforms.
 
 use regex::Regex;
+use serde::Deserialize;
 use std::sync::LazyLock;
 
 // ---------------------------------------------------------------------------
@@ -142,6 +143,106 @@ pub struct AppToolCallCard {
     pub sections: Vec<AppToolCallSection>,
 }
 
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CodeReviewPayload {
+    pub findings: Vec<CodeReviewFinding>,
+    pub overall_correctness: Option<String>,
+    pub overall_explanation: Option<String>,
+    pub overall_confidence_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CodeReviewFinding {
+    pub title: String,
+    pub body: String,
+    pub confidence_score: f64,
+    pub priority: Option<u8>,
+    pub code_location: Option<CodeReviewCodeLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CodeReviewCodeLocation {
+    pub absolute_file_path: String,
+    pub line_range: Option<CodeReviewLineRange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CodeReviewLineRange {
+    pub start: u32,
+    pub end: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct AppCodeReviewPayload {
+    pub findings: Vec<AppCodeReviewFinding>,
+    pub overall_correctness: Option<String>,
+    pub overall_explanation: Option<String>,
+    pub overall_confidence_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct AppCodeReviewFinding {
+    pub title: String,
+    pub body: String,
+    pub confidence_score: f64,
+    pub priority: Option<u8>,
+    pub code_location: Option<AppCodeReviewCodeLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct AppCodeReviewCodeLocation {
+    pub absolute_file_path: String,
+    pub line_range: Option<AppCodeReviewLineRange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AppCodeReviewLineRange {
+    pub start: u32,
+    pub end: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCodeReviewPayload {
+    findings: Vec<RawCodeReviewFinding>,
+    #[serde(default, deserialize_with = "deserialize_optional_stringified_value")]
+    overall_correctness: Option<String>,
+    #[serde(default)]
+    overall_explanation: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_f64")]
+    overall_confidence_score: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCodeReviewFinding {
+    title: String,
+    body: String,
+    #[serde(deserialize_with = "deserialize_f64")]
+    confidence_score: f64,
+    #[serde(default, deserialize_with = "deserialize_optional_u8")]
+    priority: Option<u8>,
+    #[serde(default)]
+    code_location: Option<RawCodeReviewCodeLocation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCodeReviewCodeLocation {
+    absolute_file_path: String,
+    #[serde(default)]
+    line_range: Option<RawCodeReviewLineRange>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCodeReviewLineRange {
+    #[serde(deserialize_with = "deserialize_u32")]
+    start: u32,
+    #[serde(deserialize_with = "deserialize_u32")]
+    end: u32,
+}
+
 impl From<&ToolCallKind> for AppToolCallKind {
     fn from(value: &ToolCallKind) -> Self {
         match value {
@@ -235,6 +336,54 @@ impl From<&ToolCallCard> for AppToolCallCard {
     }
 }
 
+impl From<&CodeReviewPayload> for AppCodeReviewPayload {
+    fn from(value: &CodeReviewPayload) -> Self {
+        Self {
+            findings: value
+                .findings
+                .iter()
+                .map(AppCodeReviewFinding::from)
+                .collect(),
+            overall_correctness: value.overall_correctness.clone(),
+            overall_explanation: value.overall_explanation.clone(),
+            overall_confidence_score: value.overall_confidence_score,
+        }
+    }
+}
+
+impl From<&CodeReviewFinding> for AppCodeReviewFinding {
+    fn from(value: &CodeReviewFinding) -> Self {
+        Self {
+            title: value.title.clone(),
+            body: value.body.clone(),
+            confidence_score: value.confidence_score,
+            priority: value.priority,
+            code_location: value
+                .code_location
+                .as_ref()
+                .map(AppCodeReviewCodeLocation::from),
+        }
+    }
+}
+
+impl From<&CodeReviewCodeLocation> for AppCodeReviewCodeLocation {
+    fn from(value: &CodeReviewCodeLocation) -> Self {
+        Self {
+            absolute_file_path: value.absolute_file_path.clone(),
+            line_range: value.line_range.as_ref().map(AppCodeReviewLineRange::from),
+        }
+    }
+}
+
+impl From<&CodeReviewLineRange> for AppCodeReviewLineRange {
+    fn from(value: &CodeReviewLineRange) -> Self {
+        Self {
+            start: value.start,
+            end: value.end,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -273,6 +422,12 @@ static NORMALIZE_RE: LazyLock<Regex> =
 static BULLET_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(?:[-*•]\s+|\d+\.\s+)").expect("invalid regex"));
 
+static FINDING_PRIORITY_PREFIX_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^\[(p[0-3])\]\s*").expect("invalid regex"));
+
+static WINDOWS_DRIVE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^([a-z]):/(.*)$").expect("invalid regex"));
+
 fn normalize_token(s: &str) -> String {
     let lower = s.trim().to_lowercase();
     let replaced = NORMALIZE_RE.replace_all(&lower, " ");
@@ -285,6 +440,323 @@ fn is_leading_key(normalized: &str) -> bool {
 
 fn is_named_section(normalized: &str) -> bool {
     NAMED_SECTION_SET.iter().any(|&k| k == normalized)
+}
+
+fn deserialize_optional_stringified_value<'de, D>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| match value {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(text) => {
+            let trimmed = text.trim().to_owned();
+            (!trimmed.is_empty()).then_some(trimmed)
+        }
+        serde_json::Value::Bool(boolean) => Some(boolean.to_string()),
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        other @ (serde_json::Value::Array(_) | serde_json::Value::Object(_)) => {
+            serde_json::to_string(&other).ok()
+        }
+    }))
+}
+
+fn deserialize_optional_f64<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    value
+        .map(parse_json_f64)
+        .transpose()
+        .map_err(serde::de::Error::custom)
+}
+
+fn deserialize_f64<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    parse_json_f64(value).map_err(serde::de::Error::custom)
+}
+
+fn deserialize_optional_u8<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    value
+        .map(parse_json_u8)
+        .transpose()
+        .map_err(serde::de::Error::custom)
+}
+
+fn deserialize_u32<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    parse_json_u32(value).map_err(serde::de::Error::custom)
+}
+
+fn parse_json_f64(value: serde_json::Value) -> Result<f64, String> {
+    match value {
+        serde_json::Value::Number(number) => number
+            .as_f64()
+            .ok_or_else(|| "expected finite number".to_string()),
+        serde_json::Value::String(text) => text
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| format!("invalid number: {text}")),
+        other => Err(format!("expected number, got {other}")),
+    }
+}
+
+fn parse_json_u8(value: serde_json::Value) -> Result<u8, String> {
+    match value {
+        serde_json::Value::Number(number) => number
+            .as_u64()
+            .and_then(|value| u8::try_from(value).ok())
+            .ok_or_else(|| "expected u8".to_string()),
+        serde_json::Value::String(text) => text
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| format!("invalid integer: {text}")),
+        other => Err(format!("expected integer, got {other}")),
+    }
+}
+
+fn parse_json_u32(value: serde_json::Value) -> Result<u32, String> {
+    match value {
+        serde_json::Value::Number(number) => number
+            .as_u64()
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or_else(|| "expected u32".to_string()),
+        serde_json::Value::String(text) => text
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| format!("invalid integer: {text}")),
+        other => Err(format!("expected integer, got {other}")),
+    }
+}
+
+fn normalize_priority_and_title(title: &str, priority: Option<u8>) -> (String, Option<u8>) {
+    let trimmed = title.trim();
+    let inferred_priority = FINDING_PRIORITY_PREFIX_RE
+        .captures(trimmed)
+        .and_then(|captures| captures.get(1))
+        .map(|value| value.as_str())
+        .map(|value| value.trim_start_matches(|character| character == 'P' || character == 'p'))
+        .and_then(|value| value.parse::<u8>().ok());
+    let normalized_title = FINDING_PRIORITY_PREFIX_RE
+        .replace(trimmed, "")
+        .trim()
+        .to_owned();
+    (
+        if normalized_title.is_empty() {
+            trimmed.to_owned()
+        } else {
+            normalized_title
+        },
+        priority.or(inferred_priority),
+    )
+}
+
+fn normalize_review_path(path: &str) -> String {
+    let mut normalized = path.trim().replace('\\', "/");
+    if normalized.is_empty() {
+        return normalized;
+    }
+
+    if let Some(stripped) = normalized.strip_prefix("//?/") {
+        normalized = stripped.to_owned();
+    } else if let Some(stripped) = normalized.strip_prefix("/?/") {
+        normalized = stripped.to_owned();
+    }
+
+    let lower = normalized.to_ascii_lowercase();
+    for prefix in ["//wsl$/", "//wsl.localhost/"] {
+        if lower.starts_with(prefix) {
+            let remainder = &normalized[prefix.len()..];
+            if let Some((_, path_after_distro)) = remainder.split_once('/') {
+                return collapse_repeated_slashes(&format!("/{path_after_distro}"));
+            }
+            return "/".to_string();
+        }
+    }
+
+    if let Some(captures) = WINDOWS_DRIVE_RE.captures(&normalized) {
+        let drive = captures
+            .get(1)
+            .map(|value| value.as_str().to_ascii_lowercase())
+            .unwrap_or_else(|| "c".to_string());
+        let rest = captures
+            .get(2)
+            .map(|value| value.as_str())
+            .unwrap_or_default();
+        return collapse_repeated_slashes(&format!("/mnt/{drive}/{rest}"));
+    }
+
+    if normalized.starts_with("//") {
+        let remainder = collapse_repeated_slashes(&normalized[2..]);
+        return format!("//{remainder}");
+    }
+
+    collapse_repeated_slashes(&normalized)
+}
+
+fn collapse_repeated_slashes(path: &str) -> String {
+    let mut collapsed = String::with_capacity(path.len());
+    let mut previous_was_slash = false;
+    for character in path.chars() {
+        if character == '/' {
+            if !previous_was_slash {
+                collapsed.push(character);
+            }
+            previous_was_slash = true;
+        } else {
+            collapsed.push(character);
+            previous_was_slash = false;
+        }
+    }
+    collapsed
+}
+
+fn normalize_line_range(range: RawCodeReviewLineRange) -> CodeReviewLineRange {
+    let start = range.start;
+    let end = range.end.max(start);
+    CodeReviewLineRange { start, end }
+}
+
+fn normalize_code_review_payload(raw: RawCodeReviewPayload) -> Option<CodeReviewPayload> {
+    let findings = raw
+        .findings
+        .into_iter()
+        .filter_map(|finding| {
+            let title = finding.title.trim();
+            let body = finding.body.trim();
+            if title.is_empty() || body.is_empty() {
+                return None;
+            }
+            let (title, priority) = normalize_priority_and_title(title, finding.priority);
+            Some(CodeReviewFinding {
+                title,
+                body: body.to_owned(),
+                confidence_score: finding.confidence_score,
+                priority,
+                code_location: finding
+                    .code_location
+                    .map(|location| CodeReviewCodeLocation {
+                        absolute_file_path: normalize_review_path(&location.absolute_file_path),
+                        line_range: location.line_range.map(normalize_line_range),
+                    }),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    if findings.is_empty() {
+        return None;
+    }
+
+    Some(CodeReviewPayload {
+        findings,
+        overall_correctness: raw.overall_correctness,
+        overall_explanation: raw
+            .overall_explanation
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty()),
+        overall_confidence_score: raw.overall_confidence_score,
+    })
+}
+
+fn parse_code_review_from_json_str(text: &str) -> Option<CodeReviewPayload> {
+    let value = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    let raw = serde_json::from_value::<RawCodeReviewPayload>(value).ok()?;
+    normalize_code_review_payload(raw)
+}
+
+fn extract_json_object_candidates(text: &str) -> Vec<String> {
+    let bytes = text.as_bytes();
+    let mut start_index = 0;
+    let mut candidates = Vec::new();
+    while let Some(relative_start) = text[start_index..].find('{') {
+        let absolute_start = start_index + relative_start;
+        let mut depth = 0_u32;
+        let mut in_string = false;
+        let mut is_escaped = false;
+        for index in absolute_start..bytes.len() {
+            let byte = bytes[index];
+            if in_string {
+                if is_escaped {
+                    is_escaped = false;
+                    continue;
+                }
+                match byte {
+                    b'\\' => is_escaped = true,
+                    b'"' => in_string = false,
+                    _ => {}
+                }
+                continue;
+            }
+
+            match byte {
+                b'"' => in_string = true,
+                b'{' => depth += 1,
+                b'}' => {
+                    if depth == 0 {
+                        break;
+                    }
+                    depth -= 1;
+                    if depth == 0 {
+                        candidates.push(text[absolute_start..=index].to_owned());
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        start_index = absolute_start + 1;
+    }
+    candidates
+}
+
+fn extract_fenced_json_candidates(text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut candidates = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let trimmed = lines[index].trim();
+        let Some(opening) = opening_fence(trimmed) else {
+            index += 1;
+            continue;
+        };
+        let language = trimmed[opening.marker.len_utf8() * opening.length..]
+            .trim()
+            .to_ascii_lowercase();
+        let mut content_lines = Vec::new();
+        let mut cursor = index + 1;
+        while cursor < lines.len() {
+            if is_closing_fence(lines[cursor].trim(), opening.marker, opening.length) {
+                let content = content_lines.join("\n");
+                if language.is_empty() || language == "json" {
+                    let trimmed_content = content.trim();
+                    if trimmed_content.starts_with('{') && trimmed_content.ends_with('}') {
+                        candidates.push(trimmed_content.to_owned());
+                    } else {
+                        candidates.extend(extract_json_object_candidates(trimmed_content));
+                    }
+                }
+                index = cursor;
+                break;
+            }
+            content_lines.push(lines[cursor]);
+            cursor += 1;
+        }
+        index += 1;
+    }
+    candidates
 }
 
 // ---------------------------------------------------------------------------
@@ -1357,6 +1829,35 @@ fn summary_for(
 // Public API
 // ---------------------------------------------------------------------------
 
+/// Parse a message that may contain Codex findings JSON into a normalized
+/// code-review payload.
+pub fn parse_code_review_message(text: &str) -> Option<CodeReviewPayload> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        if let Some(parsed) = parse_code_review_from_json_str(trimmed) {
+            return Some(parsed);
+        }
+    }
+
+    for candidate in extract_fenced_json_candidates(trimmed) {
+        if let Some(parsed) = parse_code_review_from_json_str(&candidate) {
+            return Some(parsed);
+        }
+    }
+
+    for candidate in extract_json_object_candidates(trimmed) {
+        if let Some(parsed) = parse_code_review_from_json_str(&candidate) {
+            return Some(parsed);
+        }
+    }
+
+    None
+}
+
 /// Parse a markdown-structured system message into zero or more typed tool
 /// call cards.
 ///
@@ -1479,6 +1980,27 @@ fn parse_single_block(text: &str) -> Option<ToolCallCard> {
 mod tests {
     use super::*;
 
+    fn sample_code_review_json() -> String {
+        serde_json::json!({
+            "findings": [
+                {
+                    "title": "[P1] Fall back to turn/start when IPC queue sync fails",
+                    "body": "A queued follow-up can get stuck indefinitely.",
+                    "confidence_score": 0.97,
+                    "priority": 1,
+                    "code_location": {
+                        "absolute_file_path": "/Users/sigkitten/dev/litter/shared/rust-bridge/codex-mobile-client/src/mobile_client_impl.rs",
+                        "line_range": { "start": 799, "end": 815 }
+                    }
+                }
+            ],
+            "overall_correctness": "incorrect",
+            "overall_explanation": "There are blocking issues.",
+            "overall_confidence_score": 0.92
+        })
+        .to_string()
+    }
+
     // -- normalize_token --
 
     #[test]
@@ -1487,6 +2009,90 @@ mod tests {
         assert_eq!(normalize_token("Exit Code"), "exit code");
         assert_eq!(normalize_token("MCP-Tool_Call!"), "mcp tool call");
         assert_eq!(normalize_token(""), "");
+    }
+
+    #[test]
+    fn parse_code_review_message_accepts_raw_json() {
+        let parsed =
+            parse_code_review_message(&sample_code_review_json()).expect("should parse findings");
+        assert_eq!(parsed.findings.len(), 1);
+        assert_eq!(
+            parsed.findings[0].title,
+            "Fall back to turn/start when IPC queue sync fails"
+        );
+        assert_eq!(parsed.findings[0].priority, Some(1));
+        assert_eq!(
+            parsed.findings[0]
+                .code_location
+                .as_ref()
+                .map(|location| location.absolute_file_path.as_str()),
+            Some(
+                "/Users/sigkitten/dev/litter/shared/rust-bridge/codex-mobile-client/src/mobile_client_impl.rs"
+            )
+        );
+        assert_eq!(parsed.overall_correctness.as_deref(), Some("incorrect"));
+    }
+
+    #[test]
+    fn parse_code_review_message_accepts_fenced_json() {
+        let message = format!("```json\n{}\n```", sample_code_review_json());
+        let parsed = parse_code_review_message(&message).expect("should parse fenced findings");
+        assert_eq!(parsed.findings.len(), 1);
+    }
+
+    #[test]
+    fn parse_code_review_message_accepts_embedded_json() {
+        let message = format!(
+            "Here are the findings:\n\n{}\n\nPlease fix them.",
+            sample_code_review_json()
+        );
+        let parsed = parse_code_review_message(&message).expect("should parse embedded findings");
+        assert_eq!(parsed.findings[0].priority, Some(1));
+    }
+
+    #[test]
+    fn parse_code_review_message_rejects_invalid_json() {
+        assert!(parse_code_review_message("{\"findings\": [}").is_none());
+        assert!(parse_code_review_message("plain markdown response").is_none());
+    }
+
+    #[test]
+    fn normalize_priority_and_title_strips_title_prefix() {
+        let parsed = parse_code_review_message(
+            r#"{"findings":[{"title":"[P2] Preserve resume overrides","body":"Bug body","confidence_score":0.7,"code_location":{"absolute_file_path":"/tmp/file.rs","line_range":{"start":10,"end":12}}}]}"#,
+        )
+        .expect("should parse findings");
+        assert_eq!(parsed.findings[0].title, "Preserve resume overrides");
+        assert_eq!(parsed.findings[0].priority, Some(2));
+    }
+
+    #[test]
+    fn normalize_review_path_matches_desktop_style() {
+        assert_eq!(
+            normalize_review_path(r#"\\?\C:\repo\src\main.rs"#),
+            "/mnt/c/repo/src/main.rs"
+        );
+        assert_eq!(
+            normalize_review_path("//wsl$/Ubuntu/home/sig/project/src/lib.rs"),
+            "/home/sig/project/src/lib.rs"
+        );
+        assert_eq!(
+            normalize_review_path("//wsl.localhost/Ubuntu/home/sig/project/src/lib.rs"),
+            "/home/sig/project/src/lib.rs"
+        );
+        assert_eq!(
+            normalize_review_path("/Users/sigkitten/dev/litter/src/main.rs"),
+            "/Users/sigkitten/dev/litter/src/main.rs"
+        );
+    }
+
+    #[test]
+    fn normalize_line_range_preserves_single_and_multi_line_ranges() {
+        let single = normalize_line_range(RawCodeReviewLineRange { start: 12, end: 12 });
+        assert_eq!(single, CodeReviewLineRange { start: 12, end: 12 });
+
+        let multi = normalize_line_range(RawCodeReviewLineRange { start: 10, end: 15 });
+        assert_eq!(multi, CodeReviewLineRange { start: 10, end: 15 });
     }
 
     // -- kind inference --

@@ -20,6 +20,7 @@ pub struct HydratedConversationItem {
 pub enum HydratedConversationItemContent {
     User(HydratedUserMessageData),
     Assistant(HydratedAssistantMessageData),
+    CodeReview(HydratedCodeReviewData),
     Reasoning(HydratedReasoningData),
     TodoList(HydratedTodoListData),
     ProposedPlan(HydratedProposedPlanData),
@@ -49,6 +50,35 @@ pub struct HydratedAssistantMessageData {
     pub agent_nickname: Option<String>,
     pub agent_role: Option<String>,
     pub phase: Option<AppMessagePhase>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, uniffi::Record)]
+pub struct HydratedCodeReviewData {
+    pub findings: Vec<HydratedCodeReviewFindingData>,
+    pub overall_correctness: Option<String>,
+    pub overall_explanation: Option<String>,
+    pub overall_confidence_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, uniffi::Record)]
+pub struct HydratedCodeReviewFindingData {
+    pub title: String,
+    pub body: String,
+    pub confidence_score: f64,
+    pub priority: Option<u8>,
+    pub code_location: Option<HydratedCodeReviewCodeLocationData>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, uniffi::Record)]
+pub struct HydratedCodeReviewCodeLocationData {
+    pub absolute_file_path: String,
+    pub line_range: Option<HydratedCodeReviewLineRangeData>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, uniffi::Record)]
+pub struct HydratedCodeReviewLineRangeData {
+    pub start: u32,
+    pub end: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, uniffi::Record)]
@@ -114,6 +144,8 @@ pub struct HydratedFileChangeEntryData {
     pub path: String,
     pub kind: String,
     pub diff: String,
+    pub additions: u32,
+    pub deletions: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, uniffi::Record)]

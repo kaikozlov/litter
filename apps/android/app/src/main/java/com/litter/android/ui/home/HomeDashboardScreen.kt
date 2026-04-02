@@ -1,5 +1,6 @@
 package com.litter.android.ui.home
 
+import com.sigkitten.litter.android.BuildConfig
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -64,6 +65,7 @@ import androidx.compose.ui.unit.sp
 import com.litter.android.state.AppThreadLaunchConfig
 import com.litter.android.state.SavedServerStore
 import com.litter.android.state.connectionModeLabel
+import com.litter.android.state.displayTitle
 import com.litter.android.state.isConnected
 import com.litter.android.state.isIpcConnected
 import com.litter.android.state.statusColor
@@ -96,6 +98,7 @@ fun HomeDashboardScreen(
     var showTipJar by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<AppServerSnapshot?>(null) }
     var renameText by remember { mutableStateOf("") }
+    val appVersionLabel = remember { "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})" }
 
     val snap = snapshot
     val servers = remember(snap) {
@@ -211,7 +214,7 @@ fun HomeDashboardScreen(
             item {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Connected Servers",
+                    text = "Servers",
                     color = LitterTheme.textSecondary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
@@ -298,6 +301,15 @@ fun HomeDashboardScreen(
             }
         }
     }
+        Text(
+            text = appVersionLabel,
+            color = LitterTheme.textMuted.copy(alpha = 0.8f),
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 2.dp),
+        )
     } // close Box
 
     // Confirmation dialogs
@@ -421,7 +433,7 @@ private fun SessionCard(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = session.title ?: session.preview ?: "Untitled",
+                    text = session.displayTitle,
                     color = LitterTheme.textPrimary,
                     fontSize = 14.sp,
                     maxLines = 1,

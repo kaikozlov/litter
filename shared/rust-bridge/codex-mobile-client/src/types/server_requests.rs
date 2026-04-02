@@ -15,8 +15,8 @@ use std::path::PathBuf;
 use super::enums::ApprovalKind;
 use super::{
     AbsolutePath, AppAskForApproval, AppDynamicToolSpec, AppMergeStrategy, AppReadOnlyAccess,
-    ReasoningEffort, AppReviewTarget, AppSandboxMode, AppSandboxPolicy, ServiceTier,
-    AppRealtimeAudioChunk, AppUserInput,
+    AppRealtimeAudioChunk, AppReviewTarget, AppSandboxMode, AppSandboxPolicy, AppUserInput,
+    ReasoningEffort, ServiceTier,
 };
 
 fn absolute_path_buf_from_mobile(value: AbsolutePath) -> Result<AbsolutePathBuf, RpcClientError> {
@@ -188,7 +188,6 @@ fn dynamic_tool_spec_into_upstream(
 ) -> Result<codex_protocol::dynamic_tools::DynamicToolSpec, RpcClientError> {
     value.try_into()
 }
-
 
 fn review_target_into_upstream(value: AppReviewTarget) -> upstream::ReviewTarget {
     match value {
@@ -463,7 +462,9 @@ pub struct AppArchiveThreadRequest {
 
 impl From<AppArchiveThreadRequest> for upstream::ThreadArchiveParams {
     fn from(value: AppArchiveThreadRequest) -> Self {
-        Self { thread_id: value.thread_id }
+        Self {
+            thread_id: value.thread_id,
+        }
     }
 }
 
@@ -476,7 +477,10 @@ pub struct AppRenameThreadRequest {
 
 impl From<AppRenameThreadRequest> for upstream::ThreadSetNameParams {
     fn from(value: AppRenameThreadRequest) -> Self {
-        Self { thread_id: value.thread_id, name: value.name }
+        Self {
+            thread_id: value.thread_id,
+            name: value.name,
+        }
     }
 }
 
@@ -498,9 +502,14 @@ pub struct AppListThreadsRequest {
 impl From<AppListThreadsRequest> for upstream::ThreadListParams {
     fn from(value: AppListThreadsRequest) -> Self {
         Self {
-            cursor: value.cursor, limit: value.limit, sort_key: None,
-            model_providers: None, source_kinds: None, archived: value.archived,
-            cwd: value.cwd, search_term: value.search_term,
+            cursor: value.cursor,
+            limit: value.limit,
+            sort_key: None,
+            model_providers: None,
+            source_kinds: None,
+            archived: value.archived,
+            cwd: value.cwd,
+            search_term: value.search_term,
         }
     }
 }
@@ -515,7 +524,10 @@ pub struct AppReadThreadRequest {
 
 impl From<AppReadThreadRequest> for upstream::ThreadReadParams {
     fn from(value: AppReadThreadRequest) -> Self {
-        Self { thread_id: value.thread_id, include_turns: value.include_turns }
+        Self {
+            thread_id: value.thread_id,
+            include_turns: value.include_turns,
+        }
     }
 }
 
@@ -528,7 +540,10 @@ pub struct AppInterruptTurnRequest {
 
 impl From<AppInterruptTurnRequest> for upstream::TurnInterruptParams {
     fn from(value: AppInterruptTurnRequest) -> Self {
-        Self { thread_id: value.thread_id, turn_id: value.turn_id }
+        Self {
+            thread_id: value.thread_id,
+            turn_id: value.turn_id,
+        }
     }
 }
 
@@ -592,7 +607,6 @@ impl TryFrom<AppStartTurnRequest> for upstream::TurnStartParams {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 #[derive(uniffi::Record)]
@@ -638,7 +652,8 @@ impl From<AppAppendRealtimeAudioRequest> for upstream::ThreadRealtimeAppendAudio
         Self {
             thread_id: value.thread_id,
             audio: upstream::ThreadRealtimeAudioChunk {
-                data: value.audio.data, sample_rate: value.audio.sample_rate,
+                data: value.audio.data,
+                sample_rate: value.audio.sample_rate,
                 num_channels: value.audio.num_channels as u16,
                 samples_per_channel: value.audio.samples_per_channel,
                 item_id: value.audio.item_id,
@@ -656,7 +671,10 @@ pub struct AppAppendRealtimeTextRequest {
 
 impl From<AppAppendRealtimeTextRequest> for upstream::ThreadRealtimeAppendTextParams {
     fn from(value: AppAppendRealtimeTextRequest) -> Self {
-        Self { thread_id: value.thread_id, text: value.text }
+        Self {
+            thread_id: value.thread_id,
+            text: value.text,
+        }
     }
 }
 
@@ -668,7 +686,9 @@ pub struct AppStopRealtimeSessionRequest {
 
 impl From<AppStopRealtimeSessionRequest> for upstream::ThreadRealtimeStopParams {
     fn from(value: AppStopRealtimeSessionRequest) -> Self {
-        Self { thread_id: value.thread_id }
+        Self {
+            thread_id: value.thread_id,
+        }
     }
 }
 
@@ -681,7 +701,10 @@ pub struct AppResolveRealtimeHandoffRequest {
 
 impl From<AppResolveRealtimeHandoffRequest> for upstream::ThreadRealtimeResolveHandoffParams {
     fn from(value: AppResolveRealtimeHandoffRequest) -> Self {
-        Self { thread_id: value.thread_id, tool_call_output: value.tool_call_output }
+        Self {
+            thread_id: value.thread_id,
+            tool_call_output: value.tool_call_output,
+        }
     }
 }
 
@@ -693,7 +716,9 @@ pub struct AppFinalizeRealtimeHandoffRequest {
 
 impl From<AppFinalizeRealtimeHandoffRequest> for upstream::ThreadRealtimeFinalizeHandoffParams {
     fn from(value: AppFinalizeRealtimeHandoffRequest) -> Self {
-        Self { thread_id: value.thread_id }
+        Self {
+            thread_id: value.thread_id,
+        }
     }
 }
 
@@ -717,7 +742,6 @@ impl TryFrom<AppStartReviewRequest> for upstream::ReviewStartParams {
         })
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
@@ -771,7 +795,11 @@ pub struct AppRefreshModelsRequest {
 
 impl From<AppRefreshModelsRequest> for upstream::ModelListParams {
     fn from(value: AppRefreshModelsRequest) -> Self {
-        Self { cursor: value.cursor, limit: value.limit, include_hidden: value.include_hidden }
+        Self {
+            cursor: value.cursor,
+            limit: value.limit,
+            include_hidden: value.include_hidden,
+        }
     }
 }
 
@@ -786,7 +814,10 @@ pub struct AppListExperimentalFeaturesRequest {
 
 impl From<AppListExperimentalFeaturesRequest> for upstream::ExperimentalFeatureListParams {
     fn from(value: AppListExperimentalFeaturesRequest) -> Self {
-        Self { cursor: value.cursor, limit: value.limit }
+        Self {
+            cursor: value.cursor,
+            limit: value.limit,
+        }
     }
 }
 
@@ -799,7 +830,9 @@ pub struct AppRefreshAccountRequest {
 
 impl From<AppRefreshAccountRequest> for upstream::GetAccountParams {
     fn from(value: AppRefreshAccountRequest) -> Self {
-        Self { refresh_token: value.refresh_token }
+        Self {
+            refresh_token: value.refresh_token,
+        }
     }
 }
 
@@ -814,7 +847,10 @@ pub struct AuthStatusRequest {
 
 impl From<AuthStatusRequest> for upstream::GetAuthStatusParams {
     fn from(value: AuthStatusRequest) -> Self {
-        Self { include_token: value.include_token, refresh_token: value.refresh_token }
+        Self {
+            include_token: value.include_token,
+            refresh_token: value.refresh_token,
+        }
     }
 }
 

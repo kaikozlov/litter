@@ -1,5 +1,6 @@
 package com.litter.android.ui.conversation
 
+import com.litter.android.state.displayTitle
 import uniffi.codex_mobile_client.AppOperationStatus
 import uniffi.codex_mobile_client.AppServerSnapshot
 import uniffi.codex_mobile_client.AppThreadSnapshot
@@ -44,6 +45,10 @@ data class ConversationStatistics(
                         lastWasUser = true
                     }
                     is HydratedConversationItemContent.Assistant -> {
+                        assistantMessages++
+                        lastWasUser = false
+                    }
+                    is HydratedConversationItemContent.CodeReview -> {
                         assistantMessages++
                         lastWasUser = false
                     }
@@ -108,8 +113,7 @@ data class ServerUsageData(
             // Token usage by thread
             val tokensByThread = threads.mapNotNull { thread ->
                 val tokens = thread.contextTokensUsed?.toLong() ?: return@mapNotNull null
-                val title = thread.info.title?.takeIf { it.isNotBlank() } ?: "Untitled"
-                title to tokens
+                thread.displayTitle to tokens
             }.sortedByDescending { it.second }
 
             // Activity by day — use created_at/updated_at timestamps

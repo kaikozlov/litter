@@ -320,6 +320,7 @@ enum LitterPreviewData {
                 createdAt: nil,
                 updatedAt: Int64(updatedAt.timeIntervalSince1970)
             ),
+            collaborationMode: .`default`,
             model: model,
             reasoningEffort: reasoningEffort,
             effectiveApprovalPolicy: nil,
@@ -327,6 +328,8 @@ enum LitterPreviewData {
             hydratedConversationItems: makeHydratedConversationItems(from: messages),
             queuedFollowUps: [],
             activeTurnId: status == .active ? "turn-preview" : nil,
+            activePlanProgress: nil,
+            pendingPlanImplementationPrompt: nil,
             contextTokensUsed: 156_000,
             modelContextWindow: 200_000,
             rateLimits: nil,

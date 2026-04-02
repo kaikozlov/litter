@@ -4,7 +4,7 @@ use crate::MobileClient;
 use crate::ffi::ClientError;
 use crate::ffi::shared::{blocking_async, shared_mobile_client, shared_runtime};
 use crate::store::{AppSnapshotRecord, AppStoreUpdateRecord, AppThreadSnapshot};
-use crate::types::{AppForkThreadFromMessageRequest, AppStartTurnRequest, ThreadKey};
+use crate::types::{AppForkThreadFromMessageRequest, AppModeKind, AppStartTurnRequest, ThreadKey};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -202,11 +202,7 @@ impl AppStore {
         &self,
         key: ThreadKey,
     ) -> Result<Option<AppThreadSnapshot>, ClientError> {
-        self.inner
-            .snapshot_thread(&key)
-            .ok()
-            .map(AppThreadSnapshot::try_from)
-            .transpose()
+        crate::store::project_thread_snapshot(&self.inner.app_snapshot(), &key)
             .map_err(ClientError::Serialization)
     }
 
@@ -216,12 +212,58 @@ impl AppStore {
         params: AppStartTurnRequest,
     ) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let params = params
-                .try_into()
-                .map_err(|error: crate::RpcClientError| {
-                    ClientError::Serialization(error.to_string())
-                })?;
+            let params = params.try_into().map_err(|error: crate::RpcClientError| {
+                ClientError::Serialization(error.to_string())
+            })?;
             c.start_turn(&key.server_id, params)
+                .await
+                .map_err(|e| ClientError::Rpc(e.to_string()))
+        })
+    }
+
+    pub async fn set_thread_collaboration_mode(
+        &self,
+        key: ThreadKey,
+        mode: AppModeKind,
+    ) -> Result<(), ClientError> {
+        blocking_async!(self.rt, self.inner, |c| {
+            c.set_thread_collaboration_mode(&key, mode)
+                .await
+                .map_err(|e| ClientError::Rpc(e.to_string()))
+        })
+    }
+
+    pub fn dismiss_plan_implementation_prompt(&self, key: ThreadKey) {
+        self.inner.dismiss_plan_implementation_prompt(&key);
+    }
+
+    pub async fn implement_plan(&self, key: ThreadKey) -> Result<(), ClientError> {
+        blocking_async!(self.rt, self.inner, |c| {
+            c.implement_plan(&key)
+                .await
+                .map_err(|e| ClientError::Rpc(e.to_string()))
+        })
+    }
+
+    pub async fn steer_queued_follow_up(
+        &self,
+        key: ThreadKey,
+        preview_id: String,
+    ) -> Result<(), ClientError> {
+        blocking_async!(self.rt, self.inner, |c| {
+            c.steer_queued_follow_up(&key, &preview_id)
+                .await
+                .map_err(|e| ClientError::Rpc(e.to_string()))
+        })
+    }
+
+    pub async fn delete_queued_follow_up(
+        &self,
+        key: ThreadKey,
+        preview_id: String,
+    ) -> Result<(), ClientError> {
+        blocking_async!(self.rt, self.inner, |c| {
+            c.delete_queued_follow_up(&key, &preview_id)
                 .await
                 .map_err(|e| ClientError::Rpc(e.to_string()))
         })
@@ -384,7 +426,10 @@ fn coalesce_ready_updates(
     }
 }
 
-fn merge_app_update(current: &mut AppStoreUpdateRecord, next: AppStoreUpdateRecord) -> Result<(), AppStoreUpdateRecord> {
+fn merge_app_update(
+    current: &mut AppStoreUpdateRecord,
+    next: AppStoreUpdateRecord,
+) -> Result<(), AppStoreUpdateRecord> {
     if matches!(current, AppStoreUpdateRecord::FullResync) {
         return Ok(());
     }

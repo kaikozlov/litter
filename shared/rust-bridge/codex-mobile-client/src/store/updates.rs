@@ -1,6 +1,6 @@
 use crate::conversation_uniffi::HydratedConversationItem;
-use crate::types::{PendingApproval, PendingUserInputRequest, ThreadKey};
 use crate::types::{AppOperationStatus, AppVoiceHandoffRequest, AppVoiceTranscriptUpdate};
+use crate::types::{PendingApproval, PendingUserInputRequest, ThreadKey};
 
 use super::boundary::{AppSessionSummary, AppThreadSnapshot, AppThreadStateRecord};
 

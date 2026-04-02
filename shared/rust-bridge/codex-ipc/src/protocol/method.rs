@@ -1,6 +1,13 @@
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MethodKind {
+    Handshake,
+    Request,
+    Broadcast,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Method {
     Initialize,
     ClientStatusChanged,
@@ -24,6 +31,30 @@ pub enum Method {
 }
 
 impl Method {
+    pub fn kind(&self) -> MethodKind {
+        match self {
+            Method::Initialize => MethodKind::Handshake,
+            Method::ClientStatusChanged
+            | Method::ThreadStreamStateChanged
+            | Method::ThreadArchived
+            | Method::ThreadUnarchived
+            | Method::ThreadQueuedFollowupsChanged
+            | Method::QueryCacheInvalidate => MethodKind::Broadcast,
+            Method::ExternalResumeThread
+            | Method::ThreadFollowerStartTurn
+            | Method::ThreadFollowerSteerTurn
+            | Method::ThreadFollowerInterruptTurn
+            | Method::ThreadFollowerSetModelAndReasoning
+            | Method::ThreadFollowerSetCollaborationMode
+            | Method::ThreadFollowerEditLastUserTurn
+            | Method::ThreadFollowerCommandApprovalDecision
+            | Method::ThreadFollowerFileApprovalDecision
+            | Method::ThreadFollowerSubmitUserInput
+            | Method::ThreadFollowerSubmitMcpServerElicitationResponse
+            | Method::ThreadFollowerSetQueuedFollowUpsState => MethodKind::Request,
+        }
+    }
+
     pub fn wire_name(&self) -> &'static str {
         match self {
             Method::Initialize => "initialize",
@@ -114,7 +145,7 @@ impl Method {
     }
 
     /// Returns all variants, useful for exhaustive iteration in tests.
-    fn all() -> &'static [Method] {
+    pub fn all() -> &'static [Method] {
         &[
             Method::Initialize,
             Method::ClientStatusChanged,
@@ -229,5 +260,17 @@ mod tests {
         for &m in Method::all() {
             assert_eq!(format!("{m}"), m.wire_name());
         }
+    }
+
+    #[test]
+    fn kind_map_completeness() {
+        assert_eq!(Method::Initialize.kind(), MethodKind::Handshake);
+        assert_eq!(Method::ExternalResumeThread.kind(), MethodKind::Request);
+        assert_eq!(Method::ThreadFollowerStartTurn.kind(), MethodKind::Request);
+        assert_eq!(
+            Method::ThreadQueuedFollowupsChanged.kind(),
+            MethodKind::Broadcast
+        );
+        assert_eq!(Method::QueryCacheInvalidate.kind(), MethodKind::Broadcast);
     }
 }

@@ -16,10 +16,16 @@ struct ToolCallCardView: View {
                     .litterFont(size: 12, weight: .semibold)
                     .foregroundColor(kindAccent)
 
-                Text(model.summary)
-                    .litterFont(.caption)
-                    .foregroundColor(LitterTheme.textSystem)
-                    .lineLimit(1)
+                if let attributedSummary = model.attributedSummary {
+                    Text(attributedSummary)
+                        .litterFont(.caption)
+                        .lineLimit(1)
+                } else {
+                    Text(model.summary)
+                        .litterFont(.caption)
+                        .foregroundColor(LitterTheme.textSystem)
+                        .lineLimit(1)
+                }
 
                 Spacer()
 

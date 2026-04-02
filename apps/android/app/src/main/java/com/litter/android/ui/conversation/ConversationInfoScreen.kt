@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.litter.android.state.connectionModeLabel
 import com.litter.android.state.contextPercent
+import com.litter.android.state.displayTitle
 import com.litter.android.state.resolvedModel
 import com.litter.android.state.statusColor
 import com.litter.android.state.statusLabel
@@ -325,7 +326,7 @@ private fun ThreadDetailsSection(thread: AppThreadSnapshot?) {
             .padding(16.dp),
     ) {
         Text(
-            text = thread?.info?.title?.takeIf { it.isNotBlank() } ?: "Untitled",
+            text = thread?.displayTitle ?: "Untitled session",
             color = LitterTheme.textPrimary,
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold,

@@ -26,6 +26,31 @@ struct ConversationAssistantMessageData: Equatable {
     var phase: AppMessagePhase?
 }
 
+struct ConversationCodeReviewLineRange: Equatable {
+    var start: Int
+    var end: Int
+}
+
+struct ConversationCodeReviewLocation: Equatable {
+    var absoluteFilePath: String
+    var lineRange: ConversationCodeReviewLineRange?
+}
+
+struct ConversationCodeReviewFinding: Equatable {
+    var title: String
+    var body: String
+    var confidenceScore: Double
+    var priority: Int?
+    var codeLocation: ConversationCodeReviewLocation?
+}
+
+struct ConversationCodeReviewData: Equatable {
+    var findings: [ConversationCodeReviewFinding]
+    var overallCorrectness: String?
+    var overallExplanation: String?
+    var overallConfidenceScore: Double?
+}
+
 struct ConversationReasoningData: Equatable {
     var summary: [String]
     var content: [String]
@@ -78,6 +103,8 @@ struct ConversationFileChangeEntry: Equatable {
     var path: String
     var kind: String
     var diff: String
+    var additions: Int
+    var deletions: Int
 }
 
 struct ConversationFileChangeData: Equatable {
@@ -195,6 +222,7 @@ struct ConversationNoteData: Equatable {
 enum ConversationItemContent: Equatable {
     case user(ConversationUserMessageData)
     case assistant(ConversationAssistantMessageData)
+    case codeReview(ConversationCodeReviewData)
     case reasoning(ConversationReasoningData)
     case todoList(ConversationTodoListData)
     case proposedPlan(ConversationProposedPlanData)
@@ -305,6 +333,24 @@ struct ConversationItem: Identifiable, Equatable {
         return data.isPureExploration
     }
 
+    var isVisuallyEmptyNeutralItem: Bool {
+        switch content {
+        case .assistant(let data):
+            let textIsEmpty = data.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let nicknameIsEmpty = data.agentNickname?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true
+            let roleIsEmpty = data.agentRole?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true
+            return textIsEmpty && nicknameIsEmpty && roleIsEmpty
+        case .codeReview(let data):
+            return data.findings.isEmpty
+        case .reasoning(let data):
+            return (data.summary + data.content).allSatisfy {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        default:
+            return false
+        }
+    }
+
     var widgetState: WidgetState? {
         if case .widget(let data) = content {
             return data.widgetState
@@ -348,7 +394,7 @@ struct ConversationItem: Identifiable, Equatable {
             hasher.combine(data.text)
             hasher.combine(data.images.count)
             for image in data.images {
-                hasher.combine(image.data)
+                hasher.combine(image.cacheKey)
             }
         case .assistant(let data):
             hasher.combine("assistant")
@@ -356,6 +402,20 @@ struct ConversationItem: Identifiable, Equatable {
             hasher.combine(data.agentNickname)
             hasher.combine(data.agentRole)
             hasher.combine(data.phase)
+        case .codeReview(let data):
+            hasher.combine("codeReview")
+            hasher.combine(data.overallCorrectness)
+            hasher.combine(data.overallExplanation)
+            hasher.combine(data.overallConfidenceScore)
+            for finding in data.findings {
+                hasher.combine(finding.title)
+                hasher.combine(finding.body)
+                hasher.combine(finding.confidenceScore)
+                hasher.combine(finding.priority)
+                hasher.combine(finding.codeLocation?.absoluteFilePath)
+                hasher.combine(finding.codeLocation?.lineRange?.start)
+                hasher.combine(finding.codeLocation?.lineRange?.end)
+            }
         case .reasoning(let data):
             hasher.combine("reasoning")
             hasher.combine(data.summary)
@@ -511,7 +571,7 @@ private extension HydratedConversationItemContent {
     func conversationItemContent(itemId: String) -> ConversationItemContent {
         switch self {
         case .user(let data):
-            let images = data.imageDataUris.compactMap(decodeBase64DataURI(_:)).map { ChatImage(data: $0) }
+            let images = data.imageDataUris.map(ChatImage.init(source:))
             return .user(ConversationUserMessageData(text: data.text, images: images))
         case .assistant(let data):
             return .assistant(
@@ -520,6 +580,33 @@ private extension HydratedConversationItemContent {
                     agentNickname: data.agentNickname,
                     agentRole: data.agentRole,
                     phase: data.phase
+                )
+            )
+        case .codeReview(let data):
+            return .codeReview(
+                ConversationCodeReviewData(
+                    findings: data.findings.map {
+                        ConversationCodeReviewFinding(
+                            title: $0.title,
+                            body: $0.body,
+                            confidenceScore: $0.confidenceScore,
+                            priority: $0.priority.map(Int.init),
+                            codeLocation: $0.codeLocation.map {
+                                ConversationCodeReviewLocation(
+                                    absoluteFilePath: $0.absoluteFilePath,
+                                    lineRange: $0.lineRange.map {
+                                        ConversationCodeReviewLineRange(
+                                            start: Int($0.start),
+                                            end: Int($0.end)
+                                        )
+                                    }
+                                )
+                            }
+                        )
+                    },
+                    overallCorrectness: data.overallCorrectness,
+                    overallExplanation: data.overallExplanation,
+                    overallConfidenceScore: data.overallConfidenceScore
                 )
             )
         case .reasoning(let data):
@@ -560,7 +647,13 @@ private extension HydratedConversationItemContent {
                 ConversationFileChangeData(
                     status: data.status,
                     changes: data.changes.map {
-                        ConversationFileChangeEntry(path: $0.path, kind: $0.kind, diff: $0.diff)
+                        ConversationFileChangeEntry(
+                            path: $0.path,
+                            kind: $0.kind,
+                            diff: $0.diff,
+                            additions: Int($0.additions),
+                            deletions: Int($0.deletions)
+                        )
                     },
                     outputDelta: nil
                 )
@@ -687,17 +780,4 @@ private extension HydratedConversationItemContent {
             return .note(ConversationNoteData(title: data.title, body: data.body))
         }
     }
-}
-
-private func decodeBase64DataURI(_ uri: String) -> Data? {
-    guard uri.hasPrefix("data:") else {
-        if uri.hasPrefix("file://") {
-            let path = String(uri.dropFirst("file://".count))
-            return FileManager.default.contents(atPath: path)
-        }
-        return nil
-    }
-    guard let commaIndex = uri.firstIndex(of: ",") else { return nil }
-    let base64 = String(uri[uri.index(after: commaIndex)...])
-    return Data(base64Encoded: base64, options: .ignoreUnknownCharacters)
 }

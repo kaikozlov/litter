@@ -596,11 +596,14 @@ class AppModel private constructor(context: android.content.Context) {
         val existingThread = current.threads[existingThreadIndex]
         val updatedThread = existingThread.copy(
             info = state.info,
+            collaborationMode = state.collaborationMode,
             model = state.model,
             reasoningEffort = state.reasoningEffort,
             effectiveApprovalPolicy = state.effectiveApprovalPolicy,
             effectiveSandboxPolicy = state.effectiveSandboxPolicy,
             activeTurnId = state.activeTurnId,
+            activePlanProgress = state.activePlanProgress,
+            pendingPlanImplementationPrompt = state.pendingPlanImplementationPrompt,
             contextTokensUsed = state.contextTokensUsed,
             modelContextWindow = state.modelContextWindow,
             rateLimits = state.rateLimits,

@@ -117,7 +117,7 @@ struct ConversationInfoView: View {
                 Circle()
                     .fill(statusColor)
                     .frame(width: 10, height: 10)
-                Text(thread?.info.title ?? "Untitled")
+                Text(thread?.displayTitle ?? "Untitled session")
                     .litterFont(size: 22, weight: .bold)
                     .foregroundStyle(LitterTheme.textPrimary)
                     .lineLimit(2)

@@ -372,7 +372,7 @@ private struct ConversationMessageList: View {
     @State private var pendingRichRenderPromotion: DispatchWorkItem?
     @AppStorage("collapseTurns") private var collapseTurns = false
     private var expandedRecentTurnCount: Int {
-        collapseTurns ? 1 : .max
+        return collapseTurns ? 1 : .max
     }
 
     private var lastTurnIsUserOnly: Bool {
@@ -424,7 +424,7 @@ private struct ConversationMessageList: View {
     }
 
     private var renderedTurns: [TranscriptTurn] {
-        mergeConsecutiveExplorationTurns(in: displayedTurns)
+        TranscriptTurn.mergeConsecutiveExplorationTurnsForRendering(displayedTurns)
     }
 
     var body: some View {
@@ -534,6 +534,17 @@ private struct ConversationMessageList: View {
                         if !isStreaming || oldItems.count != newItems.count {
                             syncRichRenderedTurns()
                         }
+                        if oldItems.isEmpty && !newItems.isEmpty {
+                            autoFollowStreaming = true
+                            userIsDraggingScroll = false
+                            scheduleScrollToBottom(
+                                proxy,
+                                delay: 0.02,
+                                force: true,
+                                replacePending: true,
+                                animation: nil
+                            )
+                        }
                     }
                     .onChange(of: collapseTurns) {
                         syncTranscriptTurns(resetExpansion: true)
@@ -545,7 +556,7 @@ private struct ConversationMessageList: View {
                             proxy,
                             delay: 0.01,
                             replacePending: true,
-                            animation: nil
+                            animation: .easeOut(duration: 0.16)
                         )
                     }
                     .onChange(of: threadStatus) {
@@ -575,7 +586,7 @@ private struct ConversationMessageList: View {
                             proxy,
                             delay: 0.02,
                             replacePending: false,
-                            animation: nil
+                            animation: .easeOut(duration: 0.16)
                         )
                     }
                     .onDisappear {
@@ -766,7 +777,6 @@ private struct ConversationMessageList: View {
             )
         } completion: {
             let turnsToInsert = pendingAnimatedTurns ?? collapsedTurns
-            let newTurnID = turnsToInsert.last?.id
             withAnimation(.smooth(duration: 0.2)) {
                 applyTranscriptTurns(turnsToInsert)
             } completion: {
@@ -874,50 +884,6 @@ private struct ConversationMessageList: View {
         }
     }
 
-    private func mergeConsecutiveExplorationTurns(
-        in turns: [TranscriptTurn]
-    ) -> [TranscriptTurn] {
-        var merged: [TranscriptTurn] = []
-        var explorationBuffer: [TranscriptTurn] = []
-
-        func flushExplorationBuffer() {
-            guard !explorationBuffer.isEmpty else { return }
-            if explorationBuffer.count == 1, let single = explorationBuffer.first {
-                merged.append(single)
-            } else if let first = explorationBuffer.first {
-                let items = explorationBuffer.flatMap(\.items)
-                var hasher = Hasher()
-                hasher.combine(items.count)
-                for item in items {
-                    hasher.combine(item.id)
-                    hasher.combine(item.renderDigest)
-                }
-                merged.append(
-                    TranscriptTurn(
-                        id: "exploration-turn-\(first.id)",
-                        items: items,
-                        preview: first.preview,
-                        isLive: explorationBuffer.contains(where: \.isLive),
-                        isCollapsedByDefault: false,
-                        renderDigest: hasher.finalize()
-                    )
-                )
-            }
-            explorationBuffer.removeAll(keepingCapacity: true)
-        }
-
-        for turn in turns {
-            if turn.items.allSatisfy(\.isExplorationCommandItem) {
-                explorationBuffer.append(turn)
-            } else {
-                flushExplorationBuffer()
-                merged.append(turn)
-            }
-        }
-
-        flushExplorationBuffer()
-        return merged
-    }
 }
 
 private struct ConversationTurnRow: View {
@@ -1225,6 +1191,7 @@ private struct ConversationInputBar: View {
     @State private var fileSearchGeneration = 0
     @State private var fileSearchTask: Task<Void, Never>?
     @State private var popupRefreshTask: Task<Void, Never>?
+    @State private var showCollaborationModeSelector = false
     @State private var showModelSelector = false
     @State private var showPermissionsSheet = false
     @State private var showExperimentalSheet = false
@@ -1235,6 +1202,8 @@ private struct ConversationInputBar: View {
     @State private var slashErrorMessage: String?
     @State private var experimentalFeatures: [ExperimentalFeature] = []
     @State private var experimentalFeaturesLoading = false
+    @State private var collaborationModePresets: [AppCollaborationModePreset] = []
+    @State private var collaborationModesLoading = false
     @State private var skills: [SkillMetadata] = []
     @State private var skillsLoading = false
     @State private var mentionSkillPathsByName: [String: String] = [:]
@@ -1320,6 +1289,41 @@ private struct ConversationInputBar: View {
         ) {
             composerSurface
         }
+        .sheet(isPresented: $showCollaborationModeSelector) {
+            CollaborationModeSelectorSheet(
+                presets: collaborationModePresets.isEmpty ? fallbackCollaborationModePresets : collaborationModePresets,
+                selectedMode: snapshot.collaborationMode,
+                isLoading: collaborationModesLoading,
+                onSelect: { mode in
+                    showCollaborationModeSelector = false
+                    Task { await setCollaborationMode(mode) }
+                }
+            )
+            .presentationDetents([.height(220)])
+            .presentationDragIndicator(.visible)
+            .task {
+                await loadCollaborationModes()
+            }
+        }
+        .alert(
+            "Implement this plan?",
+            isPresented: Binding(
+                get: { snapshot.pendingPlanImplementationPrompt != nil },
+                set: { presented in
+                    guard !presented else { return }
+                    dismissPlanImplementationPrompt()
+                }
+            )
+        ) {
+            Button("No, stay in Plan mode", role: .cancel) {
+                dismissPlanImplementationPrompt()
+            }
+            Button("Yes, implement this plan") {
+                Task { await implementPlan() }
+            }
+        } message: {
+            Text("Switch back to Default mode and send “Implement the plan.”")
+        }
         .onChange(of: inputText) { _, next in
             scheduleComposerPopupRefresh(for: next)
         }
@@ -1355,7 +1359,10 @@ private struct ConversationInputBar: View {
         VStack(spacing: 0) {
             ConversationComposerContentView(
                 attachedImage: attachedImage,
+                collaborationMode: snapshot.collaborationMode,
+                activePlanProgress: snapshot.activePlanProgress,
                 pendingUserInputRequest: pendingUserInputRequest,
+                activeTaskSummary: snapshot.activeTaskSummary,
                 queuedFollowUps: snapshot.queuedFollowUps,
                 rateLimits: snapshot.rateLimits,
                 contextPercent: contextPercent(),
@@ -1364,7 +1371,10 @@ private struct ConversationInputBar: View {
                 showAttachMenu: $showAttachMenu,
                 onClearAttachment: clearAttachment,
                 onRespondToPendingUserInput: respondToPendingUserInput,
+                onSteerQueuedFollowUp: steerQueuedFollowUp,
+                onDeleteQueuedFollowUp: deleteQueuedFollowUp,
                 onPasteImage: { image in attachedImage = image },
+                onOpenModePicker: openCollaborationModePicker,
                 onSendText: handleSend,
                 onStopRecording: stopVoiceRecording,
                 onStartRecording: startVoiceRecording,
@@ -1410,6 +1420,32 @@ private struct ConversationInputBar: View {
                 try await appModel.store.respondToUserInput(
                     requestId: pendingUserInputRequest.id,
                     answers: payload
+                )
+            } catch {
+                slashErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func steerQueuedFollowUp(_ preview: AppQueuedFollowUpPreview) {
+        Task {
+            do {
+                try await appModel.store.steerQueuedFollowUp(
+                    key: snapshot.threadKey,
+                    previewId: preview.id
+                )
+            } catch {
+                slashErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func deleteQueuedFollowUp(_ preview: AppQueuedFollowUpPreview) {
+        Task {
+            do {
+                try await appModel.store.deleteQueuedFollowUp(
+                    key: snapshot.threadKey,
+                    previewId: preview.id
                 )
             } catch {
                 slashErrorMessage = error.localizedDescription
@@ -1495,6 +1531,63 @@ private struct ConversationInputBar: View {
             attachedImage = image
         }
         selectedPhoto = nil
+    }
+
+    private var fallbackCollaborationModePresets: [AppCollaborationModePreset] {
+        [
+            AppCollaborationModePreset(
+                kind: .`default`,
+                name: "Default",
+                model: nil,
+                reasoningEffort: nil
+            ),
+            AppCollaborationModePreset(
+                kind: .plan,
+                name: "Plan",
+                model: nil,
+                reasoningEffort: .medium
+            )
+        ]
+    }
+
+    private func openCollaborationModePicker() {
+        showCollaborationModeSelector = true
+    }
+
+    private func loadCollaborationModes() async {
+        guard !collaborationModesLoading else { return }
+        collaborationModesLoading = true
+        defer { collaborationModesLoading = false }
+        do {
+            collaborationModePresets = try await appModel.client.listCollaborationModes(
+                serverId: snapshot.threadKey.serverId
+            )
+        } catch {
+            collaborationModePresets = fallbackCollaborationModePresets
+        }
+    }
+
+    private func setCollaborationMode(_ mode: AppModeKind) async {
+        do {
+            try await appModel.store.setThreadCollaborationMode(
+                key: snapshot.threadKey,
+                mode: mode
+            )
+        } catch {
+            slashErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func dismissPlanImplementationPrompt() {
+        appModel.store.dismissPlanImplementationPrompt(key: snapshot.threadKey)
+    }
+
+    private func implementPlan() async {
+        do {
+            try await appModel.store.implementPlan(key: snapshot.threadKey)
+        } catch {
+            slashErrorMessage = error.localizedDescription
+        }
     }
 
 
@@ -1719,6 +1812,8 @@ private struct ConversationInputBar: View {
 
     private func executeSlashCommand(_ command: ComposerSlashCommand, args: String?) {
         switch command {
+        case .plan:
+            openCollaborationModePicker()
         case .model:
             showModelSelector = true
         case .permissions:
@@ -2010,7 +2105,75 @@ private struct ConversationInputBar: View {
     }
 }
 
+private struct CollaborationModeSelectorSheet: View {
+    let presets: [AppCollaborationModePreset]
+    let selectedMode: AppModeKind
+    let isLoading: Bool
+    let onSelect: (AppModeKind) -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if isLoading && presets.isEmpty {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Loading modes…")
+                            .litterFont(.body)
+                            .foregroundStyle(LitterTheme.textSecondary)
+                    }
+                    .listRowBackground(LitterTheme.surface)
+                }
+
+                ForEach(presets, id: \.kind) { preset in
+                    Button(action: { onSelect(preset.kind) }) {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(preset.name)
+                                    .litterFont(.body, weight: .semibold)
+                                    .foregroundStyle(LitterTheme.textPrimary)
+                                if let reasoningEffort = preset.reasoningEffort {
+                                    Text(collaborationModeEffortLabel(reasoningEffort))
+                                        .litterFont(.caption)
+                                        .foregroundStyle(LitterTheme.textSecondary)
+                                }
+                            }
+                            Spacer()
+                            if preset.kind == selectedMode {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(LitterTheme.accent)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(LitterTheme.surface)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(LitterTheme.surface)
+            .navigationTitle("Collaboration Mode")
+        }
+    }
+}
+
+private func collaborationModeEffortLabel(_ effort: ReasoningEffort) -> String {
+    switch effort {
+    case .none:
+        return "None"
+    case .minimal:
+        return "Minimal"
+    case .low:
+        return "Low"
+    case .medium:
+        return "Medium"
+    case .high:
+        return "High"
+    case .xHigh:
+        return "XHigh"
+    }
+}
+
 enum ComposerSlashCommand: CaseIterable {
+    case plan
     case model
     case permissions
     case experimental
@@ -2023,6 +2186,7 @@ enum ComposerSlashCommand: CaseIterable {
 
     var rawValue: String {
         switch self {
+        case .plan: return "plan"
         case .model: return "model"
         case .permissions: return "permissions"
         case .experimental: return "experimental"
@@ -2037,6 +2201,7 @@ enum ComposerSlashCommand: CaseIterable {
 
     var description: String {
         switch self {
+        case .plan: return "switch collaboration mode"
         case .model: return "choose what model and reasoning effort to use"
         case .permissions: return "choose what Codex is allowed to do"
         case .experimental: return "toggle experimental features"
@@ -2051,6 +2216,7 @@ enum ComposerSlashCommand: CaseIterable {
 
     init?(rawCommand: String) {
         switch rawCommand.lowercased() {
+        case "plan", "mode", "collab": self = .plan
         case "model": self = .model
         case "permissions": self = .permissions
         case "experimental": self = .experimental
@@ -2530,33 +2696,129 @@ struct PendingUserInputPromptView: View {
 
 struct QueuedFollowUpsPreviewView: View {
     let previews: [AppQueuedFollowUpPreview]
+    let onSteer: (AppQueuedFollowUpPreview) -> Void
+    let onDelete: (AppQueuedFollowUpPreview) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(LitterTheme.accent)
-                Text(previews.count == 1 ? "Queued Follow-Up" : "Queued Follow-Ups")
+                Text("Queued Next")
                     .litterFont(.caption, weight: .semibold)
                     .foregroundColor(LitterTheme.textPrimary)
                 Spacer()
+                Text("\(previews.count)")
+                    .litterFont(.caption2, weight: .semibold)
+                    .foregroundColor(LitterTheme.textSecondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(LitterTheme.surface.opacity(0.9))
+                    .clipShape(Capsule())
             }
 
             ForEach(previews, id: \.id) { preview in
-                Text(preview.text)
-                    .litterFont(.caption)
-                    .foregroundColor(LitterTheme.textSecondary)
-                    .lineLimit(3)
+                let style = QueuedFollowUpPreviewStyle.forKind(preview.kind)
+
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 6) {
+                            Image(systemName: style.symbol)
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(style.title)
+                                .litterFont(.caption2, weight: .semibold)
+                        }
+                        .foregroundColor(style.tint)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(style.tint.opacity(0.14))
+                        .clipShape(Capsule())
+
+                        Text(preview.text)
+                            .litterFont(.caption)
+                            .foregroundColor(LitterTheme.textSecondary)
+                            .lineLimit(4)
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(LitterTheme.surface.opacity(0.82))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                    if preview.kind == .message {
+                        Button(action: { onSteer(preview) }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.turn.down.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Steer")
+                                    .litterFont(.caption, weight: .semibold)
+                            }
+                            .foregroundColor(LitterTheme.textPrimary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(LitterTheme.surface.opacity(0.96))
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Button(action: { onDelete(preview) }) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(LitterTheme.textSecondary)
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(12)
+                .background(style.background)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(style.border, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 14))
             }
         }
         .padding(12)
         .background(LitterTheme.codeBackground.opacity(0.92))
         .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+private struct QueuedFollowUpPreviewStyle {
+    let title: String
+    let symbol: String
+    let tint: Color
+    let background: Color
+    let border: Color
+
+    static func forKind(_ kind: AppQueuedFollowUpKind) -> Self {
+        switch kind {
+        case .message:
+            let tint = LitterTheme.accent
+            return Self(
+                title: "Queued message",
+                symbol: "text.bubble.fill",
+                tint: tint,
+                background: tint.opacity(0.08),
+                border: tint.opacity(0.24)
+            )
+        case .pendingSteer:
+            let tint = LitterTheme.accentStrong
+            return Self(
+                title: "Steer queued",
+                symbol: "arrowshape.turn.up.right.fill",
+                tint: tint,
+                background: tint.opacity(0.10),
+                border: tint.opacity(0.28)
+            )
+        case .retryingSteer:
+            let tint = LitterTheme.warning
+            return Self(
+                title: "Retrying steer",
+                symbol: "arrow.clockwise",
+                tint: tint,
+                background: tint.opacity(0.10),
+                border: tint.opacity(0.28)
+            )
+        }
     }
 }
 

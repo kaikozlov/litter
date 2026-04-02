@@ -156,7 +156,7 @@ static NSString *codex_ios_normalize_shell_command(const char *cmd) {
             if ([command hasPrefix:prefix]) {
                 NSString *body = [command substringFromIndex:prefix.length];
                 NSString *decoded = codex_ios_decode_wrapped_shell_argument(body);
-                if (decoded.length > 0 && ([decoded hasPrefix:@"sh -c "] || [decoded isEqualToString:@"sh"])) {
+                if (decoded.length > 0) {
                     command = decoded;
                 } else {
                     command = [@"sh -c " stringByAppendingString:body];
@@ -172,7 +172,7 @@ static NSString *codex_ios_normalize_shell_command(const char *cmd) {
         if ([command hasPrefix:@"sh -c "]) {
             NSString *body = [command substringFromIndex:6];
             NSString *decoded = codex_ios_decode_wrapped_shell_argument(body);
-            if (decoded.length > 0 && ([decoded hasPrefix:@"sh -c "] || [decoded isEqualToString:@"sh"])) {
+            if (decoded.length > 0) {
                 command = decoded;
                 changed = YES;
                 continue;

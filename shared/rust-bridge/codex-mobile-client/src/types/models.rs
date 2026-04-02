@@ -10,7 +10,7 @@
 use codex_app_server_protocol as upstream;
 use serde::{Deserialize, Serialize};
 
-use super::enums::ThreadSummaryStatus;
+use super::enums::{AppModeKind, AppPlanStepStatus, ThreadSummaryStatus};
 use crate::RpcClientError;
 
 // ── AbsolutePath conversions ─────────────────────────────────────────────
@@ -188,6 +188,73 @@ impl From<codex_protocol::account::PlanType> for PlanType {
 pub struct ThreadKey {
     pub server_id: String,
     pub thread_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, uniffi::Record)]
+#[serde(rename_all = "camelCase")]
+pub struct AppCollaborationModePreset {
+    pub kind: AppModeKind,
+    pub name: String,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, uniffi::Record)]
+#[serde(rename_all = "camelCase")]
+pub struct AppPlanStep {
+    pub step: String,
+    pub status: AppPlanStepStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, uniffi::Record)]
+#[serde(rename_all = "camelCase")]
+pub struct AppPlanProgressSnapshot {
+    pub turn_id: String,
+    pub explanation: Option<String>,
+    pub plan: Vec<AppPlanStep>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, uniffi::Record)]
+#[serde(rename_all = "camelCase")]
+pub struct AppPlanImplementationPromptSnapshot {
+    pub source_turn_id: String,
+}
+
+impl TryFrom<codex_protocol::config_types::ModeKind> for AppModeKind {
+    type Error = String;
+
+    fn try_from(value: codex_protocol::config_types::ModeKind) -> Result<Self, Self::Error> {
+        match value {
+            codex_protocol::config_types::ModeKind::Default => Ok(Self::Default),
+            codex_protocol::config_types::ModeKind::Plan => Ok(Self::Plan),
+            other => Err(format!("unsupported collaboration mode: {:?}", other)),
+        }
+    }
+}
+
+impl TryFrom<upstream::CollaborationModeMask> for AppCollaborationModePreset {
+    type Error = String;
+
+    fn try_from(value: upstream::CollaborationModeMask) -> Result<Self, Self::Error> {
+        let mode = value
+            .mode
+            .ok_or_else(|| "collaboration mode preset missing mode kind".to_string())?;
+        Ok(Self {
+            kind: mode.try_into()?,
+            name: value.name,
+            model: value.model,
+            reasoning_effort: value.reasoning_effort.flatten().map(Into::into),
+        })
+    }
+}
+
+impl From<upstream::TurnPlanStep> for AppPlanStep {
+    fn from(value: upstream::TurnPlanStep) -> Self {
+        Self {
+            step: value.step,
+            status: value.status.into(),
+        }
+    }
 }
 
 /// Rate limit information from the server.

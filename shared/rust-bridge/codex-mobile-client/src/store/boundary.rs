@@ -1,12 +1,15 @@
 use std::hash::{Hash, Hasher};
 
 use crate::conversation_uniffi::HydratedConversationItem;
-use crate::types::{PendingApproval, PendingUserInputRequest, ThreadInfo, ThreadKey};
 use crate::types::AppSubagentStatus;
+use crate::types::{
+    AppModeKind, AppPlanImplementationPromptSnapshot, AppPlanProgressSnapshot, PendingApproval,
+    PendingUserInputRequest, ThreadInfo, ThreadKey,
+};
 
 use super::snapshot::{
-    AppSnapshot, AppQueuedFollowUpPreview, AppConnectionProgressSnapshot, ServerHealthSnapshot,
-    ServerSnapshot, ThreadSnapshot, AppVoiceSessionSnapshot,
+    AppConnectionProgressSnapshot, AppQueuedFollowUpPreview, AppSnapshot, AppVoiceSessionSnapshot,
+    ServerHealthSnapshot, ServerSnapshot, ThreadSnapshot,
 };
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -38,6 +41,7 @@ pub enum AppServerHealth {
 pub struct AppThreadSnapshot {
     pub key: ThreadKey,
     pub info: ThreadInfo,
+    pub collaboration_mode: AppModeKind,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub effective_approval_policy: Option<crate::types::AppAskForApproval>,
@@ -45,6 +49,8 @@ pub struct AppThreadSnapshot {
     pub hydrated_conversation_items: Vec<HydratedConversationItem>,
     pub queued_follow_ups: Vec<AppQueuedFollowUpPreview>,
     pub active_turn_id: Option<String>,
+    pub active_plan_progress: Option<AppPlanProgressSnapshot>,
+    pub pending_plan_implementation_prompt: Option<AppPlanImplementationPromptSnapshot>,
     pub context_tokens_used: Option<u64>,
     pub model_context_window: Option<u64>,
     pub rate_limits: Option<crate::types::RateLimits>,
@@ -55,83 +61,19 @@ pub struct AppThreadSnapshot {
 pub struct AppThreadStateRecord {
     pub key: ThreadKey,
     pub info: ThreadInfo,
+    pub collaboration_mode: AppModeKind,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub effective_approval_policy: Option<crate::types::AppAskForApproval>,
     pub effective_sandbox_policy: Option<crate::types::AppSandboxPolicy>,
     pub queued_follow_ups: Vec<AppQueuedFollowUpPreview>,
     pub active_turn_id: Option<String>,
+    pub active_plan_progress: Option<AppPlanProgressSnapshot>,
+    pub pending_plan_implementation_prompt: Option<AppPlanImplementationPromptSnapshot>,
     pub context_tokens_used: Option<u64>,
     pub model_context_window: Option<u64>,
     pub rate_limits: Option<crate::types::RateLimits>,
     pub realtime_session_id: Option<String>,
-}
-
-impl TryFrom<super::snapshot::ThreadSnapshot> for AppThreadSnapshot {
-    type Error = String;
-
-    fn try_from(thread: super::snapshot::ThreadSnapshot) -> Result<Self, Self::Error> {
-        (&thread).try_into()
-    }
-}
-
-impl TryFrom<&super::snapshot::ThreadSnapshot> for AppThreadSnapshot {
-    type Error = String;
-
-    fn try_from(thread: &super::snapshot::ThreadSnapshot) -> Result<Self, Self::Error> {
-        let hydrated_conversation_items =
-            merged_hydrated_items(&thread.items, &thread.local_overlay_items);
-        Ok(Self {
-            key: thread.key.clone(),
-            info: thread.info.clone(),
-            model: thread.model.clone(),
-            reasoning_effort: thread.reasoning_effort.clone(),
-            effective_approval_policy: thread.effective_approval_policy.clone(),
-            effective_sandbox_policy: thread.effective_sandbox_policy.clone(),
-            hydrated_conversation_items,
-            queued_follow_ups: thread
-                .queued_follow_ups
-                .iter()
-                .map(|preview| AppQueuedFollowUpPreview {
-                    id: preview.id.clone(),
-                    text: preview.text.clone(),
-                })
-                .collect(),
-            active_turn_id: thread.active_turn_id.clone(),
-            context_tokens_used: thread.context_tokens_used,
-            model_context_window: thread.model_context_window,
-            rate_limits: thread.rate_limits.clone(),
-            realtime_session_id: thread.realtime_session_id.clone(),
-        })
-    }
-}
-
-impl TryFrom<&super::snapshot::ThreadSnapshot> for AppThreadStateRecord {
-    type Error = String;
-
-    fn try_from(thread: &super::snapshot::ThreadSnapshot) -> Result<Self, Self::Error> {
-        Ok(Self {
-            key: thread.key.clone(),
-            info: thread.info.clone(),
-            model: thread.model.clone(),
-            reasoning_effort: thread.reasoning_effort.clone(),
-            effective_approval_policy: thread.effective_approval_policy.clone(),
-            effective_sandbox_policy: thread.effective_sandbox_policy.clone(),
-            queued_follow_ups: thread
-                .queued_follow_ups
-                .iter()
-                .map(|preview| AppQueuedFollowUpPreview {
-                    id: preview.id.clone(),
-                    text: preview.text.clone(),
-                })
-                .collect(),
-            active_turn_id: thread.active_turn_id.clone(),
-            context_tokens_used: thread.context_tokens_used,
-            model_context_window: thread.model_context_window,
-            rate_limits: thread.rate_limits.clone(),
-            realtime_session_id: thread.realtime_session_id.clone(),
-        })
-    }
 }
 
 fn merged_hydrated_items(
@@ -141,7 +83,8 @@ fn merged_hydrated_items(
     let mut merged = Vec::with_capacity(items.len() + local_overlay_items.len());
     merged.extend(items.iter().cloned().map(Into::into));
 
-    let mut selected_overlays: Vec<&crate::conversation_uniffi::HydratedConversationItem> = Vec::new();
+    let mut selected_overlays: Vec<&crate::conversation_uniffi::HydratedConversationItem> =
+        Vec::new();
     for overlay in local_overlay_items {
         if items
             .iter()
@@ -167,8 +110,12 @@ fn same_overlay_semantics(
 
     match (&lhs.content, &rhs.content) {
         (
-            crate::conversation_uniffi::HydratedConversationItemContent::UserInputResponse(lhs_data),
-            crate::conversation_uniffi::HydratedConversationItemContent::UserInputResponse(rhs_data),
+            crate::conversation_uniffi::HydratedConversationItemContent::UserInputResponse(
+                lhs_data,
+            ),
+            crate::conversation_uniffi::HydratedConversationItemContent::UserInputResponse(
+                rhs_data,
+            ),
         ) => lhs.source_turn_id == rhs.source_turn_id && lhs_data == rhs_data,
         _ => false,
     }
@@ -216,7 +163,8 @@ impl TryFrom<AppSnapshot> for AppSnapshotRecord {
 
         let mut servers = snapshot
             .servers
-            .into_values()
+            .values()
+            .cloned()
             .map(|server| AppServerSnapshot {
                 server_id: server.server_id,
                 display_name: server.display_name,
@@ -237,7 +185,7 @@ impl TryFrom<AppSnapshot> for AppSnapshotRecord {
         let mut threads = snapshot
             .threads
             .values()
-            .map(AppThreadSnapshot::try_from)
+            .map(|thread| app_thread_snapshot_from_state(&snapshot, thread))
             .collect::<Result<Vec<_>, String>>()?;
         threads.sort_by(|lhs, rhs| lhs.key.thread_id.cmp(&rhs.key.thread_id));
 
@@ -252,6 +200,91 @@ impl TryFrom<AppSnapshot> for AppSnapshotRecord {
             voice_session: snapshot.voice_session,
         })
     }
+}
+
+fn app_thread_snapshot_from_state(
+    snapshot: &AppSnapshot,
+    thread: &ThreadSnapshot,
+) -> Result<AppThreadSnapshot, String> {
+    let hydrated_conversation_items =
+        merged_hydrated_items(&thread.items, &thread.local_overlay_items);
+    Ok(AppThreadSnapshot {
+        key: thread.key.clone(),
+        info: thread.info.clone(),
+        collaboration_mode: thread.collaboration_mode,
+        model: thread.model.clone(),
+        reasoning_effort: thread.reasoning_effort.clone(),
+        effective_approval_policy: thread.effective_approval_policy.clone(),
+        effective_sandbox_policy: thread.effective_sandbox_policy.clone(),
+        hydrated_conversation_items,
+        queued_follow_ups: thread
+            .queued_follow_ups
+            .iter()
+            .map(|preview| AppQueuedFollowUpPreview {
+                id: preview.id.clone(),
+                kind: preview.kind,
+                text: preview.text.clone(),
+            })
+            .collect(),
+        active_turn_id: thread.active_turn_id.clone(),
+        active_plan_progress: thread.active_plan_progress.clone(),
+        pending_plan_implementation_prompt: plan_implementation_prompt_for_thread(snapshot, thread),
+        context_tokens_used: thread.context_tokens_used,
+        model_context_window: thread.model_context_window,
+        rate_limits: thread.rate_limits.clone(),
+        realtime_session_id: thread.realtime_session_id.clone(),
+    })
+}
+
+fn app_thread_state_record_from_state(
+    snapshot: &AppSnapshot,
+    thread: &ThreadSnapshot,
+) -> Result<AppThreadStateRecord, String> {
+    Ok(AppThreadStateRecord {
+        key: thread.key.clone(),
+        info: thread.info.clone(),
+        collaboration_mode: thread.collaboration_mode,
+        model: thread.model.clone(),
+        reasoning_effort: thread.reasoning_effort.clone(),
+        effective_approval_policy: thread.effective_approval_policy.clone(),
+        effective_sandbox_policy: thread.effective_sandbox_policy.clone(),
+        queued_follow_ups: thread
+            .queued_follow_ups
+            .iter()
+            .map(|preview| AppQueuedFollowUpPreview {
+                id: preview.id.clone(),
+                kind: preview.kind,
+                text: preview.text.clone(),
+            })
+            .collect(),
+        active_turn_id: thread.active_turn_id.clone(),
+        active_plan_progress: thread.active_plan_progress.clone(),
+        pending_plan_implementation_prompt: plan_implementation_prompt_for_thread(snapshot, thread),
+        context_tokens_used: thread.context_tokens_used,
+        model_context_window: thread.model_context_window,
+        rate_limits: thread.rate_limits.clone(),
+        realtime_session_id: thread.realtime_session_id.clone(),
+    })
+}
+
+fn plan_implementation_prompt_for_thread(
+    snapshot: &AppSnapshot,
+    thread: &ThreadSnapshot,
+) -> Option<AppPlanImplementationPromptSnapshot> {
+    let source_turn_id = thread.pending_plan_implementation_turn_id.clone()?;
+    if thread.active_turn_id.is_some()
+        || !thread.queued_follow_ups.is_empty()
+        || snapshot.pending_approvals.iter().any(|approval| {
+            approval.server_id == thread.key.server_id
+                && approval.thread_id.as_deref() == Some(thread.key.thread_id.as_str())
+        })
+        || snapshot.pending_user_inputs.iter().any(|request| {
+            request.server_id == thread.key.server_id && request.thread_id == thread.key.thread_id
+        })
+    {
+        return None;
+    }
+    Some(AppPlanImplementationPromptSnapshot { source_turn_id })
 }
 
 pub(crate) fn session_summaries_from_snapshot(snapshot: &AppSnapshot) -> Vec<AppSessionSummary> {
@@ -350,6 +383,16 @@ pub(crate) fn sort_session_summaries(session_summaries: &mut [AppSessionSummary]
     });
 }
 
+pub(crate) fn project_thread_snapshot(
+    snapshot: &AppSnapshot,
+    key: &ThreadKey,
+) -> Result<Option<AppThreadSnapshot>, String> {
+    let Some(thread) = snapshot.threads.get(key) else {
+        return Ok(None);
+    };
+    app_thread_snapshot_from_state(snapshot, thread).map(Some)
+}
+
 pub(crate) fn project_thread_update(
     snapshot: &AppSnapshot,
     key: &ThreadKey,
@@ -357,7 +400,7 @@ pub(crate) fn project_thread_update(
     let Some(thread) = snapshot.threads.get(key) else {
         return Ok(None);
     };
-    let thread_snapshot = AppThreadSnapshot::try_from(thread)?;
+    let thread_snapshot = app_thread_snapshot_from_state(snapshot, thread)?;
     let session_summary = app_session_summary(thread, snapshot.servers.get(&key.server_id));
     let agent_directory_version = current_agent_directory_version(snapshot);
     Ok(Some((
@@ -374,7 +417,7 @@ pub(crate) fn project_thread_state_update(
     let Some(thread) = snapshot.threads.get(key) else {
         return Ok(None);
     };
-    let thread_state = AppThreadStateRecord::try_from(thread)?;
+    let thread_state = app_thread_state_record_from_state(snapshot, thread)?;
     let session_summary = app_session_summary(thread, snapshot.servers.get(&key.server_id));
     let agent_directory_version = current_agent_directory_version(snapshot);
     Ok(Some((
@@ -479,10 +522,14 @@ fn sanitized_label_field(raw: Option<&str>) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        agent_directory_version, current_agent_directory_version, session_summaries_from_snapshot,
+        agent_directory_version, app_session_summary, app_thread_snapshot_from_state,
+        current_agent_directory_version, session_summaries_from_snapshot,
     };
     use crate::store::{AppSnapshot, ThreadSnapshot};
-    use crate::types::{ThreadInfo, ThreadKey, ThreadSummaryStatus};
+    use crate::types::{
+        AppModeKind, AppPlanImplementationPromptSnapshot, PendingUserInputRequest, ThreadInfo,
+        ThreadKey, ThreadSummaryStatus,
+    };
 
     #[test]
     fn current_agent_directory_version_matches_summary_hash() {
@@ -534,6 +581,7 @@ mod tests {
                     status: ThreadSummaryStatus::Active,
                     updated_at: Some(10),
                 },
+                collaboration_mode: AppModeKind::Default,
                 model: None,
                 reasoning_effort: None,
                 effective_approval_policy: None,
@@ -541,15 +589,102 @@ mod tests {
                 items: Vec::new(),
                 local_overlay_items: Vec::new(),
                 queued_follow_ups: Vec::new(),
+                queued_follow_up_drafts: Vec::new(),
                 active_turn_id: None,
                 context_tokens_used: None,
                 model_context_window: None,
                 rate_limits: None,
                 realtime_session_id: None,
+                active_plan_progress: None,
+                pending_plan_implementation_turn_id: None,
             },
         );
 
         let expected = agent_directory_version(&session_summaries_from_snapshot(&snapshot));
         assert_eq!(current_agent_directory_version(&snapshot), expected);
+    }
+
+    #[test]
+    fn app_session_summary_keeps_title_distinct_from_preview() {
+        let summary = app_session_summary(
+            &ThreadSnapshot::from_info(
+                "srv",
+                ThreadInfo {
+                    id: "thread-a".to_string(),
+                    title: None,
+                    model: None,
+                    preview: Some("First user message".to_string()),
+                    cwd: None,
+                    path: None,
+                    model_provider: None,
+                    agent_nickname: None,
+                    agent_role: None,
+                    parent_thread_id: None,
+                    agent_status: None,
+                    created_at: None,
+                    status: ThreadSummaryStatus::Idle,
+                    updated_at: Some(20),
+                },
+            ),
+            None,
+        );
+
+        assert_eq!(summary.title, "First user message");
+        assert_eq!(summary.preview, "First user message");
+    }
+
+    #[test]
+    fn plan_prompt_projection_hides_when_blocked_and_reappears() {
+        let mut snapshot = AppSnapshot::default();
+        let thread = ThreadSnapshot {
+            pending_plan_implementation_turn_id: Some("turn-1".to_string()),
+            ..ThreadSnapshot::from_info(
+                "srv",
+                ThreadInfo {
+                    id: "thread-a".to_string(),
+                    title: Some("Parent".to_string()),
+                    model: None,
+                    preview: Some("Preview".to_string()),
+                    cwd: None,
+                    path: None,
+                    model_provider: None,
+                    agent_nickname: None,
+                    agent_role: None,
+                    parent_thread_id: None,
+                    agent_status: None,
+                    created_at: None,
+                    status: ThreadSummaryStatus::Idle,
+                    updated_at: Some(20),
+                },
+            )
+        };
+        let key = thread.key.clone();
+        snapshot.threads.insert(key.clone(), thread);
+
+        let visible =
+            app_thread_snapshot_from_state(&snapshot, snapshot.threads.get(&key).unwrap())
+                .unwrap()
+                .pending_plan_implementation_prompt;
+        assert_eq!(
+            visible,
+            Some(AppPlanImplementationPromptSnapshot {
+                source_turn_id: "turn-1".to_string()
+            })
+        );
+
+        snapshot.pending_user_inputs.push(PendingUserInputRequest {
+            id: "req-1".to_string(),
+            server_id: "srv".to_string(),
+            thread_id: "thread-a".to_string(),
+            turn_id: "turn-2".to_string(),
+            item_id: "item-2".to_string(),
+            questions: Vec::new(),
+            requester_agent_nickname: None,
+            requester_agent_role: None,
+        });
+        let hidden = app_thread_snapshot_from_state(&snapshot, snapshot.threads.get(&key).unwrap())
+            .unwrap()
+            .pending_plan_implementation_prompt;
+        assert_eq!(hidden, None);
     }
 }

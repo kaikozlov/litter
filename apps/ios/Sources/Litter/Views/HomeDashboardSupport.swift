@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 struct HomeDashboardRecentSession: Identifiable, Hashable {
     let key: ThreadKey
@@ -12,7 +13,7 @@ struct HomeDashboardRecentSession: Identifiable, Hashable {
     var id: ThreadKey { key }
 }
 
-struct HomeDashboardServer: Identifiable, Hashable {
+struct HomeDashboardServer: Identifiable {
     let id: String
     let displayName: String
     let host: String
@@ -21,6 +22,8 @@ struct HomeDashboardServer: Identifiable, Hashable {
     let hasIpc: Bool
     let health: AppServerHealth
     let sourceLabel: String
+    let statusLabel: String
+    let statusColor: Color
 
     var deduplicationKey: String {
         if isLocal {
@@ -71,7 +74,7 @@ enum HomeDashboardSupport {
         var seenServerKeys: Set<String> = []
 
         return servers
-            .filter { $0.health == .connected }
+            .filter { $0.health != .disconnected || $0.connectionProgress != nil }
             .map { server in
                 HomeDashboardServer(
                     id: server.serverId,
@@ -81,7 +84,9 @@ enum HomeDashboardSupport {
                     isLocal: server.isLocal,
                     hasIpc: server.hasIpc,
                     health: server.health,
-                    sourceLabel: server.connectionModeLabel
+                    sourceLabel: server.connectionModeLabel,
+                    statusLabel: server.statusLabel,
+                    statusColor: server.statusColor
                 )
             }
             .sorted { lhs, rhs in
@@ -119,16 +124,6 @@ enum HomeDashboardSupport {
     }
 
     private static func sessionTitle(for session: AppSessionSummary) -> String {
-        let trimmedPreview = session.preview.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedPreview.isEmpty {
-            return trimmedPreview
-        }
-
-        let trimmedTitle = session.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedTitle.isEmpty {
-            return trimmedTitle
-        }
-
-        return "Untitled session"
+        session.displayTitle
     }
 }

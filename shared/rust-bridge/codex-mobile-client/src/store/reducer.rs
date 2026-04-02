@@ -12,11 +12,12 @@ use crate::conversation_uniffi::{
 use crate::session::connection::ServerConfig;
 use crate::session::events::UiEvent;
 use crate::types::{
-    PendingApproval, PendingApprovalKey, PendingApprovalSeed, PendingApprovalWithSeed,
-    PendingUserInputAnswer, PendingUserInputRequest, ThreadInfo, ThreadKey, ThreadSummaryStatus,
+    AppModeKind, AppOperationStatus, AppPlanProgressSnapshot, AppPlanStep, AppVoiceSessionPhase,
+    AppVoiceTranscriptEntry, AppVoiceTranscriptUpdate,
 };
 use crate::types::{
-    AppOperationStatus, AppVoiceSessionPhase, AppVoiceTranscriptEntry, AppVoiceTranscriptUpdate,
+    PendingApproval, PendingApprovalKey, PendingApprovalSeed, PendingApprovalWithSeed,
+    PendingUserInputAnswer, PendingUserInputRequest, ThreadInfo, ThreadKey, ThreadSummaryStatus,
 };
 
 use super::actions::{
@@ -27,8 +28,8 @@ use super::boundary::{
     current_agent_directory_version, project_thread_state_update, project_thread_update,
 };
 use super::snapshot::{
-    AppSnapshot, AppQueuedFollowUpPreview, AppConnectionProgressSnapshot, ServerHealthSnapshot,
-    ServerSnapshot, ThreadSnapshot, AppVoiceSessionSnapshot,
+    AppConnectionProgressSnapshot, AppQueuedFollowUpPreview, AppSnapshot, AppVoiceSessionSnapshot,
+    QueuedFollowUpDraft, ServerHealthSnapshot, ServerSnapshot, ThreadSnapshot,
 };
 use super::updates::{AppStoreUpdateRecord, ThreadStreamingDeltaKind};
 use super::voice::{VoiceDerivedUpdate, VoiceRealtimeState};
@@ -213,11 +214,13 @@ impl AppStoreReducer {
                     thread_id: info.id.clone(),
                 };
                 if let Some(entry) = snapshot.threads.get_mut(&key) {
-                    let next_model = info.model.clone().or_else(|| entry.model.clone());
-                    let info_changed = entry.info != *info;
+                    let mut next_info = info.clone();
+                    preserve_thread_title(&entry.info, &mut next_info);
+                    let next_model = next_info.model.clone().or_else(|| entry.model.clone());
+                    let info_changed = entry.info != next_info;
                     let model_changed = entry.model != next_model;
                     if info_changed || model_changed {
-                        entry.info = info.clone();
+                        entry.info = next_info;
                         entry.model = next_model;
                         updated_thread_keys.push(key);
                     }
@@ -317,8 +320,13 @@ impl AppStoreReducer {
         {
             let mut snapshot = self.snapshot.write().expect("app store lock poisoned");
             if let Some(existing) = snapshot.threads.get(&key) {
+                preserve_thread_title(&existing.info, &mut thread.info);
+                preserve_thread_runtime_state(existing, &mut thread);
                 preserve_local_overlay_items(existing, &mut thread);
                 preserve_queued_follow_ups(existing, &mut thread);
+            }
+            if !thread.queued_follow_up_drafts.is_empty() || thread.queued_follow_ups.is_empty() {
+                sync_thread_follow_up_projection(&mut thread);
             }
             snapshot.threads.insert(key.clone(), thread);
         }
@@ -330,9 +338,25 @@ impl AppStoreReducer {
         key: &ThreadKey,
         preview: AppQueuedFollowUpPreview,
     ) {
+        self.enqueue_thread_follow_up_draft(
+            key,
+            QueuedFollowUpDraft {
+                preview,
+                inputs: Vec::new(),
+                source_message_json: None,
+            },
+        );
+    }
+
+    pub(crate) fn enqueue_thread_follow_up_draft(
+        &self,
+        key: &ThreadKey,
+        draft: QueuedFollowUpDraft,
+    ) {
         if self
             .mutate_thread_with_result(key, |thread| {
-                thread.queued_follow_ups.push(preview);
+                thread.queued_follow_up_drafts.push(draft);
+                sync_thread_follow_up_projection(thread);
             })
             .is_some()
         {
@@ -340,14 +364,83 @@ impl AppStoreReducer {
         }
     }
 
+    pub fn set_thread_collaboration_mode(&self, key: &ThreadKey, mode: AppModeKind) {
+        if self
+            .mutate_thread_with_result(key, |thread| {
+                if thread.collaboration_mode == mode {
+                    return false;
+                }
+                thread.collaboration_mode = mode;
+                true
+            })
+            .unwrap_or(false)
+        {
+            self.emit_thread_state_update(key);
+        }
+    }
+
+    pub fn dismiss_plan_implementation_prompt(&self, key: &ThreadKey) {
+        if self
+            .mutate_thread_with_result(key, |thread| {
+                let had_prompt = thread.pending_plan_implementation_turn_id.is_some();
+                thread.pending_plan_implementation_turn_id = None;
+                had_prompt
+            })
+            .unwrap_or(false)
+        {
+            self.emit_thread_state_update(key);
+        }
+    }
+
     pub fn remove_thread_follow_up_preview(&self, key: &ThreadKey, preview_id: &str) {
+        self.remove_thread_follow_up_draft(key, preview_id);
+    }
+
+    pub(crate) fn remove_thread_follow_up_draft(&self, key: &ThreadKey, preview_id: &str) {
         if self
             .mutate_thread_with_result(key, |thread| {
                 thread
-                    .queued_follow_ups
-                    .retain(|preview| preview.id != preview_id);
+                    .queued_follow_up_drafts
+                    .retain(|draft| draft.preview.id != preview_id);
+                sync_thread_follow_up_projection(thread);
             })
             .is_some()
+        {
+            self.emit_thread_state_update(key);
+        }
+    }
+
+    pub fn set_thread_follow_up_previews(
+        &self,
+        key: &ThreadKey,
+        previews: Vec<AppQueuedFollowUpPreview>,
+    ) {
+        let drafts = previews
+            .into_iter()
+            .map(|preview| QueuedFollowUpDraft {
+                preview,
+                inputs: Vec::new(),
+                source_message_json: None,
+            })
+            .collect();
+        self.set_thread_follow_up_drafts(key, drafts);
+    }
+
+    pub(crate) fn set_thread_follow_up_drafts(
+        &self,
+        key: &ThreadKey,
+        drafts: Vec<QueuedFollowUpDraft>,
+    ) {
+        if self
+            .mutate_thread_with_result(key, |thread| {
+                if thread.queued_follow_up_drafts == drafts {
+                    return false;
+                }
+                thread.queued_follow_up_drafts = drafts;
+                sync_thread_follow_up_projection(thread);
+                true
+            })
+            .unwrap_or(false)
         {
             self.emit_thread_state_update(key);
         }
@@ -557,7 +650,11 @@ impl AppStoreReducer {
         });
     }
 
-    pub fn update_server_models(&self, server_id: &str, models: Option<Vec<crate::types::ModelInfo>>) {
+    pub fn update_server_models(
+        &self,
+        server_id: &str,
+        models: Option<Vec<crate::types::ModelInfo>>,
+    ) {
         {
             let mut snapshot = self.snapshot.write().expect("app store lock poisoned");
             if let Some(server) = snapshot.servers.get_mut(server_id) {
@@ -671,10 +768,10 @@ impl AppStoreReducer {
             UiEvent::TurnStarted { key, turn_id } => {
                 if self
                     .mutate_thread_with_result(key, |thread| {
-                        if !thread.queued_follow_ups.is_empty() {
-                            thread.queued_follow_ups.remove(0);
-                        }
+                        remove_first_queued_follow_up(thread);
                         thread.active_turn_id = Some(turn_id.clone());
+                        thread.active_plan_progress = None;
+                        thread.pending_plan_implementation_turn_id = None;
                         thread.info.status = ThreadSummaryStatus::Active;
                         if thread.info.parent_thread_id.is_some() {
                             thread.info.agent_status = Some("running".to_string());
@@ -689,10 +786,30 @@ impl AppStoreReducer {
                 if self
                     .mutate_thread_with_result(key, |thread| {
                         thread.active_turn_id = None;
+                        thread.active_plan_progress = None;
                         thread.info.status = ThreadSummaryStatus::Idle;
                         if thread.info.parent_thread_id.is_some() {
                             thread.info.agent_status = Some("completed".to_string());
                         }
+                    })
+                    .is_some()
+                {
+                    self.emit_thread_state_update(key);
+                }
+            }
+            UiEvent::TurnPlanUpdated { key, notification } => {
+                if self
+                    .mutate_thread_with_result(key, |thread| {
+                        thread.active_plan_progress = Some(AppPlanProgressSnapshot {
+                            turn_id: notification.turn_id.clone(),
+                            explanation: notification.explanation.clone(),
+                            plan: notification
+                                .plan
+                                .iter()
+                                .cloned()
+                                .map(AppPlanStep::from)
+                                .collect(),
+                        });
                     })
                     .is_some()
                 {
@@ -707,6 +824,22 @@ impl AppStoreReducer {
             UiEvent::ItemCompleted { key, notification } => {
                 if let Some(item) = conversation_item_from_upstream(notification.item.clone()) {
                     self.apply_item_update(key, item);
+                }
+                if matches!(
+                    notification.item,
+                    codex_app_server_protocol::ThreadItem::Plan { .. }
+                ) && self
+                    .mutate_thread_with_result(key, |thread| {
+                        if thread.collaboration_mode != AppModeKind::Plan {
+                            return false;
+                        }
+                        thread.pending_plan_implementation_turn_id =
+                            Some(notification.turn_id.clone());
+                        true
+                    })
+                    .unwrap_or(false)
+                {
+                    self.emit_thread_state_update(key);
                 }
             }
             UiEvent::MessageDelta {
@@ -863,7 +996,17 @@ impl AppStoreReducer {
                 {
                     let mut snapshot = self.snapshot.write().expect("app store lock poisoned");
                     if let Some(server) = snapshot.servers.get_mut(server_id) {
-                        server.health = ServerHealthSnapshot::from_wire(health);
+                        let next_health = ServerHealthSnapshot::from_wire(health);
+                        server.health = match (&server.connection_progress, next_health) {
+                            // During SSH session replacement the old session can report a transient
+                            // disconnect while the new transport is still bootstrapping. Keep the
+                            // server visible as connecting until that progress finishes or an
+                            // explicit reconnect failure updates the store directly.
+                            (Some(_), ServerHealthSnapshot::Disconnected) => {
+                                ServerHealthSnapshot::Connecting
+                            }
+                            (_, health) => health,
+                        };
                     }
                 }
                 self.emit(AppStoreUpdateRecord::ServerChanged {
@@ -961,7 +1104,9 @@ impl AppStoreReducer {
                                     Some(AppVoiceSessionPhase::Listening);
                             }
                             self.emit(AppStoreUpdateRecord::VoiceSessionChanged);
-                            self.emit(AppStoreUpdateRecord::RealtimeSpeechStarted { key: key.clone() });
+                            self.emit(AppStoreUpdateRecord::RealtimeSpeechStarted {
+                                key: key.clone(),
+                            });
                         }
                     }
                 }
@@ -974,17 +1119,16 @@ impl AppStoreReducer {
                     }
                 }
                 self.emit(AppStoreUpdateRecord::VoiceSessionChanged);
-                let protocol_notification =
-                    crate::types::AppRealtimeOutputAudioDeltaNotification {
-                        thread_id: notification.thread_id.clone(),
-                        audio: crate::types::AppRealtimeAudioChunk {
-                            item_id: notification.audio.item_id.clone(),
-                            data: notification.audio.data.clone(),
-                            sample_rate: notification.audio.sample_rate,
-                            num_channels: notification.audio.num_channels.into(),
-                            samples_per_channel: notification.audio.samples_per_channel,
-                        },
-                    };
+                let protocol_notification = crate::types::AppRealtimeOutputAudioDeltaNotification {
+                    thread_id: notification.thread_id.clone(),
+                    audio: crate::types::AppRealtimeAudioChunk {
+                        item_id: notification.audio.item_id.clone(),
+                        data: notification.audio.data.clone(),
+                        sample_rate: notification.audio.sample_rate,
+                        num_channels: notification.audio.num_channels.into(),
+                        samples_per_channel: notification.audio.samples_per_channel,
+                    },
+                };
                 self.emit(AppStoreUpdateRecord::RealtimeOutputAudioDelta {
                     key: key.clone(),
                     notification: protocol_notification,
@@ -1065,9 +1209,13 @@ impl AppStoreReducer {
                     snapshot.pending_user_inputs.clone()
                 };
                 self.emit(AppStoreUpdateRecord::PendingUserInputsChanged { requests });
+                let key = ThreadKey {
+                    server_id: request.server_id.clone(),
+                    thread_id: request.thread_id.clone(),
+                };
+                self.emit_thread_state_update(&key);
             }
             UiEvent::RawNotification { .. } => {}
-            _ => {}
         }
     }
 
@@ -1200,7 +1348,11 @@ impl AppStoreReducer {
         self.emit_thread_item_upsert_owned(key, item.clone());
     }
 
-    pub(crate) fn emit_thread_item_upsert_owned(&self, key: &ThreadKey, item: HydratedConversationItem) {
+    pub(crate) fn emit_thread_item_upsert_owned(
+        &self,
+        key: &ThreadKey,
+        item: HydratedConversationItem,
+    ) {
         self.emit(AppStoreUpdateRecord::ThreadItemUpserted {
             key: key.clone(),
             item: HydratedConversationItem::from(item),
@@ -1267,9 +1419,7 @@ impl AppStoreReducer {
                 && matches!(&item.content, HydratedConversationItemContent::User(_));
             upsert_item(thread, item);
             if clears_queued_follow_up {
-                if !thread.queued_follow_ups.is_empty() {
-                    thread.queued_follow_ups.remove(0);
-                }
+                remove_first_queued_follow_up(thread);
             }
             (
                 mutation,
@@ -1354,9 +1504,7 @@ impl AppStoreReducer {
                 crate::types::AppVoiceSpeaker::User => AppVoiceSessionPhase::Listening,
                 crate::types::AppVoiceSpeaker::Assistant => AppVoiceSessionPhase::Speaking,
             },
-            (crate::types::AppVoiceSpeaker::Assistant, true) => {
-                AppVoiceSessionPhase::Thinking
-            }
+            (crate::types::AppVoiceSpeaker::Assistant, true) => AppVoiceSessionPhase::Thinking,
             (crate::types::AppVoiceSpeaker::User, true) => AppVoiceSessionPhase::Listening,
         });
     }
@@ -1455,7 +1603,10 @@ impl AppStoreReducer {
     }
 }
 
-fn upsert_item(thread: &mut ThreadSnapshot, item: crate::conversation_uniffi::HydratedConversationItem) {
+fn upsert_item(
+    thread: &mut ThreadSnapshot,
+    item: crate::conversation_uniffi::HydratedConversationItem,
+) {
     if let Some(existing) = thread
         .items
         .iter_mut()
@@ -1513,13 +1664,70 @@ fn preserve_local_overlay_items(source: &ThreadSnapshot, target: &mut ThreadSnap
     }
 }
 
+fn preserve_thread_runtime_state(source: &ThreadSnapshot, target: &mut ThreadSnapshot) {
+    target.collaboration_mode = source.collaboration_mode;
+    if target.active_plan_progress.is_none() {
+        target.active_plan_progress = source.active_plan_progress.clone();
+    }
+    if target.pending_plan_implementation_turn_id.is_none() {
+        target.pending_plan_implementation_turn_id =
+            source.pending_plan_implementation_turn_id.clone();
+    }
+}
+
+fn preserve_thread_title(existing: &ThreadInfo, incoming: &mut ThreadInfo) {
+    let incoming_blank = incoming
+        .title
+        .as_deref()
+        .map(str::trim)
+        .is_none_or(str::is_empty);
+    if !incoming_blank {
+        return;
+    }
+
+    let existing_title = existing
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if existing_title.is_some() {
+        incoming.title = existing_title;
+    }
+}
+
 fn preserve_queued_follow_ups(source: &ThreadSnapshot, target: &mut ThreadSnapshot) {
     if target.queued_follow_ups.is_empty() {
         target.queued_follow_ups = source.queued_follow_ups.clone();
     }
+    if target.queued_follow_up_drafts.is_empty() {
+        target.queued_follow_up_drafts = source.queued_follow_up_drafts.clone();
+    }
 }
 
-fn is_duplicate_overlay_item(local: &HydratedConversationItem, existing: &HydratedConversationItem) -> bool {
+fn sync_thread_follow_up_projection(thread: &mut ThreadSnapshot) {
+    thread.queued_follow_ups = thread
+        .queued_follow_up_drafts
+        .iter()
+        .map(|draft| draft.preview.clone())
+        .collect();
+}
+
+fn remove_first_queued_follow_up(thread: &mut ThreadSnapshot) {
+    if !thread.queued_follow_up_drafts.is_empty() {
+        thread.queued_follow_up_drafts.remove(0);
+        sync_thread_follow_up_projection(thread);
+        return;
+    }
+    if !thread.queued_follow_ups.is_empty() {
+        thread.queued_follow_ups.remove(0);
+    }
+}
+
+fn is_duplicate_overlay_item(
+    local: &HydratedConversationItem,
+    existing: &HydratedConversationItem,
+) -> bool {
     if local.id == existing.id && local.id.starts_with(USER_INPUT_RESPONSE_ITEM_PREFIX) {
         return true;
     }
@@ -1537,33 +1745,34 @@ fn answered_user_input_item(
     request: &PendingUserInputRequest,
     answers: &[PendingUserInputAnswer],
 ) -> HydratedConversationItem {
-    let content = HydratedConversationItemContent::UserInputResponse(HydratedUserInputResponseData {
-        questions: request
-            .questions
-            .iter()
-            .map(|question| {
-                let answer = answers
-                    .iter()
-                    .find(|answer| answer.question_id == question.id)
-                    .map(|answer| answer.answers.join("\n"))
-                    .unwrap_or_default();
-                HydratedUserInputResponseQuestionData {
-                    id: question.id.clone(),
-                    header: question.header.clone(),
-                    question: question.question.clone(),
-                    answer,
-                    options: question
-                        .options
+    let content =
+        HydratedConversationItemContent::UserInputResponse(HydratedUserInputResponseData {
+            questions: request
+                .questions
+                .iter()
+                .map(|question| {
+                    let answer = answers
                         .iter()
-                        .map(|option| HydratedUserInputResponseOptionData {
-                            label: option.label.clone(),
-                            description: option.description.clone(),
-                        })
-                        .collect(),
-                }
-            })
-            .collect(),
-    });
+                        .find(|answer| answer.question_id == question.id)
+                        .map(|answer| answer.answers.join("\n"))
+                        .unwrap_or_default();
+                    HydratedUserInputResponseQuestionData {
+                        id: question.id.clone(),
+                        header: question.header.clone(),
+                        question: question.question.clone(),
+                        answer,
+                        options: question
+                            .options
+                            .iter()
+                            .map(|option| HydratedUserInputResponseOptionData {
+                                label: option.label.clone(),
+                                description: option.description.clone(),
+                            })
+                            .collect(),
+                    }
+                })
+                .collect(),
+        });
 
     HydratedConversationItem {
         id: format!("{USER_INPUT_RESPONSE_ITEM_PREFIX}{}", request.id),
@@ -1597,7 +1806,7 @@ mod tests {
     use crate::types::{PendingUserInputOption, PendingUserInputQuestion};
     use codex_app_server_protocol::{
         McpToolCallProgressNotification, ModelRerouteReason, ModelReroutedNotification,
-        TurnDiffUpdatedNotification,
+        TurnDiffUpdatedNotification, TurnPlanStep, TurnPlanStepStatus, TurnPlanUpdatedNotification,
     };
     use tokio::sync::broadcast::error::TryRecvError;
 
@@ -1620,7 +1829,9 @@ mod tests {
         }
     }
 
-    fn drain_updates(receiver: &mut tokio::sync::broadcast::Receiver<AppStoreUpdateRecord>) -> Vec<AppStoreUpdateRecord> {
+    fn drain_updates(
+        receiver: &mut tokio::sync::broadcast::Receiver<AppStoreUpdateRecord>,
+    ) -> Vec<AppStoreUpdateRecord> {
         let mut updates = Vec::new();
         loop {
             match receiver.try_recv() {
@@ -1707,6 +1918,28 @@ mod tests {
     }
 
     #[test]
+    fn sync_thread_list_preserves_existing_title_when_incoming_title_missing() {
+        let reducer = AppStoreReducer::new();
+        let key = ThreadKey {
+            server_id: "srv".to_string(),
+            thread_id: "thread".to_string(),
+        };
+        reducer
+            .upsert_thread_snapshot(ThreadSnapshot::from_info("srv", make_thread_info("thread")));
+
+        let mut incoming = make_thread_info("thread");
+        incoming.title = None;
+        incoming.preview = Some("First user message".to_string());
+
+        reducer.sync_thread_list("srv", &[incoming]);
+
+        let snapshot = reducer.snapshot();
+        let thread = snapshot.threads.get(&key).expect("thread exists");
+        assert_eq!(thread.info.title.as_deref(), Some("Thread thread"));
+        assert_eq!(thread.info.preview.as_deref(), Some("First user message"));
+    }
+
+    #[test]
     fn turn_diff_updates_become_conversation_items() {
         let reducer = AppStoreReducer::new();
         let key = ThreadKey {
@@ -1739,6 +1972,62 @@ mod tests {
     }
 
     #[test]
+    fn turn_plan_updates_populate_active_plan_progress_without_timeline_items() {
+        let reducer = AppStoreReducer::new();
+        let key = ThreadKey {
+            server_id: "srv".to_string(),
+            thread_id: "thread".to_string(),
+        };
+        reducer
+            .upsert_thread_snapshot(ThreadSnapshot::from_info("srv", make_thread_info("thread")));
+
+        reducer.apply_ui_event(&UiEvent::TurnPlanUpdated {
+            key: key.clone(),
+            notification: TurnPlanUpdatedNotification {
+                thread_id: key.thread_id.clone(),
+                turn_id: "turn-1".to_string(),
+                explanation: Some("working".to_string()),
+                plan: vec![
+                    TurnPlanStep {
+                        step: "Inspect renderer".to_string(),
+                        status: TurnPlanStepStatus::Completed,
+                    },
+                    TurnPlanStep {
+                        step: "Restore task cards".to_string(),
+                        status: TurnPlanStepStatus::InProgress,
+                    },
+                ],
+            },
+        });
+
+        let snapshot = reducer.snapshot();
+        let thread = snapshot.threads.get(&key).expect("thread exists");
+        assert!(
+            thread
+                .items
+                .iter()
+                .all(|item| item.id != "turn-plan-turn-1"),
+            "turn/plan/updated should not create historical timeline items"
+        );
+        let progress = thread
+            .active_plan_progress
+            .as_ref()
+            .expect("active plan progress should exist");
+        assert_eq!(progress.turn_id, "turn-1");
+        assert_eq!(progress.explanation.as_deref(), Some("working"));
+        assert_eq!(progress.plan.len(), 2);
+        assert_eq!(
+            progress.plan[0].status,
+            crate::types::AppPlanStepStatus::Completed
+        );
+        assert_eq!(
+            progress.plan[1].status,
+            crate::types::AppPlanStepStatus::InProgress
+        );
+        assert_eq!(progress.plan[1].step, "Restore task cards");
+    }
+
+    #[test]
     fn mcp_progress_updates_append_to_existing_item() {
         let reducer = AppStoreReducer::new();
         let key = ThreadKey {
@@ -1746,25 +2035,29 @@ mod tests {
             thread_id: "thread".to_string(),
         };
         let mut thread = ThreadSnapshot::from_info("srv", make_thread_info("thread"));
-        thread.items.push(crate::conversation_uniffi::HydratedConversationItem {
-            id: "mcp-1".to_string(),
-            content: HydratedConversationItemContent::McpToolCall(crate::conversation_uniffi::HydratedMcpToolCallData {
-                server: "github".to_string(),
-                tool: "search".to_string(),
-                status: crate::types::AppOperationStatus::InProgress,
-                duration_ms: None,
-                arguments_json: None,
-                content_summary: None,
-                structured_content_json: None,
-                raw_output_json: None,
-                error_message: None,
-                progress_messages: Vec::new(),
-            }),
-            source_turn_id: Some("turn-1".to_string()),
-            source_turn_index: None,
-            timestamp: None,
-            is_from_user_turn_boundary: false,
-        });
+        thread
+            .items
+            .push(crate::conversation_uniffi::HydratedConversationItem {
+                id: "mcp-1".to_string(),
+                content: HydratedConversationItemContent::McpToolCall(
+                    crate::conversation_uniffi::HydratedMcpToolCallData {
+                        server: "github".to_string(),
+                        tool: "search".to_string(),
+                        status: crate::types::AppOperationStatus::InProgress,
+                        duration_ms: None,
+                        arguments_json: None,
+                        content_summary: None,
+                        structured_content_json: None,
+                        raw_output_json: None,
+                        error_message: None,
+                        progress_messages: Vec::new(),
+                    },
+                ),
+                source_turn_id: Some("turn-1".to_string()),
+                source_turn_index: None,
+                timestamp: None,
+                is_from_user_turn_boundary: false,
+            });
         reducer.upsert_thread_snapshot(thread);
 
         reducer.apply_ui_event(&UiEvent::McpToolCallProgress {
@@ -1897,15 +2190,17 @@ mod tests {
         let mut local = ThreadSnapshot::from_info("srv", make_thread_info("thread"));
         local.items.push(HydratedConversationItem {
             id: "user-input-response:req-1".to_string(),
-            content: HydratedConversationItemContent::UserInputResponse(HydratedUserInputResponseData {
-                questions: vec![HydratedUserInputResponseQuestionData {
-                    id: "q-1".to_string(),
-                    header: Some("Choice".to_string()),
-                    question: "Pick one".to_string(),
-                    answer: "A".to_string(),
-                    options: vec![],
-                }],
-            }),
+            content: HydratedConversationItemContent::UserInputResponse(
+                HydratedUserInputResponseData {
+                    questions: vec![HydratedUserInputResponseQuestionData {
+                        id: "q-1".to_string(),
+                        header: Some("Choice".to_string()),
+                        question: "Pick one".to_string(),
+                        answer: "A".to_string(),
+                        options: vec![],
+                    }],
+                },
+            ),
             source_turn_id: Some("turn-1".to_string()),
             source_turn_index: None,
             timestamp: None,
@@ -1916,15 +2211,17 @@ mod tests {
         let mut server = ThreadSnapshot::from_info("srv", make_thread_info("thread"));
         server.items.push(HydratedConversationItem {
             id: "server-item-1".to_string(),
-            content: HydratedConversationItemContent::UserInputResponse(HydratedUserInputResponseData {
-                questions: vec![HydratedUserInputResponseQuestionData {
-                    id: "q-1".to_string(),
-                    header: Some("Choice".to_string()),
-                    question: "Pick one".to_string(),
-                    answer: "A".to_string(),
-                    options: vec![],
-                }],
-            }),
+            content: HydratedConversationItemContent::UserInputResponse(
+                HydratedUserInputResponseData {
+                    questions: vec![HydratedUserInputResponseQuestionData {
+                        id: "q-1".to_string(),
+                        header: Some("Choice".to_string()),
+                        question: "Pick one".to_string(),
+                        answer: "A".to_string(),
+                        options: vec![],
+                    }],
+                },
+            ),
             source_turn_id: Some("turn-1".to_string()),
             source_turn_index: None,
             timestamp: None,
@@ -1940,6 +2237,29 @@ mod tests {
     }
 
     #[test]
+    fn upsert_thread_snapshot_preserves_existing_title_when_incoming_title_missing() {
+        let reducer = AppStoreReducer::new();
+        let key = ThreadKey {
+            server_id: "srv".to_string(),
+            thread_id: "thread".to_string(),
+        };
+
+        reducer
+            .upsert_thread_snapshot(ThreadSnapshot::from_info("srv", make_thread_info("thread")));
+
+        let mut incoming = ThreadSnapshot::from_info("srv", make_thread_info("thread"));
+        incoming.info.title = None;
+        incoming.info.preview = Some("First user message".to_string());
+
+        reducer.upsert_thread_snapshot(incoming);
+
+        let snapshot = reducer.snapshot();
+        let thread = snapshot.threads.get(&key).expect("thread exists");
+        assert_eq!(thread.info.title.as_deref(), Some("Thread thread"));
+        assert_eq!(thread.info.preview.as_deref(), Some("First user message"));
+    }
+
+    #[test]
     fn turn_started_consumes_first_queued_follow_up_preview() {
         let reducer = AppStoreReducer::new();
         let key = ThreadKey {
@@ -1952,6 +2272,7 @@ mod tests {
             &key,
             AppQueuedFollowUpPreview {
                 id: "queued-1".to_string(),
+                kind: crate::store::snapshot::AppQueuedFollowUpKind::Message,
                 text: "first".to_string(),
             },
         );
@@ -1959,6 +2280,7 @@ mod tests {
             &key,
             AppQueuedFollowUpPreview {
                 id: "queued-2".to_string(),
+                kind: crate::store::snapshot::AppQueuedFollowUpKind::Message,
                 text: "second".to_string(),
             },
         );
@@ -1988,6 +2310,7 @@ mod tests {
             &key,
             AppQueuedFollowUpPreview {
                 id: "queued-1".to_string(),
+                kind: crate::store::snapshot::AppQueuedFollowUpKind::Message,
                 text: "queued follow-up".to_string(),
             },
         );
@@ -1996,10 +2319,12 @@ mod tests {
             &key,
             HydratedConversationItem {
                 id: "user-1".to_string(),
-                content: HydratedConversationItemContent::User(crate::conversation_uniffi::HydratedUserMessageData {
-                    text: "queued follow-up".to_string(),
-                    image_data_uris: Vec::new(),
-                }),
+                content: HydratedConversationItemContent::User(
+                    crate::conversation_uniffi::HydratedUserMessageData {
+                        text: "queued follow-up".to_string(),
+                        image_data_uris: Vec::new(),
+                    },
+                ),
                 source_turn_id: Some("turn-2".to_string()),
                 source_turn_index: None,
                 timestamp: None,

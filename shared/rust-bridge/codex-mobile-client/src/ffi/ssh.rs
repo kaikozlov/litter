@@ -706,6 +706,7 @@ async fn run_guided_ssh_connect(
         .finish_connect_remote_over_ssh(
             config,
             credentials,
+            accept_unknown_host,
             ssh_client,
             SshBootstrapResult {
                 server_port: bootstrap.server_port,

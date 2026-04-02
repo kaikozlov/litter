@@ -446,15 +446,16 @@ private struct SubagentDetailSheet: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            _ = try await appModel.client.resumeThread(
-                serverId: threadKey.serverId,
-                params: AppThreadLaunchConfig(
+            _ = try await appModel.resumeThreadPreferringIPC(
+                key: threadKey,
+                launchConfig: AppThreadLaunchConfig(
                     model: nil,
                     approvalPolicy: nil,
                     sandbox: nil,
                     developerInstructions: nil,
                     persistExtendedHistory: true
-                ).threadResumeRequest(threadId: threadKey.threadId, cwdOverride: nil)
+                ),
+                cwdOverride: nil
             )
             await appModel.refreshSnapshot()
         } catch {}

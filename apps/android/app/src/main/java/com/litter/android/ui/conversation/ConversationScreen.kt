@@ -184,6 +184,7 @@ fun ConversationScreen(
     }
 
     var showModelSelector by remember { mutableStateOf(false) }
+    var showCollaborationModeSelector by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameDraft by remember(threadKey) { mutableStateOf("") }
     var showPermissionsSheet by remember { mutableStateOf(false) }
@@ -191,15 +192,59 @@ fun ConversationScreen(
     var showSkillsSheet by remember { mutableStateOf(false) }
     var slashErrorMessage by remember { mutableStateOf<String?>(null) }
     var reloadErrorMessage by remember { mutableStateOf<String?>(null) }
+    var collaborationModesLoading by remember { mutableStateOf(false) }
+    var collaborationModePresets by remember {
+        mutableStateOf<List<uniffi.codex_mobile_client.AppCollaborationModePreset>>(emptyList())
+    }
     LaunchedEffect(showModelSelector, server?.health, server?.account, server?.availableModels, server?.rateLimits) {
         if (showModelSelector || (server?.account != null && server.rateLimits == null)) {
             appModel.loadConversationMetadataIfNeeded(threadKey.serverId)
         }
     }
+    LaunchedEffect(showCollaborationModeSelector) {
+        if (!showCollaborationModeSelector || collaborationModesLoading) return@LaunchedEffect
+        collaborationModesLoading = true
+        collaborationModePresets = try {
+            appModel.client.listCollaborationModes(threadKey.serverId)
+        } catch (_: Exception) {
+            fallbackCollaborationModePresets()
+        }
+        collaborationModesLoading = false
+    }
 
     // Pending user input for this thread
     val pendingInput = remember(snapshot, threadKey) {
         snapshot?.pendingUserInputs?.firstOrNull { it.threadId == threadKey.threadId }
+    }
+
+    val activeTaskSummary = remember(items) {
+        items.asReversed().firstNotNullOfOrNull { item ->
+            val content = item.content as? HydratedConversationItemContent.TodoList ?: return@firstNotNullOfOrNull null
+            val steps = content.v1.steps
+            if (steps.isEmpty()) return@firstNotNullOfOrNull null
+
+            val activeSteps = steps.filter {
+                it.status != uniffi.codex_mobile_client.HydratedPlanStepStatus.COMPLETED
+            }
+            if (activeSteps.isEmpty()) return@firstNotNullOfOrNull null
+
+            val completed = steps.count {
+                it.status == uniffi.codex_mobile_client.HydratedPlanStepStatus.COMPLETED
+            }
+            val focusStep = steps.firstOrNull {
+                it.status == uniffi.codex_mobile_client.HydratedPlanStepStatus.IN_PROGRESS
+            } ?: steps.firstOrNull {
+                it.status == uniffi.codex_mobile_client.HydratedPlanStepStatus.PENDING
+            } ?: activeSteps.firstOrNull()
+            val detail = focusStep?.step?.trim().orEmpty()
+
+            ActiveTaskSummary(
+                progress = "$completed/${steps.size}",
+                label = detail.ifBlank {
+                    if (activeSteps.size == 1) "1 active task" else "${activeSteps.size} active tasks"
+                },
+            )
+        }
     }
 
     // Pinned context: latest TODO progress + file change summary
@@ -263,7 +308,7 @@ fun ConversationScreen(
 
     LaunchedEffect(threadKey, transcriptTailSignature, followScrollToken, streamingRenderTick) {
         if (shouldFollowTail && transcriptTurns.isNotEmpty()) {
-            listState.scrollToItem(conversationBottomAnchorIndex(transcriptTurns.size))
+            listState.animateScrollToItem(conversationBottomAnchorIndex(transcriptTurns.size))
         }
     }
 
@@ -349,7 +394,7 @@ fun ConversationScreen(
                                     buildTimelineEntries(turn.items, turn.isActiveTurn)
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    timelineEntries.forEach { entry ->
+                                    timelineEntries.forEachIndexed { index, entry ->
                                         when (entry) {
                                             is TimelineEntry.Single -> {
                                                 ConversationTimelineItem(
@@ -389,7 +434,10 @@ fun ConversationScreen(
                                             }
 
                                             is TimelineEntry.Exploration -> {
-                                                ExplorationGroupRow(group = entry.group)
+                                                ExplorationGroupRow(
+                                                    group = entry.group,
+                                                    showsCollapsedPreview = index == timelineEntries.lastIndex,
+                                                )
                                             }
                                         }
                                     }
@@ -487,11 +535,15 @@ fun ConversationScreen(
                     // Composer bar
                     ComposerBar(
                         threadKey = threadKey,
+                        collaborationMode = thread?.collaborationMode ?: uniffi.codex_mobile_client.AppModeKind.DEFAULT,
+                        activePlanProgress = thread?.activePlanProgress,
                         activeTurnId = thread?.activeTurnId,
                         contextPercent = thread?.composerContextPercent(),
                         isThinking = isThinking,
+                        activeTaskSummary = activeTaskSummary,
                         queuedFollowUps = thread?.queuedFollowUps ?: emptyList(),
                         rateLimits = server?.rateLimits,
+                        onOpenCollaborationModePicker = { showCollaborationModeSelector = true },
                         onToggleModelSelector = { showModelSelector = !showModelSelector },
                         onNavigateToSessions = onNavigateToSessions,
                         onShowDirectoryPicker = onShowDirectoryPicker,
@@ -538,6 +590,31 @@ fun ConversationScreen(
                 ComposerPermissionsSheet(
                     threadKey = threadKey,
                     onDismiss = { showPermissionsSheet = false },
+                )
+            }
+        }
+
+        if (showCollaborationModeSelector) {
+            ModalBottomSheet(
+                onDismissRequest = { showCollaborationModeSelector = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                containerColor = LitterTheme.background,
+            ) {
+                CollaborationModeSheet(
+                    presets = collaborationModePresets.ifEmpty { fallbackCollaborationModePresets() },
+                    selectedMode = thread?.collaborationMode ?: uniffi.codex_mobile_client.AppModeKind.DEFAULT,
+                    isLoading = collaborationModesLoading,
+                    onDismiss = { showCollaborationModeSelector = false },
+                    onSelect = { mode ->
+                        showCollaborationModeSelector = false
+                        scope.launch {
+                            try {
+                                appModel.store.setThreadCollaborationMode(threadKey, mode)
+                            } catch (e: Exception) {
+                                slashErrorMessage = e.message ?: "Failed to switch collaboration mode"
+                            }
+                        }
+                    },
                 )
             }
         }
@@ -619,6 +696,36 @@ fun ConversationScreen(
             )
         }
 
+        thread?.pendingPlanImplementationPrompt?.let {
+            AlertDialog(
+                onDismissRequest = { appModel.store.dismissPlanImplementationPrompt(threadKey) },
+                title = { Text("Implement this plan?") },
+                text = { Text("Switch back to Default mode and send \"Implement the plan.\"") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                try {
+                                    appModel.store.implementPlan(threadKey)
+                                } catch (e: Exception) {
+                                    slashErrorMessage = e.message ?: "Failed to implement plan"
+                                }
+                            }
+                        },
+                    ) {
+                        Text("Yes, implement")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { appModel.store.dismissPlanImplementationPrompt(threadKey) },
+                    ) {
+                        Text("No, stay in Plan")
+                    }
+                },
+            )
+        }
+
         slashErrorMessage?.let { message ->
             AlertDialog(
                 onDismissRequest = { slashErrorMessage = null },
@@ -646,6 +753,106 @@ fun ConversationScreen(
         }
     }
 }
+
+private fun fallbackCollaborationModePresets(): List<uniffi.codex_mobile_client.AppCollaborationModePreset> =
+    listOf(
+        uniffi.codex_mobile_client.AppCollaborationModePreset(
+            kind = uniffi.codex_mobile_client.AppModeKind.DEFAULT,
+            name = "Default",
+            model = null,
+            reasoningEffort = null,
+        ),
+        uniffi.codex_mobile_client.AppCollaborationModePreset(
+            kind = uniffi.codex_mobile_client.AppModeKind.PLAN,
+            name = "Plan",
+            model = null,
+            reasoningEffort = uniffi.codex_mobile_client.ReasoningEffort.MEDIUM,
+        ),
+    )
+
+@Composable
+private fun CollaborationModeSheet(
+    presets: List<uniffi.codex_mobile_client.AppCollaborationModePreset>,
+    selectedMode: uniffi.codex_mobile_client.AppModeKind,
+    isLoading: Boolean,
+    onDismiss: () -> Unit,
+    onSelect: (uniffi.codex_mobile_client.AppModeKind) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Collaboration Mode",
+                color = LitterTheme.textPrimary,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            TextButton(onClick = onDismiss) {
+                Text("Done")
+            }
+        }
+
+        if (isLoading && presets.isEmpty()) {
+            CircularProgressIndicator(color = LitterTheme.accent)
+        }
+
+        presets.forEach { preset ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(LitterTheme.surface, RoundedCornerShape(16.dp))
+                    .clickable { onSelect(preset.kind) }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = preset.name,
+                        color = LitterTheme.textPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    preset.reasoningEffort?.let { effort ->
+                        Text(
+                            text = collaborationModeEffortLabel(effort),
+                            color = LitterTheme.textSecondary,
+                            fontSize = 11.sp,
+                        )
+                    }
+                }
+                if (preset.kind == selectedMode) {
+                    Text(
+                        text = "Selected",
+                        color = LitterTheme.accent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun collaborationModeEffortLabel(
+    effort: uniffi.codex_mobile_client.ReasoningEffort,
+): String =
+    when (effort) {
+        uniffi.codex_mobile_client.ReasoningEffort.NONE -> "None"
+        uniffi.codex_mobile_client.ReasoningEffort.MINIMAL -> "Minimal"
+        uniffi.codex_mobile_client.ReasoningEffort.LOW -> "Low"
+        uniffi.codex_mobile_client.ReasoningEffort.MEDIUM -> "Medium"
+        uniffi.codex_mobile_client.ReasoningEffort.HIGH -> "High"
+        uniffi.codex_mobile_client.ReasoningEffort.X_HIGH -> "XHigh"
+    }
 
 private data class PinnedContextData(
     val todoProgress: String?,

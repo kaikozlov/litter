@@ -32,7 +32,7 @@ final class TurnLiveActivityController {
             return
         }
 
-        let activeThreads = snapshot.threads.filter(\.hasActiveTurn)
+        let activeThreads = snapshot.threadsWithTrackedTurns
 
         if activeThreads.isEmpty {
             endCurrent(phase: .completed, snapshot: snapshot)

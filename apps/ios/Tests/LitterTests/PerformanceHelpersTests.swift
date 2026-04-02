@@ -84,6 +84,119 @@ final class PerformanceHelpersTests: XCTestCase {
         XCTAssertEqual(turns[0].preview.durationText, "840ms")
     }
 
+    func testRenderMergeIgnoresEmptyAssistantBetweenExplorationTurns() {
+        let baseTime = Date(timeIntervalSince1970: 300)
+        let firstTurn = TranscriptTurn.build(
+            from: [
+                makeExplorationItem(
+                    command: "cat reducer.rs",
+                    actionKind: .read,
+                    path: "/tmp/reducer.rs",
+                    turnId: "turn-1",
+                    turnIndex: 0,
+                    timestamp: baseTime
+                )
+            ],
+            threadStatus: .ready,
+            expandedRecentTurnCount: 1
+        )[0].withCollapsedByDefault(true)
+        let emptyAssistantTurn = TranscriptTurn.build(
+            from: [
+                makeAssistantItem(
+                    text: "",
+                    turnId: "turn-2",
+                    turnIndex: 1,
+                    timestamp: baseTime.addingTimeInterval(0.5)
+                )
+            ],
+            threadStatus: .ready,
+            expandedRecentTurnCount: 1
+        )[0].withCollapsedByDefault(true)
+        let secondTurn = TranscriptTurn.build(
+            from: [
+                makeExplorationItem(
+                    command: "rg pendingSteers",
+                    actionKind: .search,
+                    path: "/tmp/chatwidget.rs",
+                    query: "pendingSteers",
+                    turnId: "turn-3",
+                    turnIndex: 2,
+                    timestamp: baseTime.addingTimeInterval(1)
+                )
+            ],
+            threadStatus: .ready,
+            expandedRecentTurnCount: 1
+        )[0].withCollapsedByDefault(true)
+
+        let merged = TranscriptTurn.mergeConsecutiveExplorationTurnsForRendering([
+            firstTurn,
+            emptyAssistantTurn,
+            secondTurn,
+        ])
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged[0].items.count, 2)
+        XCTAssertEqual(merged[0].preview.toolCallCount, 2)
+        XCTAssertEqual(merged[0].preview.primaryText, "Read reducer.rs")
+        XCTAssertTrue(merged[0].isCollapsedByDefault)
+    }
+
+    func testRenderMergeStillSplitsOnVisibleAssistantBetweenExplorationTurns() {
+        let baseTime = Date(timeIntervalSince1970: 400)
+        let firstTurn = TranscriptTurn.build(
+            from: [
+                makeExplorationItem(
+                    command: "cat reducer.rs",
+                    actionKind: .read,
+                    path: "/tmp/reducer.rs",
+                    turnId: "turn-1",
+                    turnIndex: 0,
+                    timestamp: baseTime
+                )
+            ],
+            threadStatus: .ready,
+            expandedRecentTurnCount: 1
+        )[0]
+        let visibleAssistantTurn = TranscriptTurn.build(
+            from: [
+                makeAssistantItem(
+                    text: "Checking the reducer",
+                    turnId: "turn-2",
+                    turnIndex: 1,
+                    timestamp: baseTime.addingTimeInterval(0.5)
+                )
+            ],
+            threadStatus: .ready,
+            expandedRecentTurnCount: 1
+        )[0]
+        let secondTurn = TranscriptTurn.build(
+            from: [
+                makeExplorationItem(
+                    command: "rg pendingSteers",
+                    actionKind: .search,
+                    path: "/tmp/chatwidget.rs",
+                    query: "pendingSteers",
+                    turnId: "turn-3",
+                    turnIndex: 2,
+                    timestamp: baseTime.addingTimeInterval(1)
+                )
+            ],
+            threadStatus: .ready,
+            expandedRecentTurnCount: 1
+        )[0]
+
+        let merged = TranscriptTurn.mergeConsecutiveExplorationTurnsForRendering([
+            firstTurn,
+            visibleAssistantTurn,
+            secondTurn,
+        ])
+
+        XCTAssertEqual(merged.count, 3)
+        XCTAssertEqual(merged[0].items.count, 1)
+        XCTAssertEqual(merged[1].items.count, 1)
+        XCTAssertEqual(merged[2].items.count, 1)
+    }
+
     func testMessageRenderCacheReusesStableAssistantRevisionKey() {
         let cache = MessageRenderCache()
         let base64Pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8Vf0AAAAASUVORK5CYII="
@@ -206,7 +319,8 @@ final class PerformanceHelpersTests: XCTestCase {
         turnId: String?,
         turnIndex: Int?,
         timestamp: Date,
-        durationMs: Int? = nil
+        durationMs: Int? = nil,
+        actions: [ConversationCommandAction] = []
     ) -> ConversationItem {
         ConversationItem(
             id: UUID().uuidString,
@@ -219,12 +333,38 @@ final class PerformanceHelpersTests: XCTestCase {
                     exitCode: 0,
                     durationMs: durationMs,
                     processId: nil,
-                    actions: []
+                    actions: actions
                 )
             ),
             sourceTurnId: turnId,
             sourceTurnIndex: turnIndex,
             timestamp: timestamp
+        )
+    }
+
+    private func makeExplorationItem(
+        command: String,
+        actionKind: HydratedCommandActionKind,
+        path: String?,
+        query: String? = nil,
+        turnId: String?,
+        turnIndex: Int?,
+        timestamp: Date
+    ) -> ConversationItem {
+        makeCommandItem(
+            command: command,
+            turnId: turnId,
+            turnIndex: turnIndex,
+            timestamp: timestamp,
+            actions: [
+                ConversationCommandAction(
+                    kind: actionKind,
+                    command: command,
+                    name: nil,
+                    path: path,
+                    query: query
+                )
+            ]
         )
     }
 }

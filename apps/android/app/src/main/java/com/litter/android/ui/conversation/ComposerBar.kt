@@ -28,7 +28,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.DropdownMenu
@@ -82,12 +84,16 @@ import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.launch
 import uniffi.codex_mobile_client.ThreadKey
 import uniffi.codex_mobile_client.AppInterruptTurnRequest
+import uniffi.codex_mobile_client.AppQueuedFollowUpKind
+import uniffi.codex_mobile_client.AppQueuedFollowUpPreview
 
 /** Slash command definitions matching iOS. */
 internal data class SlashCommand(val name: String, val description: String)
 internal data class SlashInvocation(val command: SlashCommand, val args: String?)
+data class ActiveTaskSummary(val progress: String, val label: String)
 
 private val SLASH_COMMANDS = listOf(
+    SlashCommand("plan", "Switch collaboration mode"),
     SlashCommand("model", "Change model or reasoning effort"),
     SlashCommand("new", "Start a new session"),
     SlashCommand("fork", "Fork this conversation"),
@@ -107,11 +113,15 @@ private val SLASH_COMMANDS = listOf(
 @Composable
 fun ComposerBar(
     threadKey: ThreadKey,
+    collaborationMode: uniffi.codex_mobile_client.AppModeKind,
+    activePlanProgress: uniffi.codex_mobile_client.AppPlanProgressSnapshot? = null,
     activeTurnId: String?,
     contextPercent: Int?,
     isThinking: Boolean,
+    activeTaskSummary: ActiveTaskSummary? = null,
     queuedFollowUps: List<uniffi.codex_mobile_client.AppQueuedFollowUpPreview> = emptyList(),
     rateLimits: uniffi.codex_mobile_client.RateLimitSnapshot? = null,
+    onOpenCollaborationModePicker: (() -> Unit)? = null,
     onToggleModelSelector: (() -> Unit)? = null,
     onNavigateToSessions: (() -> Unit)? = null,
     onShowDirectoryPicker: (() -> Unit)? = null,
@@ -198,6 +208,7 @@ fun ComposerBar(
 
     fun dispatchSlashCommand(commandName: String, args: String?): Boolean {
         when (commandName) {
+            "plan" -> onOpenCollaborationModePicker?.invoke()
             "model" -> onToggleModelSelector?.invoke()
             "new" -> onShowDirectoryPicker?.invoke()
             "resume" -> onNavigateToSessions?.invoke()
@@ -286,6 +297,71 @@ fun ComposerBar(
             }
         }
 
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            CollaborationModeChip(
+                mode = collaborationMode,
+                onClick = { onOpenCollaborationModePicker?.invoke() },
+            )
+        }
+
+        activePlanProgress?.let { progress ->
+            PlanProgressPanel(progress = progress)
+        }
+
+        activeTaskSummary?.let { summary ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(LitterTheme.codeBackground.copy(alpha = 0.72f))
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "\u2610",
+                    color = LitterTheme.accent,
+                    fontSize = LitterTextStyle.caption.scaled,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Active tasks",
+                            color = LitterTheme.textPrimary,
+                            fontSize = LitterTextStyle.caption.scaled,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = summary.progress,
+                            color = LitterTheme.accent,
+                            fontSize = LitterTextStyle.caption.scaled,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = BerkeleyMono,
+                        )
+                    }
+                    Text(
+                        text = summary.label,
+                        color = LitterTheme.textSecondary,
+                        fontSize = LitterTextStyle.caption.scaled,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+
         // Inline pending user input prompt (above composer)
         if (pendingUserInput != null) {
             Column(
@@ -358,34 +434,23 @@ fun ComposerBar(
         }
 
         if (queuedFollowUps.isNotEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-                    .background(LitterTheme.codeBackground, RoundedCornerShape(12.dp))
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = if (queuedFollowUps.size == 1) "Queued Follow-Up" else "Queued Follow-Ups",
-                    color = LitterTheme.textPrimary,
-                    fontSize = LitterTextStyle.caption.scaled,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                queuedFollowUps.forEach { preview ->
-                    Text(
-                        text = preview.text,
-                        color = LitterTheme.textSecondary,
-                        fontSize = LitterTextStyle.caption.scaled,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(LitterTheme.surface, RoundedCornerShape(10.dp))
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                    )
-                }
-            }
+            QueuedFollowUpsPreviewPanel(
+                previews = queuedFollowUps,
+                onSteer = { preview ->
+                    scope.launch {
+                        runCatching {
+                            appModel.store.steerQueuedFollowUp(threadKey, preview.id)
+                        }
+                    }
+                },
+                onDelete = { preview ->
+                    scope.launch {
+                        runCatching {
+                            appModel.store.deleteQueuedFollowUp(threadKey, preview.id)
+                        }
+                    }
+                },
+            )
         }
 
         // Input row
@@ -715,6 +780,167 @@ fun ComposerBar(
     }
 }
 
+private data class QueuedFollowUpUiStyle(
+    val title: String,
+    val tint: Color,
+    val background: Color,
+    val border: Color,
+)
+
+@Composable
+private fun QueuedFollowUpsPreviewPanel(
+    previews: List<AppQueuedFollowUpPreview>,
+    onSteer: (AppQueuedFollowUpPreview) -> Unit,
+    onDelete: (AppQueuedFollowUpPreview) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .background(LitterTheme.codeBackground, RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Default.Schedule,
+                contentDescription = null,
+                tint = LitterTheme.accent,
+                modifier = Modifier.size(14.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "Queued Next",
+                color = LitterTheme.textPrimary,
+                fontSize = LitterTextStyle.caption.scaled,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = previews.size.toString(),
+                color = LitterTheme.textSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .background(LitterTheme.surface.copy(alpha = 0.9f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
+
+        previews.forEach { preview ->
+            QueuedFollowUpCard(
+                preview = preview,
+                onSteer = onSteer,
+                onDelete = onDelete,
+            )
+        }
+    }
+}
+
+@Composable
+private fun QueuedFollowUpCard(
+    preview: AppQueuedFollowUpPreview,
+    onSteer: (AppQueuedFollowUpPreview) -> Unit,
+    onDelete: (AppQueuedFollowUpPreview) -> Unit,
+) {
+    val style = queuedFollowUpUiStyle(preview.kind)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, style.border, RoundedCornerShape(12.dp))
+            .background(style.background, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .background(style.tint.copy(alpha = 0.14f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(style.tint, CircleShape),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = style.title,
+                    color = style.tint,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+
+            Text(
+                text = preview.text,
+                color = LitterTheme.textSecondary,
+                fontSize = LitterTextStyle.caption.scaled,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        if (preview.kind == AppQueuedFollowUpKind.MESSAGE) {
+            Text(
+                text = "\u21b3 Steer",
+                color = LitterTheme.textPrimary,
+                fontSize = LitterTextStyle.caption.scaled,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .background(LitterTheme.surface.copy(alpha = 0.96f), RoundedCornerShape(999.dp))
+                    .clickable { onSteer(preview) }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
+
+        IconButton(
+            onClick = { onDelete(preview) },
+            modifier = Modifier.size(30.dp),
+        ) {
+            Icon(
+                Icons.Default.Close,
+                contentDescription = "Delete queued follow-up",
+                tint = LitterTheme.textSecondary,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+    }
+}
+
+private fun queuedFollowUpUiStyle(kind: AppQueuedFollowUpKind): QueuedFollowUpUiStyle =
+    when (kind) {
+        AppQueuedFollowUpKind.MESSAGE ->
+            QueuedFollowUpUiStyle(
+                title = "Queued message",
+                tint = LitterTheme.accent,
+                background = LitterTheme.accent.copy(alpha = 0.08f),
+                border = LitterTheme.accent.copy(alpha = 0.24f),
+            )
+
+        AppQueuedFollowUpKind.PENDING_STEER ->
+            QueuedFollowUpUiStyle(
+                title = "Steer queued",
+                tint = LitterTheme.accentStrong,
+                background = LitterTheme.accentStrong.copy(alpha = 0.10f),
+                border = LitterTheme.accentStrong.copy(alpha = 0.28f),
+            )
+
+        AppQueuedFollowUpKind.RETRYING_STEER ->
+            QueuedFollowUpUiStyle(
+                title = "Retrying steer",
+                tint = LitterTheme.warning,
+                background = LitterTheme.warning.copy(alpha = 0.10f),
+                border = LitterTheme.warning.copy(alpha = 0.28f),
+            )
+    }
+
 private fun reasoningEffortFromServerValue(value: String): ReasoningEffort? =
     when (value.trim().lowercase()) {
         "none" -> ReasoningEffort.NONE
@@ -725,6 +951,129 @@ private fun reasoningEffortFromServerValue(value: String): ReasoningEffort? =
         "xhigh" -> ReasoningEffort.X_HIGH
         else -> null
     }
+
+@Composable
+private fun CollaborationModeChip(
+    mode: uniffi.codex_mobile_client.AppModeKind,
+    onClick: () -> Unit,
+) {
+    val label = when (mode) {
+        uniffi.codex_mobile_client.AppModeKind.PLAN -> "Plan"
+        uniffi.codex_mobile_client.AppModeKind.DEFAULT -> "Default"
+    }
+    val container = if (mode == uniffi.codex_mobile_client.AppModeKind.PLAN) {
+        LitterTheme.accent
+    } else {
+        LitterTheme.surfaceLight
+    }
+    val contentColor = if (mode == uniffi.codex_mobile_client.AppModeKind.PLAN) {
+        Color.Black
+    } else {
+        LitterTheme.textPrimary
+    }
+
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(container)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            color = contentColor,
+            fontSize = LitterTextStyle.caption.scaled,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Icon(
+            Icons.Default.KeyboardArrowDown,
+            contentDescription = "Open collaboration mode picker",
+            tint = contentColor,
+            modifier = Modifier.size(14.dp),
+        )
+    }
+}
+
+@Composable
+private fun PlanProgressPanel(
+    progress: uniffi.codex_mobile_client.AppPlanProgressSnapshot,
+) {
+    val completed = remember(progress.plan) {
+        progress.plan.count { it.status == uniffi.codex_mobile_client.AppPlanStepStatus.COMPLETED }
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(LitterTheme.codeBackground.copy(alpha = 0.82f))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Plan Progress",
+                color = LitterTheme.textPrimary,
+                fontSize = LitterTextStyle.caption.scaled,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "$completed/${progress.plan.size}",
+                color = LitterTheme.accent,
+                fontSize = LitterTextStyle.caption.scaled,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = BerkeleyMono,
+            )
+        }
+        progress.explanation?.takeIf { it.isNotBlank() }?.let { explanation ->
+            Text(
+                text = explanation,
+                color = LitterTheme.textSecondary,
+                fontSize = LitterTextStyle.caption.scaled,
+            )
+        }
+        progress.plan.forEachIndexed { index, step ->
+            val icon = when (step.status) {
+                uniffi.codex_mobile_client.AppPlanStepStatus.COMPLETED -> "✓"
+                uniffi.codex_mobile_client.AppPlanStepStatus.IN_PROGRESS -> "●"
+                uniffi.codex_mobile_client.AppPlanStepStatus.PENDING -> "○"
+            }
+            val tint = when (step.status) {
+                uniffi.codex_mobile_client.AppPlanStepStatus.COMPLETED -> LitterTheme.success
+                uniffi.codex_mobile_client.AppPlanStepStatus.IN_PROGRESS -> LitterTheme.warning
+                uniffi.codex_mobile_client.AppPlanStepStatus.PENDING -> LitterTheme.textMuted
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Text(
+                    text = icon,
+                    color = tint,
+                    fontSize = LitterTextStyle.caption.scaled,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "${index + 1}.",
+                    color = LitterTheme.textMuted,
+                    fontSize = LitterTextStyle.caption.scaled,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = BerkeleyMono,
+                )
+                Text(
+                    text = step.step,
+                    color = LitterTheme.textPrimary,
+                    fontSize = LitterTextStyle.caption.scaled,
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun AttachmentActionRow(

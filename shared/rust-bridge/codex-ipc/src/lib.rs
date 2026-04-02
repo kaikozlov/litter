@@ -31,6 +31,6 @@ pub use conversation_state::*;
 pub use error::{IpcError, RequestError, TransportError};
 pub use handler::RequestHandler;
 pub use protocol::envelope::*;
-pub use protocol::method::Method;
+pub use protocol::method::{Method, MethodKind};
 pub use protocol::params::*;
 pub use wire_trace::*;

@@ -27,6 +27,7 @@ data class SavedServer(
     val websocketURL: String? = null,
     val os: String? = null,
     val sshBanner: String? = null,
+    val rememberedByUser: Boolean = false,
 ) {
     /** Stable key for deduplication across discovery cycles. */
     val deduplicationKey: String
@@ -58,6 +59,7 @@ data class SavedServer(
         websocketURL?.let { put("websocketURL", it) }
         os?.let { put("os", it) }
         sshBanner?.let { put("sshBanner", it) }
+        put("rememberedByUser", rememberedByUser)
     }
 
     val availableDirectCodexPorts: List<Int>
@@ -185,6 +187,11 @@ data class SavedServer(
             websocketURL = if (obj.has("websocketURL")) obj.getString("websocketURL") else null,
             os = if (obj.has("os")) obj.getString("os") else null,
             sshBanner = if (obj.has("sshBanner")) obj.getString("sshBanner") else null,
+            rememberedByUser = if (obj.has("rememberedByUser")) {
+                obj.optBoolean("rememberedByUser")
+            } else {
+                true
+            },
         )
 
         fun from(server: AppDiscoveredServer): SavedServer = SavedServer(
@@ -239,10 +246,21 @@ object SavedServerStore {
 
     fun upsert(context: Context, server: SavedServer) {
         val existing = load(context).toMutableList()
+        val prior = existing.firstOrNull { it.id == server.id || it.deduplicationKey == server.deduplicationKey }
         existing.removeAll { it.id == server.id || it.deduplicationKey == server.deduplicationKey }
-        existing.add(server)
+        existing.add(server.copy(rememberedByUser = prior?.rememberedByUser ?: server.rememberedByUser))
         save(context, existing)
     }
+
+    fun remember(context: Context, server: SavedServer) {
+        val existing = load(context).toMutableList()
+        existing.removeAll { it.id == server.id || it.deduplicationKey == server.deduplicationKey }
+        existing.add(server.copy(rememberedByUser = true))
+        save(context, existing)
+    }
+
+    fun remembered(context: Context): List<SavedServer> =
+        load(context).filter { it.rememberedByUser }
 
     fun remove(context: Context, serverId: String) {
         val existing = load(context).toMutableList()

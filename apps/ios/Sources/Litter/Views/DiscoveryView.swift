@@ -122,7 +122,6 @@ struct DiscoveryView: View {
                 ForEach(server.availableDirectCodexPorts, id: \.self) { port in
                     Button("Use Codex (\(port))") {
                         let preferredServer = server.withConnectionPreference(.directCodex, codexPort: port)
-                        SavedServerStore.upsert(preferredServer)
                         connectionChoiceServer = nil
                         Task { await connectToServer(preferredServer) }
                     }
@@ -130,7 +129,6 @@ struct DiscoveryView: View {
                 if server.canConnectViaSSH {
                     Button("Connect via SSH") {
                         let preferredServer = server.withConnectionPreference(.ssh)
-                        SavedServerStore.upsert(preferredServer)
                         connectionChoiceServer = nil
                         sshServer = preferredServer
                     }
@@ -771,7 +769,7 @@ struct DiscoveryView: View {
                     port: 0
                 )
                 await appModel.restoreStoredLocalChatGPTAuth(serverId: server.id)
-                SavedServerStore.upsert(server)
+                SavedServerStore.remember(server)
             case .remote(let host, let port):
                 startedAsyncBootstrap = false
                 connectedServerId = try await appModel.serverBridge.connectRemoteServer(
@@ -780,7 +778,7 @@ struct DiscoveryView: View {
                     host: host,
                     port: port
                 )
-                SavedServerStore.upsert(server.withConnectionPreference(.directCodex, codexPort: port))
+                SavedServerStore.remember(server.withConnectionPreference(.directCodex, codexPort: port))
             case .remoteURL(let url):
                 startedAsyncBootstrap = false
                 connectedServerId = try await appModel.serverBridge.connectRemoteUrlServer(
@@ -788,7 +786,7 @@ struct DiscoveryView: View {
                     displayName: server.name,
                     websocketUrl: url.absoluteString
                 )
-                SavedServerStore.upsert(server)
+                SavedServerStore.remember(server)
             case .sshThenRemote(let host, let credentials):
                 startedAsyncBootstrap = true
                 connectedServerId = try await connectViaSSH(server: server, host: host, credentials: credentials)
@@ -825,7 +823,7 @@ struct DiscoveryView: View {
             credentials: credentials,
             port: server.resolvedSSHPort
         )
-        SavedServerStore.upsert(
+        SavedServerStore.remember(
             server.withConnectionPreference(.ssh)
         )
         return serverId

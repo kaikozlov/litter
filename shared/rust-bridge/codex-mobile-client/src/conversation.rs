@@ -7,6 +7,10 @@
 use std::path::PathBuf;
 
 use crate::conversation_uniffi::*;
+use crate::parser::{
+    CodeReviewCodeLocation, CodeReviewFinding, CodeReviewLineRange, CodeReviewPayload,
+    parse_code_review_message,
+};
 use crate::types::{AppMessagePhase, AppOperationStatus, AppSubagentStatus};
 use codex_app_server_protocol::{
     CollabAgentStatus, CollabAgentTool, CollabAgentToolCallStatus, CommandAction,
@@ -33,10 +37,7 @@ pub struct HydrationOptions {
 
 /// Convert a list of upstream [`Turn`] values into a flat list of
 /// [`HydratedConversationItem`] suitable for UI rendering.
-pub fn hydrate_turns(
-    turns: &[Turn],
-    opts: &HydrationOptions,
-) -> Vec<HydratedConversationItem> {
+pub fn hydrate_turns(turns: &[Turn], opts: &HydrationOptions) -> Vec<HydratedConversationItem> {
     let mut items = Vec::with_capacity(turns.len() * 3);
     for (turn_index, turn) in turns.iter().enumerate() {
         for thread_item in &turn.items {
@@ -69,6 +70,51 @@ fn hydrate_message_phase(
     })
 }
 
+fn hydrate_code_review_line_range(range: &CodeReviewLineRange) -> HydratedCodeReviewLineRangeData {
+    HydratedCodeReviewLineRangeData {
+        start: range.start,
+        end: range.end,
+    }
+}
+
+fn hydrate_code_review_location(
+    location: &CodeReviewCodeLocation,
+) -> HydratedCodeReviewCodeLocationData {
+    HydratedCodeReviewCodeLocationData {
+        absolute_file_path: location.absolute_file_path.clone(),
+        line_range: location
+            .line_range
+            .as_ref()
+            .map(hydrate_code_review_line_range),
+    }
+}
+
+fn hydrate_code_review_finding(finding: &CodeReviewFinding) -> HydratedCodeReviewFindingData {
+    HydratedCodeReviewFindingData {
+        title: finding.title.clone(),
+        body: finding.body.clone(),
+        confidence_score: finding.confidence_score,
+        priority: finding.priority,
+        code_location: finding
+            .code_location
+            .as_ref()
+            .map(hydrate_code_review_location),
+    }
+}
+
+fn hydrate_code_review_payload(review: &CodeReviewPayload) -> HydratedCodeReviewData {
+    HydratedCodeReviewData {
+        findings: review
+            .findings
+            .iter()
+            .map(hydrate_code_review_finding)
+            .collect(),
+        overall_correctness: review.overall_correctness.clone(),
+        overall_explanation: review.overall_explanation.clone(),
+        overall_confidence_score: review.overall_confidence_score,
+    }
+}
+
 fn convert_thread_item(
     item: &ThreadItem,
     item_id: &str,
@@ -95,15 +141,17 @@ fn convert_thread_item(
             if trimmed.is_empty() {
                 return None;
             }
-            (
+            let content = if let Some(review) = parse_code_review_message(trimmed) {
+                HydratedConversationItemContent::CodeReview(hydrate_code_review_payload(&review))
+            } else {
                 HydratedConversationItemContent::Assistant(HydratedAssistantMessageData {
                     text: trimmed.to_string(),
                     agent_nickname: opts.default_agent_nickname.clone(),
                     agent_role: opts.default_agent_role.clone(),
                     phase: hydrate_message_phase(phase.clone()),
-                }),
-                false,
-            )
+                })
+            };
+            (content, false)
         }
         ThreadItem::Plan { text, .. } => {
             let trimmed = text.trim();
@@ -398,11 +446,7 @@ pub fn make_model_rerouted_item(
     }
 }
 
-pub fn make_error_item(
-    id: String,
-    message: String,
-    code: Option<i64>,
-) -> HydratedConversationItem {
+pub fn make_error_item(id: String, message: String, code: Option<i64>) -> HydratedConversationItem {
     HydratedConversationItem {
         id,
         content: HydratedConversationItemContent::Error(HydratedErrorData {
@@ -527,6 +571,7 @@ fn convert_command_action(action: &CommandAction) -> HydratedCommandActionData {
 }
 
 fn convert_file_change(change: &FileUpdateChange) -> HydratedFileChangeEntryData {
+    let (additions, deletions) = diff_stats(&change.diff);
     let kind = match &change.kind {
         PatchChangeKind::Add => "add",
         PatchChangeKind::Delete => "delete",
@@ -536,7 +581,22 @@ fn convert_file_change(change: &FileUpdateChange) -> HydratedFileChangeEntryData
         path: change.path.clone(),
         kind: kind.to_string(),
         diff: change.diff.clone(),
+        additions,
+        deletions,
     }
+}
+
+fn diff_stats(diff: &str) -> (u32, u32) {
+    let mut additions = 0;
+    let mut deletions = 0;
+    for line in diff.lines() {
+        if line.starts_with('+') && !line.starts_with("+++") {
+            additions += 1;
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            deletions += 1;
+        }
+    }
+    (additions, deletions)
 }
 
 // ---------------------------------------------------------------------------
@@ -752,6 +812,87 @@ mod tests {
             }
             _ => panic!("expected Assistant content"),
         }
+    }
+
+    #[test]
+    fn test_agent_message_code_review_hydrates_as_code_review() {
+        let turns = vec![make_turn(
+            "t1",
+            vec![ThreadItem::AgentMessage {
+                id: "a1".into(),
+                text: serde_json::json!({
+                    "findings": [
+                        {
+                            "title": "[P1] Fall back to turn/start when IPC queue sync fails",
+                            "body": "A queued follow-up can get stuck indefinitely.",
+                            "confidence_score": 0.97,
+                            "priority": 1,
+                            "code_location": {
+                                "absolute_file_path": "/Users/sigkitten/dev/litter/shared/rust-bridge/codex-mobile-client/src/mobile_client_impl.rs",
+                                "line_range": { "start": 799, "end": 815 }
+                            }
+                        }
+                    ],
+                    "overall_correctness": "incorrect",
+                    "overall_explanation": "There are blocking issues.",
+                    "overall_confidence_score": 0.92
+                })
+                .to_string(),
+                phase: Some(codex_protocol::models::MessagePhase::FinalAnswer),
+                memory_citation: None,
+            }],
+        )];
+
+        let items = hydrate_turns(&turns, &HydrationOptions::default());
+        assert_eq!(items.len(), 1);
+        match &items[0].content {
+            HydratedConversationItemContent::CodeReview(data) => {
+                assert_eq!(data.findings.len(), 1);
+                assert_eq!(
+                    data.findings[0].title,
+                    "Fall back to turn/start when IPC queue sync fails"
+                );
+                assert_eq!(data.findings[0].priority, Some(1));
+                assert_eq!(data.overall_correctness.as_deref(), Some("incorrect"));
+            }
+            _ => panic!("expected CodeReview content"),
+        }
+    }
+
+    #[test]
+    fn test_diff_stats_ignores_headers() {
+        let diff = "\
+diff --git a/parser.rs b/parser.rs\n\
+--- a/parser.rs\n\
++++ b/parser.rs\n\
+@@ -1,3 +1,4 @@\n\
+ line one\n\
+-line two\n\
++line two updated\n\
++line three\n";
+
+        assert_eq!(diff_stats(diff), (2, 1));
+    }
+
+    #[test]
+    fn test_agent_message_markdown_stays_assistant() {
+        let turns = vec![make_turn(
+            "t1",
+            vec![ThreadItem::AgentMessage {
+                id: "a1".into(),
+                text: "Here is a regular markdown answer.".into(),
+                phase: Some(codex_protocol::models::MessagePhase::FinalAnswer),
+                memory_citation: None,
+            }],
+        )];
+
+        let items = hydrate_turns(&turns, &HydrationOptions::default());
+        assert_eq!(items.len(), 1);
+        assert!(matches!(
+            &items[0].content,
+            HydratedConversationItemContent::Assistant(data)
+            if data.text == "Here is a regular markdown answer."
+        ));
     }
 
     #[test]

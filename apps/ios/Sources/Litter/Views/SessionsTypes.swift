@@ -4,8 +4,22 @@ extension AppSessionSummary: Identifiable {
     public var id: ThreadKey { key }
     var serverId: String { key.serverId }
     var threadId: String { key.threadId }
+    var displayTitle: String {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedTitle.isEmpty {
+            return trimmedTitle
+        }
+
+        let trimmedPreview = preview.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedPreview.isEmpty {
+            return trimmedPreview
+        }
+
+        return "Untitled session"
+    }
+
     var sessionTitle: String {
-        title
+        displayTitle
     }
 
     var sessionModelLabel: String? {

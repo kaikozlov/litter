@@ -12,16 +12,21 @@ final class AppLifecycleController {
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
     private var bgWakeCount: Int = 0
     private var notificationPermissionRequested = false
+    private var hasRecoveredCurrentForegroundSession = false
+    private var hasEnteredBackgroundSinceLaunch = false
+    private var foregroundRecoveryTask: Task<Void, Never>?
+    private var foregroundRecoveryID: UUID?
 
     func setDevicePushToken(_ token: Data) {
         devicePushToken = token
     }
 
     func reconnectSavedServers(appModel: AppModel) async {
-        for savedServer in SavedServerStore.load() {
+        let plans = SavedServerStore.rememberedServers().compactMap { savedServer -> SavedReconnectPlan? in
             let server = savedServer.toDiscoveredServer()
-            if appModel.snapshot?.serverSnapshot(for: server.id)?.isConnected == true {
-                continue
+            if let snapshot = appModel.snapshot?.serverSnapshot(for: server.id),
+               snapshot.health != .disconnected {
+                return nil
             }
 
             do {
@@ -30,10 +35,9 @@ final class AppLifecycleController {
                         host: server.hostname,
                         port: Int(server.resolvedSSHPort)
                     ) else {
-                        continue
+                        return nil
                     }
-                    try await reconnectSSHServer(
-                        appModel: appModel,
+                    return .ssh(
                         serverId: server.id,
                         displayName: server.name,
                         host: server.hostname,
@@ -43,29 +47,26 @@ final class AppLifecycleController {
                 } else if let target = server.connectionTarget {
                     switch target {
                     case .local:
-                        _ = try await appModel.serverBridge.connectLocalServer(
+                        return .local(
                             serverId: server.id,
                             displayName: server.name,
-                            host: "127.0.0.1",
-                            port: 0
+                            restoreLocalAuth: true
                         )
-                        await appModel.restoreStoredLocalChatGPTAuth(serverId: server.id)
                     case .remote(let host, let port):
-                        _ = try await appModel.serverBridge.connectRemoteServer(
+                        return .remote(
                             serverId: server.id,
                             displayName: server.name,
                             host: host,
                             port: port
                         )
                     case .remoteURL(let url):
-                        _ = try await appModel.serverBridge.connectRemoteUrlServer(
+                        return .remoteURL(
                             serverId: server.id,
                             displayName: server.name,
                             websocketUrl: url.absoluteString
                         )
                     case .sshThenRemote(let host, let credentials):
-                        try await reconnectSSHServer(
-                            appModel: appModel,
+                        return .ssh(
                             serverId: server.id,
                             displayName: server.name,
                             host: host,
@@ -78,8 +79,7 @@ final class AppLifecycleController {
                     host: server.hostname,
                     port: Int(server.resolvedSSHPort)
                 ) {
-                    try await reconnectSSHServer(
-                        appModel: appModel,
+                    return .ssh(
                         serverId: server.id,
                         displayName: server.name,
                         host: server.hostname,
@@ -87,7 +87,21 @@ final class AppLifecycleController {
                         credentials: credential.toConnectionCredential()
                     )
                 }
-            } catch {}
+            } catch {
+                return nil
+            }
+            return nil
+        }
+
+        let tasks = plans.map { plan in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.runReconnectPlan(plan, appModel: appModel)
+            }
+        }
+
+        for task in tasks {
+            await task.value
         }
 
         await appModel.refreshSnapshot()
@@ -120,7 +134,7 @@ final class AppLifecycleController {
         let ipcSocketPathOverride = ExperimentalFeatures.shared.ipcSocketPathOverride()
         switch credentials {
         case .password(let username, let password):
-            _ = try await appModel.ssh.sshConnectRemoteServer(
+            _ = try await appModel.ssh.sshStartRemoteServerConnect(
                 serverId: serverId,
                 displayName: displayName,
                 host: host,
@@ -134,7 +148,7 @@ final class AppLifecycleController {
                 ipcSocketPathOverride: ipcSocketPathOverride
             )
         case .key(let username, let privateKey, let passphrase):
-            _ = try await appModel.ssh.sshConnectRemoteServer(
+            _ = try await appModel.ssh.sshStartRemoteServerConnect(
                 serverId: serverId,
                 displayName: displayName,
                 host: host,
@@ -155,8 +169,13 @@ final class AppLifecycleController {
         hasActiveVoiceSession: Bool,
         liveActivities: TurnLiveActivityController
     ) {
+        hasEnteredBackgroundSinceLaunch = true
+        hasRecoveredCurrentForegroundSession = false
+        foregroundRecoveryTask?.cancel()
+        foregroundRecoveryTask = nil
+        foregroundRecoveryID = nil
         guard !hasActiveVoiceSession else { return }
-        let activeThreads = snapshot?.threads.filter(\.hasActiveTurn) ?? []
+        let activeThreads = snapshot?.threadsWithTrackedTurns ?? []
         guard !activeThreads.isEmpty else { return }
 
         backgroundedTurnKeys = Set(activeThreads.map(\.key))
@@ -181,21 +200,43 @@ final class AppLifecycleController {
         deregisterPushProxy()
         endBackgroundTaskIfNeeded()
         guard !hasActiveVoiceSession else { return }
+        guard !hasRecoveredCurrentForegroundSession else { return }
+        hasRecoveredCurrentForegroundSession = true
+        let needsInitialReconnect = !hasEnteredBackgroundSinceLaunch
+        let preResumeActiveSSHServerIDs = Set((appModel.snapshot?.servers ?? [])
+            .filter { !$0.isLocal && $0.health != .disconnected }
+            .map(\.serverId))
+        let currentSnapshot = appModel.snapshot
+        let backgroundedKeys = backgroundedTurnKeys
         backgroundedTurnKeys.removeAll()
+        var keysToRefresh = Set(currentSnapshot?.threads.compactMap { thread in
+            currentSnapshot?.threadHasTrackedTurn(for: thread.key) == true ? thread.key : nil
+        } ?? [])
+        if let activeKey = currentSnapshot?.activeThread {
+            keysToRefresh.insert(activeKey)
+        }
 
-        Task {
-            await reconnectSavedServers(appModel: appModel)
-            var keysToRefresh = Set(appModel.snapshot?.threads.compactMap {
-                $0.hasActiveTurn ? $0.key : nil
-            } ?? [])
-            if let activeKey = appModel.snapshot?.activeThread {
-                keysToRefresh.insert(activeKey)
+        foregroundRecoveryTask?.cancel()
+        let recoveryID = UUID()
+        foregroundRecoveryID = recoveryID
+
+        foregroundRecoveryTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.foregroundRecoveryID == recoveryID {
+                    self.foregroundRecoveryTask = nil
+                    self.foregroundRecoveryID = nil
+                }
             }
-            await refreshTrackedThreads(appModel: appModel, keys: Array(keysToRefresh))
-            await appModel.refreshSnapshot()
-            await MainActor.run {
-                liveActivities.sync(appModel.snapshot)
-            }
+
+            await self.performForegroundRecovery(
+                appModel: appModel,
+                liveActivities: liveActivities,
+                needsInitialReconnect: needsInitialReconnect,
+                reconnectActiveServerIDs: preResumeActiveSSHServerIDs,
+                backgroundedKeys: backgroundedKeys,
+                keysToRefresh: keysToRefresh
+            )
         }
     }
 
@@ -214,7 +255,7 @@ final class AppLifecycleController {
         guard let snapshot = appModel.snapshot else { return }
         for key in keys {
             guard let thread = snapshot.threadSnapshot(for: key) else { continue }
-            if thread.hasActiveTurn {
+            if snapshot.threadHasTrackedTurn(for: key) {
                 liveActivities.updateBackgroundWake(for: thread, pushCount: bgWakeCount)
             } else {
                 backgroundedTurnKeys.remove(key)
@@ -235,6 +276,154 @@ final class AppLifecycleController {
         guard !notificationPermissionRequested else { return }
         notificationPermissionRequested = true
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    private func reconnectActiveSSHServers(
+        appModel: AppModel,
+        serverIDs: Set<String>
+    ) async {
+        guard !serverIDs.isEmpty else { return }
+
+        let plans = SavedServerStore.rememberedServers().compactMap { savedServer -> SavedReconnectPlan? in
+            guard savedServer.preferredConnectionMode == .ssh,
+                  serverIDs.contains(savedServer.id) else {
+                return nil
+            }
+            let server = savedServer.toDiscoveredServer()
+            guard let credential = try? SSHCredentialStore.shared.load(
+                host: server.hostname,
+                port: Int(server.resolvedSSHPort)
+            ) else {
+                return nil
+            }
+            return .ssh(
+                serverId: server.id,
+                displayName: server.name,
+                host: server.hostname,
+                port: server.resolvedSSHPort,
+                credentials: credential.toConnectionCredential()
+            )
+        }
+
+        let tasks = plans.map { plan in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.runReconnectPlan(plan, appModel: appModel)
+            }
+        }
+
+        for task in tasks {
+            await task.value
+        }
+
+        await appModel.refreshSnapshot()
+    }
+
+    private func runReconnectPlan(
+        _ plan: SavedReconnectPlan,
+        appModel: AppModel
+    ) async {
+        do {
+            switch plan {
+            case .ssh(let serverId, let displayName, let host, let port, let credentials):
+                try await reconnectSSHServer(
+                    appModel: appModel,
+                    serverId: serverId,
+                    displayName: displayName,
+                    host: host,
+                    port: port,
+                    credentials: credentials
+                )
+            case .local(let serverId, let displayName, let restoreLocalAuth):
+                _ = try await appModel.serverBridge.connectLocalServer(
+                    serverId: serverId,
+                    displayName: displayName,
+                    host: "127.0.0.1",
+                    port: 0
+                )
+                if restoreLocalAuth {
+                    await appModel.restoreStoredLocalChatGPTAuth(serverId: serverId)
+                }
+            case .remote(let serverId, let displayName, let host, let port):
+                _ = try await appModel.serverBridge.connectRemoteServer(
+                    serverId: serverId,
+                    displayName: displayName,
+                    host: host,
+                    port: port
+                )
+            case .remoteURL(let serverId, let displayName, let websocketUrl):
+                _ = try await appModel.serverBridge.connectRemoteUrlServer(
+                    serverId: serverId,
+                    displayName: displayName,
+                    websocketUrl: websocketUrl
+                )
+            }
+        } catch {}
+    }
+
+    private enum SavedReconnectPlan {
+        case ssh(
+            serverId: String,
+            displayName: String,
+            host: String,
+            port: UInt16,
+            credentials: SSHCredentials
+        )
+        case local(
+            serverId: String,
+            displayName: String,
+            restoreLocalAuth: Bool
+        )
+        case remote(
+            serverId: String,
+            displayName: String,
+            host: String,
+            port: UInt16
+        )
+        case remoteURL(
+            serverId: String,
+            displayName: String,
+            websocketUrl: String
+        )
+    }
+
+    private func performForegroundRecovery(
+        appModel: AppModel,
+        liveActivities: TurnLiveActivityController,
+        needsInitialReconnect: Bool,
+        reconnectActiveServerIDs: Set<String>,
+        backgroundedKeys: Set<ThreadKey>,
+        keysToRefresh: Set<ThreadKey>
+    ) async {
+        if needsInitialReconnect {
+            await reconnectSavedServers(appModel: appModel)
+            guard !Task.isCancelled else { return }
+        }
+
+        let serverIDsToReconnect: Set<String>
+        if needsInitialReconnect {
+            serverIDsToReconnect = reconnectActiveServerIDs
+        } else {
+            let focusedServerIDs = Set(backgroundedKeys.map(\.serverId))
+                .union(keysToRefresh.map(\.serverId))
+            serverIDsToReconnect = reconnectActiveServerIDs.intersection(focusedServerIDs)
+        }
+
+        if !serverIDsToReconnect.isEmpty {
+            await reconnectActiveSSHServers(
+                appModel: appModel,
+                serverIDs: serverIDsToReconnect
+            )
+            guard !Task.isCancelled else { return }
+        }
+
+        if !keysToRefresh.isEmpty {
+            await refreshTrackedThreads(appModel: appModel, keys: Array(keysToRefresh))
+            guard !Task.isCancelled else { return }
+        }
+
+        await appModel.refreshSnapshot()
+        liveActivities.sync(appModel.snapshot)
     }
 
     private func refreshTrackedThreads(appModel: AppModel, keys: [ThreadKey]) async {

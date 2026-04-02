@@ -1,5 +1,5 @@
 use crate::hydration::AppMessageSegment;
-use crate::parser::AppToolCallCard;
+use crate::parser::{AppCodeReviewPayload, AppToolCallCard};
 
 #[derive(uniffi::Object)]
 pub struct MessageParser;
@@ -16,6 +16,12 @@ impl MessageParser {
             .iter()
             .map(AppToolCallCard::from)
             .collect()
+    }
+
+    pub fn parse_code_review_typed(&self, text: String) -> Option<AppCodeReviewPayload> {
+        crate::parser::parse_code_review_message(&text)
+            .as_ref()
+            .map(AppCodeReviewPayload::from)
     }
 
     pub fn extract_segments_typed(&self, text: String) -> Vec<AppMessageSegment> {

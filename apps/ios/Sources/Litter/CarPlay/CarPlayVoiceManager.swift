@@ -36,9 +36,7 @@ final class CarPlayVoiceManager {
             ?? []
 
         for summary in sorted {
-            let title = summary.preview.isEmpty
-                ? "Session"
-                : String(summary.preview.prefix(60))
+            let title = String(summary.displayTitle.prefix(60))
             let detail = summary.key.serverId == VoiceRuntimeController.localServerID
                 ? "local" : summary.serverDisplayName
             let item = CPListItem(text: title, detailText: detail)

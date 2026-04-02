@@ -10,7 +10,7 @@ struct PreparedImageAttachment {
     }
 
     var chatImage: ChatImage {
-        ChatImage(data: data)
+        ChatImage(data: data, mimeType: mimeType)
     }
 
     private var dataURI: String {

@@ -148,14 +148,16 @@ ios-sim-run: ios-sim-fast
 
 ios-device-run: ios-device-fast
 	@echo "==> Installing and launching on connected device..."
-	@APP_PATH=$$(/bin/ls -dt $(HOME)/Library/Developer/Xcode/DerivedData/Litter-*/Build/Products/Debug-iphoneos/Litter.app 2>/dev/null | head -1) && \
+	@set -o pipefail && \
+	APP_PATH=$$(/bin/ls -dt $(HOME)/Library/Developer/Xcode/DerivedData/Litter-*/Build/Products/Debug-iphoneos/Litter.app 2>/dev/null | head -1) && \
 	if [ -z "$$APP_PATH" ]; then echo "ERROR: Litter.app not found in DerivedData"; exit 1; fi && \
 	DEVICE_ID=$$(xcrun devicectl list devices 2>/dev/null | grep -E 'available|connected' | grep -v 'Simulator' | grep -oE '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}' | head -1) && \
 	if [ -z "$$DEVICE_ID" ]; then echo "ERROR: no connected device found"; exit 1; fi && \
 	echo "==> Installing on device $$DEVICE_ID..." && \
 	xcrun devicectl device install app --device "$$DEVICE_ID" "$$APP_PATH" && \
-	echo "==> Launching..." && \
-	xcrun devicectl device process launch --device "$$DEVICE_ID" com.sigkitten.litter
+	echo "==> Launching with attached console and timestamps (Ctrl+C stops the app)..." && \
+	xcrun devicectl device process launch --device "$$DEVICE_ID" --terminate-existing --console com.sigkitten.litter 2>&1 | \
+	perl -MPOSIX=strftime -ne 'BEGIN { $$| = 1 } print strftime("[%Y-%m-%d %H:%M:%S] ", localtime), $$_'
 
 ios-run: ios
 	@open $(IOS_DIR)/Litter.xcodeproj
@@ -241,6 +243,7 @@ help:
 		'make ios-sim-run        fast sim build + install + launch on booted simulator' \
 		'make ios-device         full iOS package lane + device build' \
 		'make ios-device-fast    fast device lane using raw staticlib outputs' \
+		'make ios-device-run     fast device build + install + launch with attached console on connected device' \
 		'make rust-ios-package   full Rust iOS package lane (bindings + xcframework)' \
 		'make rust-ios-sim-fast  fast Rust iOS simulator lane (raw staticlib only)' \
 		'make rust-ios-device-fast fast Rust iOS device lane (raw staticlib only)' \

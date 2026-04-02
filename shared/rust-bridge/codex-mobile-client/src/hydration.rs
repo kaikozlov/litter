@@ -341,7 +341,9 @@ fn line_byte_offsets(text: &str) -> Vec<(usize, &str)> {
 }
 
 fn overlaps_range(start: usize, end: usize, ranges: &[(usize, usize)]) -> bool {
-    ranges.iter().any(|(range_start, range_end)| start < *range_end && end > *range_start)
+    ranges
+        .iter()
+        .any(|(range_start, range_end)| start < *range_end && end > *range_start)
 }
 
 fn is_escaped(text: &str, index: usize) -> bool {
@@ -449,7 +451,10 @@ fn find_closing_math_delimiter(
     None
 }
 
-fn find_math_spans(text: &str, excluded_ranges: &[(usize, usize)]) -> Vec<(usize, usize, MessageSegment)> {
+fn find_math_spans(
+    text: &str,
+    excluded_ranges: &[(usize, usize)],
+) -> Vec<(usize, usize, MessageSegment)> {
     let bytes = text.as_bytes();
     let mut spans = Vec::new();
     let mut cursor = 0usize;
@@ -584,8 +589,10 @@ pub fn extract_message_segments(text: &str) -> Vec<MessageSegment> {
     // Collect all "spans" (start, end, segment) sorted by start position.
     let mut spans: Vec<(usize, usize, MessageSegment)> = Vec::new();
     let code_fences = find_code_fences(text);
-    let code_fence_ranges: Vec<(usize, usize)> =
-        code_fences.iter().map(|(start, end, _, _)| (*start, *end)).collect();
+    let code_fence_ranges: Vec<(usize, usize)> = code_fences
+        .iter()
+        .map(|(start, end, _, _)| (*start, *end))
+        .collect();
     let inline_code_ranges = find_inline_code_spans(text, &code_fence_ranges);
     let opaque_ranges: Vec<(usize, usize)> = code_fence_ranges
         .iter()
@@ -1163,7 +1170,9 @@ mod tests {
         let segs = extract_message_segments("Price is \\$5 and not math");
         assert_eq!(
             segs,
-            vec![MessageSegment::Text("Price is \\$5 and not math".to_owned())]
+            vec![MessageSegment::Text(
+                "Price is \\$5 and not math".to_owned()
+            )]
         );
     }
 
@@ -1172,7 +1181,9 @@ mod tests {
         let segs = extract_message_segments("Price is $5 and $unfinished");
         assert_eq!(
             segs,
-            vec![MessageSegment::Text("Price is $5 and $unfinished".to_owned())]
+            vec![MessageSegment::Text(
+                "Price is $5 and $unfinished".to_owned()
+            )]
         );
     }
 

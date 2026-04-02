@@ -18,6 +18,7 @@ enum VoiceSessionControl {
         When using the codex tool, you MUST specify the "server" parameter. \
         IMPORTANT: Use the local discovery tools for server and session lookup. \
         The "local" server has special tools that can see sessions across ALL connected servers in one call. \
+        After calling `list_servers` or `list_sessions`, always give the user a short spoken summary of what you found. Do not stop after the tool result alone. \
         Remote servers do NOT have these tools — never ask a remote server to list sessions. \
         Use a remote server name ONLY to run coding tasks, shell commands, or file operations on that machine.
         """

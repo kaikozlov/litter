@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 
+use codex_app_server_protocol as upstream;
+
 use crate::conversation_uniffi::HydratedConversationItem;
 use crate::types::{
-    Account, ModelInfo, PendingApproval, PendingApprovalKey, PendingApprovalSeed,
-    PendingUserInputRequest, RateLimitSnapshot, RateLimits, ThreadInfo, ThreadKey,
+    Account, AppModeKind, AppPlanProgressSnapshot, ModelInfo, PendingApproval, PendingApprovalKey,
+    PendingApprovalSeed, PendingUserInputRequest, RateLimitSnapshot, RateLimits, ThreadInfo,
+    ThreadKey,
 };
 use crate::types::{AppVoiceSessionPhase, AppVoiceTranscriptEntry};
 
@@ -145,6 +148,7 @@ pub struct AppVoiceSessionSnapshot {
 pub struct ThreadSnapshot {
     pub key: ThreadKey,
     pub info: ThreadInfo,
+    pub collaboration_mode: AppModeKind,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub effective_approval_policy: Option<crate::types::AppAskForApproval>,
@@ -152,17 +156,35 @@ pub struct ThreadSnapshot {
     pub items: Vec<HydratedConversationItem>,
     pub local_overlay_items: Vec<HydratedConversationItem>,
     pub queued_follow_ups: Vec<AppQueuedFollowUpPreview>,
+    pub(crate) queued_follow_up_drafts: Vec<QueuedFollowUpDraft>,
     pub active_turn_id: Option<String>,
     pub context_tokens_used: Option<u64>,
     pub model_context_window: Option<u64>,
     pub rate_limits: Option<RateLimits>,
     pub realtime_session_id: Option<String>,
+    pub active_plan_progress: Option<AppPlanProgressSnapshot>,
+    pub(crate) pending_plan_implementation_turn_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct AppQueuedFollowUpPreview {
     pub id: String,
+    pub kind: AppQueuedFollowUpKind,
     pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum AppQueuedFollowUpKind {
+    Message,
+    PendingSteer,
+    RetryingSteer,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct QueuedFollowUpDraft {
+    pub preview: AppQueuedFollowUpPreview,
+    pub inputs: Vec<upstream::UserInput>,
+    pub source_message_json: Option<serde_json::Value>,
 }
 
 impl ThreadSnapshot {
@@ -173,6 +195,7 @@ impl ThreadSnapshot {
         };
         Self {
             key,
+            collaboration_mode: AppModeKind::Default,
             model: info.model.clone(),
             info,
             reasoning_effort: None,
@@ -181,11 +204,14 @@ impl ThreadSnapshot {
             items: Vec::new(),
             local_overlay_items: Vec::new(),
             queued_follow_ups: Vec::new(),
+            queued_follow_up_drafts: Vec::new(),
             active_turn_id: None,
             context_tokens_used: None,
             model_context_window: None,
             rate_limits: None,
             realtime_session_id: None,
+            active_plan_progress: None,
+            pending_plan_implementation_turn_id: None,
         }
     }
 }

@@ -56,10 +56,14 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.litter.android.ui.BerkeleyMono
@@ -96,6 +100,16 @@ fun ConversationTimelineItem(
     onEditMessage: ((UInt) -> Unit)? = null,
     onForkFromMessage: ((UInt) -> Unit)? = null,
 ) {
+    val shouldNotifyLiveContentRendered = remember(item.content, isLiveTurn) {
+        isLiveTurn && item.content.shouldAutoFollowRenderedContent()
+    }
+
+    LaunchedEffect(item.id, item.hashCode(), shouldNotifyLiveContentRendered) {
+        if (!shouldNotifyLiveContentRendered) return@LaunchedEffect
+        delay(32)
+        onStreamingSnapshotRendered?.invoke()
+    }
+
     when (val content = item.content) {
         is HydratedConversationItemContent.User -> UserMessageRow(
             data = content.v1,
@@ -111,6 +125,10 @@ fun ConversationTimelineItem(
             agentDirectoryVersion = agentDirectoryVersion,
             isStreamingMessage = isStreamingMessage,
             onStreamingSnapshotRendered = onStreamingSnapshotRendered,
+        )
+
+        is HydratedConversationItemContent.CodeReview -> CodeReviewRow(
+            data = content.v1,
         )
 
         is HydratedConversationItemContent.Reasoning -> ReasoningRow(
@@ -173,6 +191,21 @@ fun ConversationTimelineItem(
         is HydratedConversationItemContent.Note -> NoteRow(
             data = content.v1,
         )
+    }
+}
+
+private fun HydratedConversationItemContent.shouldAutoFollowRenderedContent(): Boolean {
+    return when (this) {
+        is HydratedConversationItemContent.Reasoning,
+        is HydratedConversationItemContent.CommandExecution,
+        is HydratedConversationItemContent.FileChange,
+        is HydratedConversationItemContent.TurnDiff,
+        is HydratedConversationItemContent.McpToolCall,
+        is HydratedConversationItemContent.DynamicToolCall,
+        is HydratedConversationItemContent.MultiAgentAction,
+        is HydratedConversationItemContent.WebSearch,
+        is HydratedConversationItemContent.Widget -> true
+        else -> false
     }
 }
 
@@ -419,6 +452,107 @@ private fun coalesceRenderableAssistantSegments(
     return result
 }
 
+@Composable
+private fun CodeReviewRow(
+    data: uniffi.codex_mobile_client.HydratedCodeReviewData,
+) {
+    var dismissedIndices by remember(data.findings) { mutableStateOf(setOf<Int>()) }
+    val visibleFindings = remember(data.findings, dismissedIndices) {
+        data.findings.mapIndexedNotNull { index, finding ->
+            if (dismissedIndices.contains(index)) null else index to finding
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        visibleFindings.forEach { (index, finding) ->
+            CodeReviewFindingCard(
+                finding = finding,
+                onDismiss = { dismissedIndices = dismissedIndices + index },
+            )
+        }
+    }
+}
+
+@Composable
+private fun CodeReviewFindingCard(
+    finding: uniffi.codex_mobile_client.HydratedCodeReviewFindingData,
+    onDismiss: () -> Unit,
+) {
+    val priorityTint = when (finding.priority?.toInt()) {
+        0, 1 -> LitterTheme.danger
+        2 -> LitterTheme.warning
+        3 -> LitterTheme.textSecondary
+        else -> LitterTheme.textSecondary
+    }
+    val locationText = remember(finding.codeLocation) {
+        val location = finding.codeLocation ?: return@remember null
+        val range = location.lineRange
+        when {
+            range == null -> location.absoluteFilePath
+            range.start == range.end -> "${location.absoluteFilePath}:${range.start}"
+            else -> "${location.absoluteFilePath}:${range.start}-${range.end}"
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(LitterTheme.surface.copy(alpha = 0.72f), RoundedCornerShape(22.dp))
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            finding.priority?.let { priority ->
+                Text(
+                    text = "P${priority.toInt()}",
+                    color = priorityTint,
+                    fontSize = LitterTextStyle.caption2.scaled,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .background(priorityTint.copy(alpha = 0.12f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+            }
+
+            Text(
+                text = finding.title,
+                color = LitterTheme.textPrimary,
+                fontSize = LitterTextStyle.callout.scaled,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+
+            Text(
+                text = "Dismiss",
+                color = LitterTheme.textSecondary,
+                fontSize = LitterTextStyle.callout.scaled,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.clickable(onClick = onDismiss),
+            )
+        }
+
+        MarkdownText(text = finding.body)
+
+        locationText?.takeIf { it.isNotBlank() }?.let { location ->
+            Text(
+                text = location,
+                color = LitterTheme.textSecondary,
+                fontSize = LitterTextStyle.footnote.scaled,
+                fontFamily = LitterTheme.monoFont,
+            )
+        }
+    }
+}
+
 // ── Reasoning ────────────────────────────────────────────────────────────────
 
 @Composable
@@ -451,6 +585,7 @@ private fun ReasoningRow(
 private fun CommandExecutionRow(
     data: uniffi.codex_mobile_client.HydratedCommandExecutionData,
 ) {
+    val outputScrollState = rememberScrollState()
     val outputText =
         data.output
             ?.trim('\n')
@@ -460,6 +595,11 @@ private fun CommandExecutionRow(
             } else {
                 "No output"
             }
+
+    LaunchedEffect(outputText, outputScrollState.maxValue) {
+        if (outputScrollState.maxValue <= 0) return@LaunchedEffect
+        outputScrollState.animateScrollTo(outputScrollState.maxValue)
+    }
 
     Column(
         modifier = Modifier
@@ -505,12 +645,12 @@ private fun CommandExecutionRow(
         ) {
             Text(
                 text = outputText,
-                color = LitterTheme.textBody,
+                color = LitterTheme.textSecondary,
                 fontFamily = LitterTheme.monoFont,
-                fontSize = LitterTextStyle.caption2.scaled,
+                fontSize = LitterTextStyle.caption.scaled,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(outputScrollState),
             )
         }
     }
@@ -523,16 +663,12 @@ private fun FileChangeRow(
     data: uniffi.codex_mobile_client.HydratedFileChangeData,
 ) {
     val summary = remember(data.changes) {
-        val firstPath = data.changes.firstOrNull()?.path?.let(::workspaceTitle)
-        when {
-            firstPath != null && data.changes.size == 1 -> "Changed $firstPath"
-            data.changes.isNotEmpty() -> "Changed ${data.changes.size} files"
-            else -> "File changes"
-        }
+        buildFileChangeSummary(data)
     }
 
     ToolCardShell(
-        summary = summary,
+        summary = summary.plainText,
+        summaryAnnotated = summary.annotatedText,
         accent = LitterTheme.toolCallFileChange,
         status = data.status,
     ) {
@@ -545,6 +681,80 @@ private fun FileChangeRow(
             }
         }
     }
+}
+
+private data class FileChangeSummary(
+    val plainText: String,
+    val annotatedText: AnnotatedString,
+)
+
+private fun buildFileChangeSummary(
+    data: uniffi.codex_mobile_client.HydratedFileChangeData,
+): FileChangeSummary {
+    if (data.changes.isEmpty()) {
+        return FileChangeSummary(
+            plainText = "File changes",
+            annotatedText = AnnotatedString("File changes"),
+        )
+    }
+
+    val additions = data.changes.sumOf { it.additions.toInt() }
+    val deletions = data.changes.sumOf { it.deletions.toInt() }
+    val hasCountSummary = additions > 0 || deletions > 0
+
+    if (data.changes.size == 1) {
+        val change = data.changes.first()
+        val verb = fileChangeVerb(change.kind)
+        val filename = workspaceTitle(change.path)
+        if (!hasCountSummary) {
+            return FileChangeSummary(
+                plainText = "$verb $filename",
+                annotatedText = AnnotatedString("$verb $filename"),
+            )
+        }
+        val plainText = "$verb $filename +$additions -$deletions"
+        val annotatedText = buildAnnotatedString {
+            withStyle(SpanStyle(color = LitterTheme.textSecondary)) {
+                append("$verb ")
+            }
+            withStyle(SpanStyle(color = LitterTheme.accent)) {
+                append(filename)
+            }
+            withStyle(SpanStyle(color = LitterTheme.success)) {
+                append(" +$additions")
+            }
+            withStyle(SpanStyle(color = LitterTheme.danger)) {
+                append(" -$deletions")
+            }
+        }
+        return FileChangeSummary(plainText = plainText, annotatedText = annotatedText)
+    }
+
+    if (!hasCountSummary) {
+        return FileChangeSummary(
+            plainText = "Changed ${data.changes.size} files",
+            annotatedText = AnnotatedString("Changed ${data.changes.size} files"),
+        )
+    }
+
+    val plainText = "Changed ${data.changes.size} files +$additions -$deletions"
+    val annotatedText = buildAnnotatedString {
+        append("Changed ${data.changes.size} files")
+        withStyle(SpanStyle(color = LitterTheme.success)) {
+            append(" +$additions")
+        }
+        withStyle(SpanStyle(color = LitterTheme.danger)) {
+            append(" -$deletions")
+        }
+    }
+    return FileChangeSummary(plainText = plainText, annotatedText = annotatedText)
+}
+
+private fun fileChangeVerb(kind: String): String = when (kind.lowercase()) {
+    "add" -> "Added"
+    "delete" -> "Deleted"
+    "update" -> "Edited"
+    else -> "Changed"
 }
 
 // ── Todo List ────────────────────────────────────────────────────────────────
@@ -1046,6 +1256,7 @@ private fun CodeBlockSegment(
 @Composable
 private fun ToolCardShell(
     summary: String,
+    summaryAnnotated: AnnotatedString? = null,
     accent: Color,
     status: AppOperationStatus,
     durationMs: Long? = null,
@@ -1067,7 +1278,7 @@ private fun ToolCardShell(
             StatusIcon(status)
             Spacer(Modifier.width(8.dp))
             Text(
-                text = summary,
+                text = summaryAnnotated ?: AnnotatedString(summary),
                 color = LitterTheme.textSystem,
                 fontSize = LitterTextStyle.caption.scaled,
                 maxLines = 1,

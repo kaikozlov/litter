@@ -980,16 +980,23 @@ index 1ddd72d0f..73fa911a7 100644
                  event = events.next_event() => {
                      match event {
                          Ok(Some(event)) => {
-@@ -912,7 +1032,8 @@ fn spawn_realtime_input_task(input: RealtimeInputTask) -> JoinHandle<()> {
-                                 RealtimeEvent::SessionUpdated { .. }
-                                 | RealtimeEvent::InputTranscriptDelta(_)
-                                 | RealtimeEvent::OutputTranscriptDelta(_)
--                                | RealtimeEvent::ConversationItemDone { .. } => {}
-+                                | RealtimeEvent::ConversationItemDone { .. }
-+                                | RealtimeEvent::ToolCallRequested(_) => {}
-                             }
-                             if forward_event && events_tx.send(event).await.is_err() {
-                                 break;
+@@ -903,7 +1023,16 @@ fn spawn_realtime_input_task(input: RealtimeInputTask) -> JoinHandle<()> {
+                                     *handoff_state.last_output_text.lock().await = None;
+                                     response_in_progress = false;
+                                     output_audio_state = None;
++                                }
++                                RealtimeEvent::ToolCallRequested(_) => {
++                                    // Realtime V2 dynamic tool calls can be surfaced via
++                                    // `response.done` instead of a standalone `response.done`
++                                    // event. When that happens we never hit the normal
++                                    // response-done branch above, so clear the in-progress
++                                    // flag here to allow the follow-up `response.create`
++                                    // after the tool output is returned.
++                                    response_in_progress = false;
++                                    output_audio_state = None;
+                                 }
+                                 RealtimeEvent::Error(message)
+                                     if matches!(session_kind, RealtimeSessionKind::V2)
 diff --git a/codex-rs/protocol/src/protocol.rs b/codex-rs/protocol/src/protocol.rs
 index 2e67fa5d7..7a33d2ea4 100644
 --- a/codex-rs/protocol/src/protocol.rs

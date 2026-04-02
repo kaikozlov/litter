@@ -129,6 +129,7 @@ struct SessionServerCardRow: View {
     enum Trailing {
         case none
         case status(connected: Bool)
+        case statusLabel(String, Color)
         case badge(String)
         case chevron
     }
@@ -167,6 +168,15 @@ struct SessionServerCardRow: View {
                         .fill(connected ? LitterTheme.accent : LitterTheme.textMuted.opacity(0.5))
                         .frame(width: 8, height: 8)
                     Text(connected ? "Connected" : "Offline")
+                        .litterFont(.caption)
+                        .foregroundColor(LitterTheme.textMuted)
+                }
+            case .statusLabel(let label, let color):
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(color)
+                        .frame(width: 8, height: 8)
+                    Text(label)
                         .litterFont(.caption)
                         .foregroundColor(LitterTheme.textMuted)
                 }

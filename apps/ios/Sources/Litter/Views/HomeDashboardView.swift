@@ -18,6 +18,21 @@ struct HomeDashboardView: View {
     @State private var renameTargetServer: HomeDashboardServer?
     @State private var renameText = ""
 
+    private var appVersionLabel: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String
+        switch (version, build) {
+        case let (version?, build?) where !version.isEmpty && !build.isEmpty:
+            return "v\(version) (\(build))"
+        case let (version?, _ ) where !version.isEmpty:
+            return "v\(version)"
+        case let (_, build?) where !build.isEmpty:
+            return "build \(build)"
+        default:
+            return ""
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -93,6 +108,15 @@ struct HomeDashboardView: View {
                 SupporterBadge()
             }
         }
+        .overlay(alignment: .bottom) {
+            if !appVersionLabel.isEmpty {
+                Text(appVersionLabel)
+                    .litterFont(.caption)
+                    .foregroundColor(LitterTheme.textMuted.opacity(0.8))
+                    .padding(.bottom, 2)
+                    .ignoresSafeArea(.container, edges: .bottom)
+            }
+        }
     }
 
     private var recentSessionsSection: some View {
@@ -137,7 +161,7 @@ struct HomeDashboardView: View {
 
     private var connectedServersSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Connected Servers", buttonTitle: "Connect Server", systemImage: "bolt.horizontal.circle", action: onConnectServer)
+            sectionHeader(title: "Servers", buttonTitle: "Connect Server", systemImage: "bolt.horizontal.circle", action: onConnectServer)
 
             if connectedServers.isEmpty {
                 emptyStateCard(
@@ -253,7 +277,7 @@ struct HomeDashboardView: View {
             icon: server.isLocal ? "iphone" : "server.rack",
             title: server.displayName,
             subtitle: HomeDashboardSupport.serverSubtitle(for: server),
-            trailing: .status(connected: server.health == .connected)
+            trailing: .statusLabel(server.statusLabel, server.statusColor)
         )
         .accessibilityIdentifier("home.connectedServerRow")
     }

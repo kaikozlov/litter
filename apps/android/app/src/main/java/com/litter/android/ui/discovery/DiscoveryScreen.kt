@@ -209,7 +209,7 @@ fun DiscoveryScreen(
                         prepared.port.toUShort(),
                     )
                     appModel.restoreStoredLocalChatGptAuth(prepared.id)
-                    SavedServerStore.upsert(context, prepared.normalizedForPersistence())
+                    SavedServerStore.remember(context, prepared.normalizedForPersistence())
                     reloadSavedServers()
                     appModel.refreshSnapshot()
                     onDismiss()
@@ -221,7 +221,7 @@ fun DiscoveryScreen(
                         prepared.name,
                         prepared.websocketURL,
                     )
-                    SavedServerStore.upsert(context, prepared.normalizedForPersistence())
+                    SavedServerStore.remember(context, prepared.normalizedForPersistence())
                     reloadSavedServers()
                     appModel.refreshSnapshot()
                     onDismiss()
@@ -242,7 +242,7 @@ fun DiscoveryScreen(
                         prepared.hostname,
                         prepared.directCodexPort!!.toUShort(),
                     )
-                    SavedServerStore.upsert(
+                    SavedServerStore.remember(
                         context,
                         prepared.withPreferredConnection("directCodex", prepared.directCodexPort),
                     )
@@ -421,7 +421,7 @@ fun DiscoveryScreen(
                                             server.hostname,
                                             port.toUShort(),
                                         )
-                                        SavedServerStore.upsert(
+                                        SavedServerStore.remember(
                                             context,
                                             server.withPreferredConnection("directCodex", port),
                                         )
@@ -452,11 +452,6 @@ fun DiscoveryScreen(
                     if (server.canConnectViaSsh) {
                         TextButton(
                             onClick = {
-                                SavedServerStore.upsert(
-                                    context,
-                                    server.withPreferredConnection("ssh"),
-                                )
-                                scope.launch { reloadSavedServers() }
                                 sshServer = server.withPreferredConnection("ssh")
                                 connectionChoiceServer = null
                             },
@@ -532,7 +527,7 @@ fun DiscoveryScreen(
                     } else {
                         sshCredentialStore.delete(server.hostname, server.resolvedSshPort)
                     }
-                    SavedServerStore.upsert(
+                    SavedServerStore.remember(
                         context,
                         server.withPreferredConnection("ssh"),
                     )

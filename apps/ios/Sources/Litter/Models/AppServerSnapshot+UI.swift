@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 extension AppServerSnapshot {
     var isConnected: Bool {
@@ -43,5 +44,31 @@ extension AppServerSnapshot {
 
     var connectionProgressDetail: String? {
         currentConnectionStep?.detail ?? connectionProgress?.terminalMessage
+    }
+
+    var statusLabel: String {
+        if let connectionProgressLabel {
+            return connectionProgressLabel
+        }
+        if health == .connected, !isLocal, account == nil {
+            return "Sign in required"
+        }
+        return health.displayLabel
+    }
+
+    var statusColor: Color {
+        if currentConnectionStep?.state == .failed {
+            return .red
+        }
+        if currentConnectionStep?.state == .awaitingUserInput {
+            return .orange
+        }
+        if connectionProgressLabel != nil {
+            return LitterTheme.accent
+        }
+        if health == .connected, !isLocal, account == nil {
+            return .orange
+        }
+        return health.accentColor
     }
 }

@@ -430,6 +430,17 @@ private struct VoiceTranscriptEntry: Identifiable, Equatable {
                 body: body
             )
 
+        case .codeReview(let data):
+            guard let first = data.findings.first else { return nil }
+            let body = ([first.title, first.body] + data.findings.dropFirst().map(\.title))
+                .joined(separator: "\n\n")
+            self = VoiceTranscriptEntry(
+                id: item.id,
+                kind: .assistant,
+                title: "CODE REVIEW",
+                body: body
+            )
+
         case .reasoning(let data):
             let chunks = (data.summary + data.content)
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }

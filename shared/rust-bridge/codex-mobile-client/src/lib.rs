@@ -16,6 +16,7 @@ pub mod ffi;
 pub mod hydration;
 pub mod immer_patch;
 pub mod logging;
+mod mobile_client_impl;
 pub mod parser;
 pub mod permissions;
 pub mod session;
@@ -24,7 +25,6 @@ pub mod store;
 pub mod transport;
 pub mod types;
 pub mod widget_guidelines;
-mod mobile_client_impl;
 
 pub use mobile_client_impl::*;
 

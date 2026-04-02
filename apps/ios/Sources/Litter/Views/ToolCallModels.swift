@@ -147,6 +147,7 @@ struct ToolCallCardModel: Equatable {
     let kind: ToolCallKind
     let title: String
     let summary: String
+    let attributedSummary: AttributedString?
     let status: ToolCallStatus
     let duration: String?
     let sections: [ToolCallSection]
@@ -157,6 +158,7 @@ struct ToolCallCardModel: Equatable {
         kind: ToolCallKind,
         title: String,
         summary: String,
+        attributedSummary: AttributedString? = nil,
         status: ToolCallStatus,
         duration: String?,
         sections: [ToolCallSection],
@@ -166,6 +168,7 @@ struct ToolCallCardModel: Equatable {
         self.kind = kind
         self.title = title
         self.summary = summary
+        self.attributedSummary = attributedSummary
         self.status = status
         self.duration = duration
         self.sections = sections

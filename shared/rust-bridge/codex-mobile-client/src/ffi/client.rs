@@ -74,8 +74,12 @@ impl AppClient {
     ) -> Result<types::ThreadKey, ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
             let params = convert_params::<_, upstream::ThreadResumeParams>(params)?;
-            let response: upstream::ThreadResumeResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, ThreadResume, params)).await?;
+            let response: upstream::ThreadResumeResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, ThreadResume, params),
+            )
+            .await?;
             c.apply_thread_resume_response(&server_id, &response)
                 .map_err(ClientError::Serialization)
         })
@@ -101,8 +105,12 @@ impl AppClient {
         params: types::AppArchiveThreadRequest,
     ) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let _: upstream::ThreadArchiveResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, ThreadArchive, params.into())).await?;
+            let _: upstream::ThreadArchiveResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, ThreadArchive, params.into()),
+            )
+            .await?;
             Ok(())
         })
     }
@@ -113,8 +121,12 @@ impl AppClient {
         params: types::AppRenameThreadRequest,
     ) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let _: upstream::ThreadSetNameResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, ThreadSetName, params.into())).await?;
+            let _: upstream::ThreadSetNameResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, ThreadSetName, params.into()),
+            )
+            .await?;
             Ok(())
         })
     }
@@ -125,8 +137,12 @@ impl AppClient {
         params: types::AppListThreadsRequest,
     ) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let response: upstream::ThreadListResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, ThreadList, params.into())).await?;
+            let response: upstream::ThreadListResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, ThreadList, params.into()),
+            )
+            .await?;
             c.sync_thread_list(&server_id, &response.data)
                 .map(|_| ())
                 .map_err(ClientError::Serialization)
@@ -139,8 +155,12 @@ impl AppClient {
         params: types::AppReadThreadRequest,
     ) -> Result<types::ThreadKey, ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let response: upstream::ThreadReadResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, ThreadRead, params.into())).await?;
+            let response: upstream::ThreadReadResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, ThreadRead, params.into()),
+            )
+            .await?;
             c.apply_thread_read_response(&server_id, &response)
                 .map_err(ClientError::Serialization)
         })
@@ -154,9 +174,24 @@ impl AppClient {
         params: types::AppInterruptTurnRequest,
     ) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let _: upstream::TurnInterruptResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, TurnInterrupt, params.into())).await?;
+            let _: upstream::TurnInterruptResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, TurnInterrupt, params.into()),
+            )
+            .await?;
             Ok(())
+        })
+    }
+
+    pub async fn list_collaboration_modes(
+        &self,
+        server_id: String,
+    ) -> Result<Vec<types::AppCollaborationModePreset>, ClientError> {
+        blocking_async!(self.rt, self.inner, |c| {
+            c.server_collaboration_mode_list(&server_id)
+                .await
+                .map_err(|e| ClientError::Rpc(e.to_string()))
         })
     }
 
@@ -169,8 +204,12 @@ impl AppClient {
     ) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
             let params = convert_params::<_, upstream::ThreadRealtimeStartParams>(params)?;
-            let _: upstream::ThreadRealtimeStartResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, ThreadRealtimeStart, params)).await?;
+            let _: upstream::ThreadRealtimeStartResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, ThreadRealtimeStart, params),
+            )
+            .await?;
             Ok(())
         })
     }
@@ -181,8 +220,12 @@ impl AppClient {
         params: types::AppAppendRealtimeAudioRequest,
     ) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let _: upstream::ThreadRealtimeAppendAudioResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, ThreadRealtimeAppendAudio, params.into())).await?;
+            let _: upstream::ThreadRealtimeAppendAudioResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, ThreadRealtimeAppendAudio, params.into()),
+            )
+            .await?;
             Ok(())
         })
     }
@@ -193,8 +236,12 @@ impl AppClient {
         params: types::AppAppendRealtimeTextRequest,
     ) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let _: upstream::ThreadRealtimeAppendTextResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, ThreadRealtimeAppendText, params.into())).await?;
+            let _: upstream::ThreadRealtimeAppendTextResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, ThreadRealtimeAppendText, params.into()),
+            )
+            .await?;
             Ok(())
         })
     }
@@ -205,8 +252,12 @@ impl AppClient {
         params: types::AppStopRealtimeSessionRequest,
     ) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let _: upstream::ThreadRealtimeStopResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, ThreadRealtimeStop, params.into())).await?;
+            let _: upstream::ThreadRealtimeStopResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, ThreadRealtimeStop, params.into()),
+            )
+            .await?;
             Ok(())
         })
     }
@@ -217,8 +268,12 @@ impl AppClient {
         params: types::AppResolveRealtimeHandoffRequest,
     ) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let _: upstream::ThreadRealtimeResolveHandoffResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, ThreadRealtimeResolveHandoff, params.into())).await?;
+            let _: upstream::ThreadRealtimeResolveHandoffResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, ThreadRealtimeResolveHandoff, params.into()),
+            )
+            .await?;
             Ok(())
         })
     }
@@ -229,8 +284,12 @@ impl AppClient {
         params: types::AppFinalizeRealtimeHandoffRequest,
     ) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let _: upstream::ThreadRealtimeFinalizeHandoffResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, ThreadRealtimeFinalizeHandoff, params.into())).await?;
+            let _: upstream::ThreadRealtimeFinalizeHandoffResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, ThreadRealtimeFinalizeHandoff, params.into()),
+            )
+            .await?;
             Ok(())
         })
     }
@@ -258,8 +317,12 @@ impl AppClient {
         params: types::AppRefreshModelsRequest,
     ) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let response: upstream::ModelListResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, ModelList, params.into())).await?;
+            let response: upstream::ModelListResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, ModelList, params.into()),
+            )
+            .await?;
             c.apply_model_list_response(&server_id, &response);
             Ok(())
         })
@@ -271,8 +334,12 @@ impl AppClient {
         params: types::AppListExperimentalFeaturesRequest,
     ) -> Result<Vec<types::ExperimentalFeature>, ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let response: upstream::ExperimentalFeatureListResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, ExperimentalFeatureList, params.into())).await?;
+            let response: upstream::ExperimentalFeatureListResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, ExperimentalFeatureList, params.into()),
+            )
+            .await?;
             Ok(response.data.into_iter().map(Into::into).collect())
         })
     }
@@ -283,8 +350,12 @@ impl AppClient {
         params: types::AppListSkillsRequest,
     ) -> Result<Vec<types::SkillMetadata>, ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let response: upstream::SkillsListResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, SkillsList, params.into())).await?;
+            let response: upstream::SkillsListResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, SkillsList, params.into()),
+            )
+            .await?;
             Ok(response
                 .data
                 .into_iter()
@@ -301,8 +372,12 @@ impl AppClient {
         params: types::AppLoginAccountRequest,
     ) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let _: upstream::LoginAccountResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, LoginAccount, params.into())).await?;
+            let _: upstream::LoginAccountResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, LoginAccount, params.into()),
+            )
+            .await?;
             c.sync_server_account(&server_id)
                 .await
                 .map_err(|error| ClientError::Rpc(error.to_string()))
@@ -321,8 +396,12 @@ impl AppClient {
 
     pub async fn refresh_rate_limits(&self, server_id: String) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let response: upstream::GetAccountRateLimitsResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, GetAccountRateLimits, None)).await?;
+            let response: upstream::GetAccountRateLimitsResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, GetAccountRateLimits, None),
+            )
+            .await?;
             c.apply_account_rate_limits_response(&server_id, &response);
             Ok(())
         })
@@ -334,8 +413,12 @@ impl AppClient {
         params: types::AppRefreshAccountRequest,
     ) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let response: upstream::GetAccountResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, GetAccount, params.into())).await?;
+            let response: upstream::GetAccountResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, GetAccount, params.into()),
+            )
+            .await?;
             c.apply_account_response(&server_id, &response);
             Ok(())
         })
@@ -347,8 +430,12 @@ impl AppClient {
         params: types::AuthStatusRequest,
     ) -> Result<types::AuthStatus, ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let response: upstream::GetAuthStatusResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, GetAuthStatus, params.into())).await?;
+            let response: upstream::GetAuthStatusResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, GetAuthStatus, params.into()),
+            )
+            .await?;
             Ok(response.into())
         })
     }
@@ -362,8 +449,12 @@ impl AppClient {
     ) -> Result<types::CommandExecResult, ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
             let params = convert_params::<_, upstream::CommandExecParams>(params)?;
-            let response: upstream::CommandExecResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, OneOffCommandExec, params)).await?;
+            let response: upstream::CommandExecResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, OneOffCommandExec, params),
+            )
+            .await?;
             Ok(response.into())
         })
     }
@@ -375,8 +466,12 @@ impl AppClient {
     ) -> Result<(), ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
             let params = convert_params::<_, upstream::ConfigValueWriteParams>(params)?;
-            let _: upstream::ConfigWriteResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, ConfigValueWrite, params)).await?;
+            let _: upstream::ConfigWriteResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, ConfigValueWrite, params),
+            )
+            .await?;
             Ok(())
         })
     }
@@ -387,8 +482,12 @@ impl AppClient {
         params: types::AppSearchFilesRequest,
     ) -> Result<Vec<types::FileSearchResult>, ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
-            let response: upstream::FuzzyFileSearchResponse =
-                rpc(c.as_ref(), &server_id, req!(server_id, FuzzyFileSearch, params.into())).await?;
+            let response: upstream::FuzzyFileSearchResponse = rpc(
+                c.as_ref(),
+                &server_id,
+                req!(server_id, FuzzyFileSearch, params.into()),
+            )
+            .await?;
             Ok(response.files.into_iter().map(Into::into).collect())
         })
     }

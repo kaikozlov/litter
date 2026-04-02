@@ -14,6 +14,7 @@ struct SavedServer: Codable, Identifiable, Equatable {
     let preferredCodexPort: UInt16?
     let sshPortForwardingEnabled: Bool?
     let websocketURL: String?
+    let rememberedByUser: Bool
 
     init(
         id: String,
@@ -28,7 +29,8 @@ struct SavedServer: Codable, Identifiable, Equatable {
         preferredConnectionMode: PreferredConnectionMode?,
         preferredCodexPort: UInt16?,
         sshPortForwardingEnabled: Bool?,
-        websocketURL: String?
+        websocketURL: String?,
+        rememberedByUser: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -43,6 +45,7 @@ struct SavedServer: Codable, Identifiable, Equatable {
         self.preferredCodexPort = preferredCodexPort
         self.sshPortForwardingEnabled = sshPortForwardingEnabled
         self.websocketURL = websocketURL
+        self.rememberedByUser = rememberedByUser
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -59,6 +62,7 @@ struct SavedServer: Codable, Identifiable, Equatable {
         case preferredCodexPort
         case sshPortForwardingEnabled
         case websocketURL
+        case rememberedByUser
     }
 
     init(from decoder: Decoder) throws {
@@ -86,6 +90,7 @@ struct SavedServer: Codable, Identifiable, Equatable {
             forKey: .sshPortForwardingEnabled
         )
         self.websocketURL = try container.decodeIfPresent(String.self, forKey: .websocketURL)
+        self.rememberedByUser = try container.decodeIfPresent(Bool.self, forKey: .rememberedByUser) ?? true
     }
 
     func toDiscoveredServer() -> DiscoveredServer {
@@ -108,7 +113,7 @@ struct SavedServer: Codable, Identifiable, Equatable {
         )
     }
 
-    static func from(_ server: DiscoveredServer) -> SavedServer {
+    static func from(_ server: DiscoveredServer, rememberedByUser: Bool = false) -> SavedServer {
         SavedServer(
             id: server.id,
             name: server.name,
@@ -122,7 +127,8 @@ struct SavedServer: Codable, Identifiable, Equatable {
             preferredConnectionMode: server.preferredConnectionMode,
             preferredCodexPort: server.preferredCodexPort,
             sshPortForwardingEnabled: nil,
-            websocketURL: server.websocketURL
+            websocketURL: server.websocketURL,
+            rememberedByUser: rememberedByUser
         )
     }
 

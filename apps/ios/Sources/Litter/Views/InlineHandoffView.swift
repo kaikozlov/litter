@@ -131,6 +131,11 @@ private struct InlineHandoffEntry: Identifiable {
             self.id = item.id
             self.text = text
             self.style = .assistant
+        case .codeReview(let data):
+            guard let first = data.findings.first else { return nil }
+            self.id = item.id
+            self.text = "Review: \(first.title)"
+            self.style = .assistant
         case .reasoning(let data):
             let summary = (data.summary + data.content)
                 .joined(separator: " ")

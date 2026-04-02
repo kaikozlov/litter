@@ -60,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import com.litter.android.state.displayTitle
 import com.litter.android.state.isConnected
 import com.litter.android.ui.LocalAppModel
 import com.litter.android.ui.LitterTheme
@@ -561,7 +562,7 @@ private fun SessionNodeRow(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = summary.title ?: summary.preview ?: "Untitled",
+                    text = summary.displayTitle,
                     color = LitterTheme.textPrimary,
                     fontSize = 13.sp,
                     maxLines = 1,

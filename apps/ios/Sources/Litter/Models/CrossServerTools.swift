@@ -26,7 +26,7 @@ enum CrossServerTools {
     private static func listServersSpec() -> DynamicToolSpecParams {
         DynamicToolSpecParams(
             name: listServersToolName,
-            description: "List all connected servers and their status.",
+            description: "List all connected servers and their status. After calling this tool, briefly tell the user what you found.",
             inputSchema: AnyEncodable(JSONSchema.object([:], required: []))
         )
     }
@@ -34,7 +34,7 @@ enum CrossServerTools {
     private static func listSessionsSpec() -> DynamicToolSpecParams {
         DynamicToolSpecParams(
             name: listSessionsToolName,
-            description: "List recent sessions/threads on a specific server or all connected servers.",
+            description: "List recent sessions/threads on a specific server or all connected servers. After calling this tool, briefly tell the user what you found.",
             inputSchema: AnyEncodable(JSONSchema.object([
                 "server": .string(description: "Server name to query. Omit to query all connected servers.")
             ], required: []))

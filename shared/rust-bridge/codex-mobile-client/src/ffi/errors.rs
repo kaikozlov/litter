@@ -16,9 +16,7 @@ impl From<crate::RpcClientError> for ClientError {
     fn from(value: crate::RpcClientError) -> Self {
         match value {
             crate::RpcClientError::Rpc(message) => ClientError::Rpc(message),
-            crate::RpcClientError::Serialization(message) => {
-                ClientError::Serialization(message)
-            }
+            crate::RpcClientError::Serialization(message) => ClientError::Serialization(message),
         }
     }
 }

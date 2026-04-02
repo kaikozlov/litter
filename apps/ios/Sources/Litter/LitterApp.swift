@@ -167,7 +167,7 @@ struct LitterApp: App {
                     voiceRuntime.bind(appModel: appModel)
                     appRuntime.bind(appModel: appModel, voiceRuntime: voiceRuntime)
                     appDelegate.appRuntime = appRuntime
-                    await appRuntime.reconnectSavedServers()
+                    appRuntime.appDidBecomeActive()
                 }
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -664,15 +664,12 @@ private struct HomeNavigationView: View {
         do {
             let resumeKey = await appModel.hydrateThreadPermissions(for: thread.key, appState: appState)
                 ?? thread.key
-            let nextKey = try await appModel.client.resumeThread(
-                serverId: resumeKey.serverId,
-                params: launchConfig(for: resumeKey).threadResumeRequest(
-                    threadId: resumeKey.threadId,
-                    cwdOverride: thread.cwd
-                )
+            let nextKey = try await appModel.resumeThreadPreferringIPC(
+                key: resumeKey,
+                launchConfig: launchConfig(for: resumeKey),
+                cwdOverride: thread.cwd
             )
-            appModel.store.setActiveThread(key: nextKey)
-            await appModel.refreshSnapshot()
+            appModel.activateThread(nextKey)
             openedKey = nextKey
         } catch {
             actionErrorMessage = error.localizedDescription
@@ -899,6 +896,18 @@ private struct ConversationDestinationScreen: View {
         conversationThread?.key ?? threadKey
     }
 
+    private var pendingUserInputsForThread: [PendingUserInputRequest] {
+        guard let snapshot = appModel.snapshot else { return [] }
+        let key = resolvedThreadKey
+        return snapshot.pendingUserInputs.filter {
+            $0.serverId == key.serverId && $0.threadId == key.threadId
+        }
+    }
+
+    private var relevantServerSnapshot: AppServerSnapshot? {
+        appModel.snapshot?.serverSnapshot(for: resolvedThreadKey.serverId)
+    }
+
     private func bindScreenModel(for thread: AppThreadSnapshot) {
         screenModel.bind(
             thread: thread,
@@ -949,7 +958,13 @@ private struct ConversationDestinationScreen: View {
                 .onChange(of: appModel.snapshot?.agentDirectoryVersion) { _, _ in
                     bindScreenModel(for: conversationThread)
                 }
-                .onChange(of: appModel.snapshot) { _, _ in
+                .onChange(of: pendingUserInputsForThread) { _, _ in
+                    bindScreenModel(for: conversationThread)
+                }
+                .onChange(of: relevantServerSnapshot) { _, _ in
+                    bindScreenModel(for: conversationThread)
+                }
+                .onChange(of: appModel.composerPrefillRequest) { _, _ in
                     bindScreenModel(for: conversationThread)
                 }
             } else {

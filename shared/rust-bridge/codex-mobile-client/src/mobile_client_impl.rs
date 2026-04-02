@@ -1,11 +1,14 @@
 #[cfg(target_os = "android")]
 use futures::FutureExt;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::future::Future;
+use std::hash::{Hash, Hasher};
 #[cfg(target_os = "android")]
 use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, RwLock};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, broadcast, mpsc};
+use tokio::time::{Duration, timeout};
 use tracing::{debug, info, trace, warn};
 use url::Url;
 
@@ -18,25 +21,27 @@ use crate::session::events::{EventProcessor, UiEvent};
 use crate::ssh::{SshBootstrapResult, SshClient, SshCredentials};
 use crate::store::updates::ThreadStreamingDeltaKind;
 use crate::store::{
-    AppSnapshot, AppStoreReducer, AppStoreUpdateRecord, AppQueuedFollowUpPreview, ServerHealthSnapshot,
-    ThreadSnapshot,
+    AppConnectionProgressSnapshot, AppQueuedFollowUpKind, AppQueuedFollowUpPreview, AppSnapshot,
+    AppStoreReducer, AppStoreUpdateRecord, ServerHealthSnapshot, ThreadSnapshot,
 };
 use crate::transport::{RpcError, TransportError};
-use crate::types::{
-    ApprovalDecisionValue, PendingApproval, PendingApprovalSeed, PendingApprovalWithSeed,
-    PendingUserInputAnswer, PendingUserInputRequest, ThreadInfo, ThreadKey, ThreadSummaryStatus,
-};
 use crate::types::AppOperationStatus;
+use crate::types::{
+    AppCollaborationModePreset, AppModeKind, ApprovalDecisionValue, PendingApproval,
+    PendingApprovalSeed, PendingApprovalWithSeed, PendingUserInputAnswer, PendingUserInputRequest,
+    ThreadInfo, ThreadKey, ThreadSummaryStatus,
+};
 use codex_app_server_protocol as upstream;
 use codex_ipc::{
     ClientStatus, CommandExecutionApprovalDecision, ConversationStreamApplyError,
     ExternalResumeThreadParams, FileChangeApprovalDecision, ImmerOp, ImmerPatch, ImmerPathSegment,
-    IpcClient, IpcClientConfig, ProjectedApprovalKind, ProjectedApprovalRequest,
+    IpcClient, IpcClientConfig, IpcError, ProjectedApprovalKind, ProjectedApprovalRequest,
     ProjectedUserInputRequest, StreamChange, ThreadFollowerCommandApprovalDecisionParams,
-    ThreadFollowerFileApprovalDecisionParams, ThreadFollowerStartTurnParams,
-    ThreadFollowerSubmitUserInputParams, ThreadStreamStateChangedParams, TypedBroadcast,
-    apply_stream_change_to_conversation_state, project_conversation_request_state,
-    project_conversation_state, project_conversation_turn, seed_conversation_state_from_thread,
+    ThreadFollowerFileApprovalDecisionParams, ThreadFollowerSetCollaborationModeParams,
+    ThreadFollowerStartTurnParams, ThreadFollowerSubmitUserInputParams,
+    ThreadStreamStateChangedParams, TypedBroadcast, apply_stream_change_to_conversation_state,
+    project_conversation_request_state, project_conversation_state, project_conversation_turn,
+    seed_conversation_state_from_thread,
 };
 
 /// Top-level entry point for platform code (iOS / Android).
@@ -58,15 +63,119 @@ struct OAuthCallbackTunnel {
     local_port: u16,
 }
 
+fn ipc_command_error_clears_server_ipc_state(error: &IpcError) -> bool {
+    matches!(error, IpcError::Transport(_) | IpcError::NotConnected)
+}
+
+fn ipc_command_error_context(error: &IpcError) -> &'static str {
+    if ipc_command_error_clears_server_ipc_state(error) {
+        "IPC transport is no longer connected"
+    } else {
+        "IPC stream is still attached, but desktop follower commands are unavailable"
+    }
+}
+
+async fn wait_for_thread_resume_sync(
+    updates: &mut broadcast::Receiver<AppStoreUpdateRecord>,
+    server_id: &str,
+    thread_id: &str,
+) {
+    let wait_result = timeout(Duration::from_millis(350), async {
+        loop {
+            match updates.recv().await {
+                Ok(update) if update_targets_thread(&update, server_id, thread_id) => return,
+                Ok(_) => continue,
+                Err(_) => return,
+            }
+        }
+    })
+    .await;
+
+    if wait_result.is_err() {
+        debug!(
+            "IPC out: external_resume_thread timed out waiting for first thread sync server={} thread={}",
+            server_id, thread_id
+        );
+    }
+}
+
+async fn refresh_ipc_thread_subscription(
+    ipc_client: &IpcClient,
+    app_store: &AppStoreReducer,
+    server_id: &str,
+    thread_id: &str,
+) {
+    let mut updates = app_store.subscribe();
+    info!(
+        "IPC out: external_resume_thread (preflight) server={} thread={}",
+        server_id, thread_id
+    );
+    match ipc_client
+        .external_resume_thread(ExternalResumeThreadParams {
+            conversation_id: thread_id.to_string(),
+            host_id: None,
+        })
+        .await
+    {
+        Ok(_) => {
+            wait_for_thread_resume_sync(&mut updates, server_id, thread_id).await;
+        }
+        Err(error) => {
+            warn!(
+                "IPC out: external_resume_thread (preflight) failed server={} thread={} error={} ({})",
+                server_id,
+                thread_id,
+                error,
+                ipc_command_error_context(&error)
+            );
+        }
+    }
+}
+
+fn update_targets_thread(update: &AppStoreUpdateRecord, server_id: &str, thread_id: &str) -> bool {
+    match update {
+        AppStoreUpdateRecord::ThreadUpserted { thread, .. } => {
+            thread.key.server_id == server_id && thread.key.thread_id == thread_id
+        }
+        AppStoreUpdateRecord::ThreadStateUpdated { state, .. } => {
+            state.key.server_id == server_id && state.key.thread_id == thread_id
+        }
+        AppStoreUpdateRecord::ThreadItemUpserted { key, .. }
+        | AppStoreUpdateRecord::ThreadCommandExecutionUpdated { key, .. }
+        | AppStoreUpdateRecord::ThreadStreamingDelta { key, .. }
+        | AppStoreUpdateRecord::ThreadRemoved { key, .. } => {
+            key.server_id == server_id && key.thread_id == thread_id
+        }
+        AppStoreUpdateRecord::ActiveThreadChanged { key } => key
+            .as_ref()
+            .map(|key| key.server_id == server_id && key.thread_id == thread_id)
+            .unwrap_or(false),
+        AppStoreUpdateRecord::PendingApprovalsChanged { approvals } => {
+            approvals.iter().any(|approval| {
+                approval.server_id == server_id && approval.thread_id.as_deref() == Some(thread_id)
+            })
+        }
+        AppStoreUpdateRecord::PendingUserInputsChanged { requests } => requests
+            .iter()
+            .any(|request| request.server_id == server_id && request.thread_id == thread_id),
+        _ => false,
+    }
+}
+
 impl MobileClient {
     /// Create a new `MobileClient`.
     pub fn new() -> Self {
         crate::logging::install_ipc_wire_trace_logger();
         let event_processor = Arc::new(EventProcessor::new());
         let app_store = Arc::new(AppStoreReducer::new());
-        spawn_store_listener(Arc::clone(&app_store), event_processor.subscribe());
+        let sessions = Arc::new(RwLock::new(HashMap::new()));
+        spawn_store_listener(
+            Arc::clone(&app_store),
+            Arc::clone(&sessions),
+            event_processor.subscribe(),
+        );
         Self {
-            sessions: Arc::new(RwLock::new(HashMap::new())),
+            sessions,
             event_processor,
             app_store,
             discovery: RwLock::new(DiscoveryService::new(DiscoveryConfig::default())),
@@ -166,6 +275,29 @@ impl MobileClient {
         .map_err(RpcClientError::Rpc)
     }
 
+    pub(crate) async fn server_collaboration_mode_list(
+        &self,
+        server_id: &str,
+    ) -> Result<Vec<AppCollaborationModePreset>, crate::RpcClientError> {
+        use crate::{RpcClientError, next_request_id};
+        let response = self
+            .request_typed_for_server::<upstream::CollaborationModeListResponse>(
+                server_id,
+                upstream::ClientRequest::CollaborationModeList {
+                    request_id: upstream::RequestId::Integer(next_request_id()),
+                    params: upstream::CollaborationModeListParams::default(),
+                },
+            )
+            .await
+            .map_err(RpcClientError::Rpc)?;
+
+        Ok(response
+            .data
+            .into_iter()
+            .filter_map(|mask| AppCollaborationModePreset::try_from(mask).ok())
+            .collect())
+    }
+
     fn discovery_write(&self) -> std::sync::RwLockWriteGuard<'_, DiscoveryService> {
         match self.discovery.write() {
             Ok(guard) => guard,
@@ -258,11 +390,9 @@ impl MobileClient {
         self.spawn_event_reader(server_id.clone(), Arc::clone(&session));
         self.spawn_health_reader(server_id.clone(), session.health());
 
-        self.sessions_write().insert(server_id.clone(), session);
-
-        if let Err(error) = self.sync_server_account(server_id.as_str()).await {
-            warn!("MobileClient: failed to sync account for {server_id}: {error}");
-        }
+        self.sessions_write()
+            .insert(server_id.clone(), Arc::clone(&session));
+        self.spawn_post_connect_warmup(server_id.clone(), session);
 
         info!("MobileClient: connected local server {server_id}");
         Ok(server_id)
@@ -285,11 +415,9 @@ impl MobileClient {
         self.spawn_event_reader(server_id.clone(), Arc::clone(&session));
         self.spawn_health_reader(server_id.clone(), session.health());
 
-        self.sessions_write().insert(server_id.clone(), session);
-
-        if let Err(error) = self.sync_server_account(server_id.as_str()).await {
-            warn!("MobileClient: failed to sync account for {server_id}: {error}");
-        }
+        self.sessions_write()
+            .insert(server_id.clone(), Arc::clone(&session));
+        self.spawn_post_connect_warmup(server_id.clone(), session);
 
         info!("MobileClient: connected remote server {server_id}");
         Ok(server_id)
@@ -312,10 +440,16 @@ impl MobileClient {
             accept_unknown_host,
             working_dir.as_deref().unwrap_or("<none>")
         );
-        if self.existing_active_session(server_id.as_str()).is_some() {
-            info!("MobileClient: reusing existing remote SSH server session {server_id}");
-            return Ok(server_id);
-        }
+        self.app_store
+            .upsert_server(&config, ServerHealthSnapshot::Connecting);
+        self.app_store.update_server_connection_progress(
+            server_id.as_str(),
+            Some(AppConnectionProgressSnapshot::ssh_bootstrap()),
+        );
+        // SSH-backed sessions depend on a local tunnel and optional IPC bridge
+        // that may be torn down while the app is backgrounded even if the
+        // session health never observed a clean disconnect. Prefer replacing
+        // any existing session so resume can rebuild the full SSH transport.
         self.replace_existing_session(server_id.as_str()).await;
 
         let ssh_client = Arc::new(
@@ -351,6 +485,10 @@ impl MobileClient {
                     error
                 );
                 ssh_client.disconnect().await;
+                self.app_store
+                    .update_server_health(server_id.as_str(), ServerHealthSnapshot::Disconnected);
+                self.app_store
+                    .update_server_connection_progress(server_id.as_str(), None);
                 return Err(map_ssh_transport_error(error));
             }
         };
@@ -363,20 +501,36 @@ impl MobileClient {
             bootstrap.pid
         );
 
-        self.finish_connect_remote_over_ssh(
-            config,
-            ssh_credentials,
-            ssh_client,
-            bootstrap,
-            ipc_socket_path_override,
-        )
-        .await
+        let result = self
+            .finish_connect_remote_over_ssh(
+                config,
+                ssh_credentials,
+                accept_unknown_host,
+                ssh_client,
+                bootstrap,
+                ipc_socket_path_override,
+            )
+            .await;
+        match &result {
+            Ok(_) => {
+                self.app_store
+                    .update_server_connection_progress(server_id.as_str(), None);
+            }
+            Err(_) => {
+                self.app_store
+                    .update_server_health(server_id.as_str(), ServerHealthSnapshot::Disconnected);
+                self.app_store
+                    .update_server_connection_progress(server_id.as_str(), None);
+            }
+        }
+        result
     }
 
     pub(crate) async fn finish_connect_remote_over_ssh(
         &self,
         mut config: ServerConfig,
         ssh_credentials: SshCredentials,
+        accept_unknown_host: bool,
         ssh_client: Arc<SshClient>,
         bootstrap: SshBootstrapResult,
         ipc_socket_path_override: Option<String>,
@@ -397,8 +551,33 @@ impl MobileClient {
         config.is_local = false;
         config.tls = false;
 
-        let ipc_ssh_client = None;
+        let ipc_ssh_client = match SshClient::connect(
+            ssh_credentials.clone(),
+            make_accept_unknown_host_callback(accept_unknown_host),
+        )
+        .await
+        {
+            Ok(client) => {
+                info!(
+                    "MobileClient: dedicated IPC SSH transport established server_id={} host={} ssh_port={}",
+                    server_id,
+                    ssh_credentials.host.as_str(),
+                    ssh_credentials.port
+                );
+                Some(Arc::new(client))
+            }
+            Err(error) => {
+                warn!(
+                    "MobileClient: failed to establish dedicated IPC SSH transport server_id={} host={} error={}; falling back to shared SSH handle",
+                    server_id,
+                    ssh_credentials.host.as_str(),
+                    error
+                );
+                None
+            }
+        };
         let ipc_bridge_pid = None;
+        let ipc_attach_ssh_client = ipc_ssh_client.as_ref().unwrap_or(&ssh_client);
 
         #[cfg(target_os = "android")]
         trace!(
@@ -407,7 +586,7 @@ impl MobileClient {
         );
         #[cfg(target_os = "android")]
         let ipc_client = match AssertUnwindSafe(attach_ipc_client_via_ssh(
-            &ssh_client,
+            ipc_attach_ssh_client,
             config.server_id.as_str(),
             ipc_socket_path_override.as_deref(),
         ))
@@ -431,7 +610,7 @@ impl MobileClient {
         );
         #[cfg(not(target_os = "android"))]
         let ipc_client = attach_ipc_client_via_ssh(
-            &ssh_client,
+            ipc_attach_ssh_client,
             config.server_id.as_str(),
             ipc_socket_path_override.as_deref(),
         )
@@ -493,27 +672,7 @@ impl MobileClient {
 
         self.sessions_write()
             .insert(server_id.clone(), Arc::clone(&session));
-
-        if let Err(error) = self.sync_server_account(server_id.as_str()).await {
-            warn!("MobileClient: failed to sync account for {server_id}: {error}");
-        }
-        trace!(
-            "MobileClient: finish_connect_remote_over_ssh account sync completed server_id={}",
-            server_id
-        );
-        if let Err(error) = refresh_thread_list_from_app_server(
-            Arc::clone(&session),
-            Arc::clone(&self.app_store),
-            server_id.as_str(),
-        )
-        .await
-        {
-            warn!("MobileClient: failed to refresh thread list for {server_id}: {error}");
-        }
-        trace!(
-            "MobileClient: finish_connect_remote_over_ssh thread refresh completed server_id={}",
-            server_id
-        );
+        self.spawn_post_connect_warmup(server_id.clone(), session);
 
         info!("MobileClient: connected remote SSH server {server_id}");
         Ok(server_id)
@@ -595,6 +754,48 @@ impl MobileClient {
         Ok(())
     }
 
+    fn spawn_post_connect_warmup(&self, server_id: String, session: Arc<ServerSession>) {
+        let sessions = Arc::clone(&self.sessions);
+        let app_store = Arc::clone(&self.app_store);
+        Self::spawn_detached(async move {
+            let account_future = refresh_account_from_app_server(
+                Arc::clone(&session),
+                Arc::clone(&app_store),
+                Arc::clone(&sessions),
+                server_id.as_str(),
+            );
+            let threads_future = refresh_thread_list_from_app_server_if_current(
+                Arc::clone(&session),
+                Arc::clone(&app_store),
+                Arc::clone(&sessions),
+                server_id.as_str(),
+            );
+            let (account_result, thread_result) = tokio::join!(account_future, threads_future);
+
+            match account_result {
+                Ok(()) => trace!(
+                    "MobileClient: post-connect account sync completed server_id={}",
+                    server_id
+                ),
+                Err(error) => warn!(
+                    "MobileClient: failed to sync account for {}: {}",
+                    server_id, error
+                ),
+            }
+
+            match thread_result {
+                Ok(()) => trace!(
+                    "MobileClient: post-connect thread refresh completed server_id={}",
+                    server_id
+                ),
+                Err(error) => warn!(
+                    "MobileClient: failed to refresh thread list for {}: {}",
+                    server_id, error
+                ),
+            }
+        });
+    }
+
     pub async fn start_remote_ssh_oauth_login(&self, server_id: &str) -> Result<String, RpcError> {
         let session = self.get_session(server_id)?;
         if session.config().is_local {
@@ -673,6 +874,7 @@ impl MobileClient {
                 "desktop IPC is not connected".to_string(),
             ))
         })?;
+        let mut updates = self.app_store.subscribe();
         info!(
             "IPC out: external_resume_thread server={} thread={}",
             server_id, thread_id
@@ -685,18 +887,15 @@ impl MobileClient {
             .await
             .map_err(|error| {
                 warn!(
-                    "IPC out: external_resume_thread failed server={} error={}",
-                    server_id, error
+                    "IPC out: external_resume_thread failed server={} thread={} error={} ({})",
+                    server_id,
+                    thread_id,
+                    error,
+                    ipc_command_error_context(&error)
                 );
                 RpcError::Deserialization(format!("IPC external resume: {error}"))
             })?;
-        refresh_thread_snapshot_from_app_server(
-            Arc::clone(&session),
-            Arc::clone(&self.app_store),
-            server_id,
-            thread_id,
-        )
-        .await?;
+        wait_for_thread_resume_sync(&mut updates, server_id, thread_id).await;
         Ok(())
     }
 
@@ -706,25 +905,94 @@ impl MobileClient {
         params: upstream::TurnStartParams,
     ) -> Result<(), RpcError> {
         let session = self.get_session(server_id)?;
+        let mut params = params;
         let thread_key = ThreadKey {
             server_id: server_id.to_string(),
             thread_id: params.thread_id.clone(),
         };
+        self.app_store
+            .dismiss_plan_implementation_prompt(&thread_key);
         let thread_snapshot = self.snapshot_thread(&thread_key).ok();
+        if let Some(thread) = thread_snapshot.as_ref()
+            && thread.collaboration_mode == AppModeKind::Plan
+            && params.collaboration_mode.is_none()
+        {
+            params.collaboration_mode = collaboration_mode_from_thread(
+                thread,
+                AppModeKind::Plan,
+                params.model.clone(),
+                params.effort,
+            );
+        }
         let has_active_session = thread_snapshot.as_ref().is_some_and(|thread| {
             thread.active_turn_id.is_some() || thread.info.status == ThreadSummaryStatus::Active
         });
-        let queued_preview = has_active_session
-            .then(|| queued_follow_up_preview_from_inputs(&params.input))
-            .flatten();
-        if let Some(preview) = queued_preview.clone() {
-            self.app_store
-                .enqueue_thread_follow_up_preview(&thread_key, preview);
-        }
         let direct_params = params.clone();
+        let queued_draft = has_active_session
+            .then(|| {
+                queued_follow_up_draft_from_inputs(&params.input, AppQueuedFollowUpKind::Message)
+            })
+            .flatten();
+        if let Some(draft) = queued_draft.clone() {
+            self.app_store
+                .enqueue_thread_follow_up_draft(&thread_key, draft.clone());
 
-        if let Some(ipc_client) = session.ipc_client() {
+            if let Some(ipc_client) = session.ipc_client() {
+                let mut next_drafts = thread_snapshot
+                    .as_ref()
+                    .map(|thread| thread.queued_follow_up_drafts.clone())
+                    .unwrap_or_default();
+                next_drafts.push(draft);
+                let thread_id = params.thread_id.clone();
+                info!(
+                    "IPC out: set_queued_follow_ups_state server={} thread={}",
+                    server_id, thread_id
+                );
+                let ipc_result = ipc_client
+                    .set_queued_follow_ups_state(
+                        codex_ipc::ThreadFollowerSetQueuedFollowUpsStateParams {
+                            conversation_id: thread_id.clone(),
+                            state: queued_follow_up_state_json_from_drafts(&next_drafts),
+                        },
+                    )
+                    .await;
+                match ipc_result {
+                    Ok(_) => {
+                        debug!(
+                            "IPC out: set_queued_follow_ups_state ok server={} thread={}",
+                            server_id, thread_id
+                        );
+                        return Ok(());
+                    }
+                    Err(error) => {
+                        warn!(
+                            "MobileClient: IPC queued follow-up update failed for {} thread {}: {} ({})",
+                            server_id,
+                            thread_id,
+                            error,
+                            ipc_command_error_context(&error)
+                        );
+                        if ipc_command_error_clears_server_ipc_state(&error) {
+                            self.app_store.update_server_ipc_state(server_id, false);
+                        }
+                    }
+                }
+            } else {
+                return Ok(());
+            }
+        }
+
+        if queued_draft.is_none()
+            && let Some(ipc_client) = session.ipc_client()
+        {
             let thread_id = params.thread_id.clone();
+            refresh_ipc_thread_subscription(
+                &ipc_client,
+                &self.app_store,
+                server_id,
+                &thread_id,
+            )
+            .await;
             info!(
                 "IPC out: start_turn server={} thread={}",
                 server_id, thread_id
@@ -741,25 +1009,24 @@ impl MobileClient {
                         "IPC out: start_turn ok server={} thread={}",
                         server_id, thread_id
                     );
-                    refresh_thread_snapshot_from_app_server(
-                        Arc::clone(&session),
-                        Arc::clone(&self.app_store),
-                        server_id,
-                        &thread_id,
-                    )
-                    .await?;
+                    // When the desktop follower accepts the turn, the IPC stream is
+                    // the authoritative source for the new in-progress state. An
+                    // immediate thread/read can race behind the follower update and
+                    // briefly regress the store back to older "not loaded"/completed
+                    // thread state before stream deltas catch up.
                     return Ok(());
                 }
                 Err(error) => {
-                    if let Some(preview) = queued_preview.as_ref() {
-                        self.app_store
-                            .remove_thread_follow_up_preview(&thread_key, &preview.id);
-                    }
                     warn!(
-                        "MobileClient: IPC follower start turn failed for {} thread {}: {}",
-                        server_id, thread_id, error
+                        "MobileClient: IPC follower start turn failed for {} thread {}: {} ({})",
+                        server_id,
+                        thread_id,
+                        error,
+                        ipc_command_error_context(&error)
                     );
-                    self.app_store.update_server_ipc_state(server_id, false);
+                    if ipc_command_error_clears_server_ipc_state(&error) {
+                        self.app_store.update_server_ipc_state(server_id, false);
+                    }
                 }
             }
         }
@@ -774,13 +1041,118 @@ impl MobileClient {
             )
             .await
             .map_err(|error| {
-                if let Some(preview) = queued_preview.as_ref() {
+                if let Some(draft) = queued_draft.as_ref() {
                     self.app_store
-                        .remove_thread_follow_up_preview(&thread_key, &preview.id);
+                        .remove_thread_follow_up_draft(&thread_key, &draft.preview.id);
                 }
                 RpcError::Deserialization(error)
             })?;
         let _ = response;
+        Ok(())
+    }
+
+    pub async fn steer_queued_follow_up(
+        &self,
+        key: &ThreadKey,
+        preview_id: &str,
+    ) -> Result<(), RpcError> {
+        let session = self.get_session(&key.server_id)?;
+        let thread = self.snapshot_thread(key)?;
+        let Some(draft) = thread
+            .queued_follow_up_drafts
+            .iter()
+            .find(|draft| draft.preview.id == preview_id)
+            .cloned()
+        else {
+            return Err(RpcError::Deserialization(format!(
+                "queued follow-up not found: {preview_id}"
+            )));
+        };
+
+        if let Some(ipc_client) = session.ipc_client() {
+            let next_drafts = thread
+                .queued_follow_up_drafts
+                .into_iter()
+                .map(|mut queued| {
+                    if queued.preview.id == preview_id {
+                        queued.preview.kind = AppQueuedFollowUpKind::PendingSteer;
+                    }
+                    queued
+                })
+                .collect::<Vec<_>>();
+            ipc_client
+                .set_queued_follow_ups_state(
+                    codex_ipc::ThreadFollowerSetQueuedFollowUpsStateParams {
+                        conversation_id: key.thread_id.clone(),
+                        state: queued_follow_up_state_json_from_drafts(&next_drafts),
+                    },
+                )
+                .await
+                .map_err(|error| {
+                    if ipc_command_error_clears_server_ipc_state(&error) {
+                        self.app_store
+                            .update_server_ipc_state(&key.server_id, false);
+                    }
+                    RpcError::Deserialization(format!("IPC steer queued follow-up: {error}"))
+                })?;
+            self.app_store.set_thread_follow_up_drafts(key, next_drafts);
+            return Ok(());
+        }
+
+        let active_turn_id = thread.active_turn_id.ok_or_else(|| {
+            RpcError::Deserialization("no active turn available to steer".to_string())
+        })?;
+
+        self.request_typed_for_server::<upstream::TurnSteerResponse>(
+            &key.server_id,
+            upstream::ClientRequest::TurnSteer {
+                request_id: upstream::RequestId::Integer(crate::next_request_id()),
+                params: upstream::TurnSteerParams {
+                    thread_id: key.thread_id.clone(),
+                    input: draft.inputs,
+                    expected_turn_id: active_turn_id,
+                },
+            },
+        )
+        .await
+        .map_err(RpcError::Deserialization)?;
+        self.app_store
+            .remove_thread_follow_up_draft(key, preview_id);
+        Ok(())
+    }
+
+    pub async fn delete_queued_follow_up(
+        &self,
+        key: &ThreadKey,
+        preview_id: &str,
+    ) -> Result<(), RpcError> {
+        let session = self.get_session(&key.server_id)?;
+        let thread = self.snapshot_thread(key)?;
+        let next_drafts = thread
+            .queued_follow_up_drafts
+            .into_iter()
+            .filter(|draft| draft.preview.id != preview_id)
+            .collect::<Vec<_>>();
+
+        if let Some(ipc_client) = session.ipc_client() {
+            ipc_client
+                .set_queued_follow_ups_state(
+                    codex_ipc::ThreadFollowerSetQueuedFollowUpsStateParams {
+                        conversation_id: key.thread_id.clone(),
+                        state: queued_follow_up_state_json_from_drafts(&next_drafts),
+                    },
+                )
+                .await
+                .map_err(|error| {
+                    if ipc_command_error_clears_server_ipc_state(&error) {
+                        self.app_store
+                            .update_server_ipc_state(&key.server_id, false);
+                    }
+                    RpcError::Deserialization(format!("IPC delete queued follow-up: {error}"))
+                })?;
+        }
+
+        self.app_store.set_thread_follow_up_drafts(key, next_drafts);
         Ok(())
     }
 
@@ -855,9 +1227,7 @@ impl MobileClient {
                     persist_extended_history,
                 }
                 .try_into()
-                .map_err(|e: crate::RpcClientError| {
-                    RpcError::Deserialization(e.to_string())
-                })?,
+                .map_err(|e: crate::RpcClientError| RpcError::Deserialization(e.to_string()))?,
             )
             .await
             .map_err(|e| RpcError::Deserialization(e.to_string()))?;
@@ -916,22 +1286,38 @@ impl MobileClient {
         let session = self.get_session(&approval.server_id)?;
         if let Some(ipc_client) = session.ipc_client()
             && let Some(thread_id) = approval.thread_id.clone()
-            && send_ipc_approval_response(&ipc_client, &approval, &thread_id, decision.clone())
-                .await?
         {
-            debug!(
-                "MobileClient: approval response sent over IPC for server={} request_id={}",
-                approval.server_id, request_id
-            );
-            self.app_store.resolve_approval(request_id);
-            return Ok(());
+            match send_ipc_approval_response(&ipc_client, &approval, &thread_id, decision.clone())
+                .await
+            {
+                Ok(true) => {
+                    debug!(
+                        "MobileClient: approval response sent over IPC for server={} request_id={}",
+                        approval.server_id, request_id
+                    );
+                    self.app_store.resolve_approval(request_id);
+                    return Ok(());
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    warn!(
+                        "MobileClient: IPC approval response failed for server={} request_id={}: {} ({})",
+                        approval.server_id,
+                        request_id,
+                        error,
+                        ipc_command_error_context(&error)
+                    );
+                    if ipc_command_error_clears_server_ipc_state(&error) {
+                        self.app_store
+                            .update_server_ipc_state(&approval.server_id, false);
+                    }
+                }
+            }
         }
         let response_json = approval_response_json(&approval, approval_seed.as_ref(), decision)?;
         let response_request_id =
             server_request_id_json(approval_request_id(&approval, approval_seed.as_ref()));
-        session
-            .respond(response_request_id, response_json)
-            .await?;
+        session.respond(response_request_id, response_json).await?;
         debug!(
             "MobileClient: approval response sent for server={} request_id={}",
             approval.server_id, request_id
@@ -948,22 +1334,39 @@ impl MobileClient {
         let answered_inputs = answers.clone();
         let request = self.pending_user_input(request_id)?;
         let session = self.get_session(&request.server_id)?;
-        if let Some(ipc_client) = session.ipc_client()
-            && send_ipc_user_input_response(
+        if let Some(ipc_client) = session.ipc_client() {
+            match send_ipc_user_input_response(
                 &ipc_client,
                 &request.thread_id,
                 &request.id,
                 answers.clone(),
             )
-            .await?
-        {
-            debug!(
-                "MobileClient: user input response sent over IPC for server={} request_id={}",
-                request.server_id, request_id
-            );
-            self.app_store
-                .resolve_pending_user_input_with_response(request_id, answered_inputs);
-            return Ok(());
+            .await
+            {
+                Ok(true) => {
+                    debug!(
+                        "MobileClient: user input response sent over IPC for server={} request_id={}",
+                        request.server_id, request_id
+                    );
+                    self.app_store
+                        .resolve_pending_user_input_with_response(request_id, answered_inputs);
+                    return Ok(());
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    warn!(
+                        "MobileClient: IPC user input response failed for server={} request_id={}: {} ({})",
+                        request.server_id,
+                        request_id,
+                        error,
+                        ipc_command_error_context(&error)
+                    );
+                    if ipc_command_error_clears_server_ipc_state(&error) {
+                        self.app_store
+                            .update_server_ipc_state(&request.server_id, false);
+                    }
+                }
+            }
         }
         let response = upstream::ToolRequestUserInputResponse {
             answers: answers
@@ -1011,6 +1414,89 @@ impl MobileClient {
 
     pub fn set_active_thread(&self, key: Option<ThreadKey>) {
         self.app_store.set_active_thread(key);
+    }
+
+    pub async fn set_thread_collaboration_mode(
+        &self,
+        key: &ThreadKey,
+        mode: AppModeKind,
+    ) -> Result<(), RpcError> {
+        let session = self.get_session(&key.server_id)?;
+        let thread = self.snapshot_thread(key)?;
+        self.app_store.set_thread_collaboration_mode(key, mode);
+
+        let Some(ipc_client) = session.ipc_client() else {
+            return Ok(());
+        };
+        let Some(collaboration_mode) = collaboration_mode_from_thread(&thread, mode, None, None)
+        else {
+            return Ok(());
+        };
+
+        info!(
+            "IPC out: set_collaboration_mode server={} thread={}",
+            key.server_id, key.thread_id
+        );
+        let ipc_result = ipc_client
+            .set_collaboration_mode(ThreadFollowerSetCollaborationModeParams {
+                conversation_id: key.thread_id.clone(),
+                collaboration_mode,
+            })
+            .await;
+        match ipc_result {
+            Ok(_) => {
+                debug!(
+                    "IPC out: set_collaboration_mode ok server={} thread={}",
+                    key.server_id, key.thread_id
+                );
+            }
+            Err(error) => {
+                warn!(
+                    "MobileClient: IPC collaboration mode sync failed for {} thread {}: {} ({})",
+                    key.server_id,
+                    key.thread_id,
+                    error,
+                    ipc_command_error_context(&error)
+                );
+                if ipc_command_error_clears_server_ipc_state(&error) {
+                    self.app_store
+                        .update_server_ipc_state(&key.server_id, false);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn dismiss_plan_implementation_prompt(&self, key: &ThreadKey) {
+        self.app_store.dismiss_plan_implementation_prompt(key);
+    }
+
+    pub async fn implement_plan(&self, key: &ThreadKey) -> Result<(), RpcError> {
+        self.app_store.dismiss_plan_implementation_prompt(key);
+        self.app_store
+            .set_thread_collaboration_mode(key, AppModeKind::Default);
+        self.start_turn(
+            &key.server_id,
+            upstream::TurnStartParams {
+                thread_id: key.thread_id.clone(),
+                input: vec![upstream::UserInput::Text {
+                    text: "Implement the plan.".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                cwd: None,
+                approval_policy: None,
+                approvals_reviewer: None,
+                sandbox_policy: None,
+                model: None,
+                service_tier: None,
+                effort: None,
+                summary: None,
+                personality: None,
+                output_schema: None,
+                collaboration_mode: None,
+            },
+        )
+        .await
     }
 
     pub fn set_voice_handoff_thread(&self, key: Option<ThreadKey>) {
@@ -1170,158 +1656,174 @@ impl MobileClient {
         let loop_server_id = server_id.clone();
         Self::spawn_detached(async move {
             let mut stream_cache: HashMap<String, serde_json::Value> = HashMap::new();
+            let mut pending_thread_events: HashMap<
+                String,
+                VecDeque<ThreadStreamStateChangedParams>,
+            > = HashMap::new();
+            let mut recovering_threads: HashSet<String> = HashSet::new();
+            let (recovery_tx, mut recovery_rx) =
+                mpsc::unbounded_channel::<PendingIpcStreamRecovery>();
             loop {
-                match broadcasts.recv().await {
-                    Ok(TypedBroadcast::ThreadStreamStateChanged(params)) => {
-                        let change_type = match &params.change {
-                            StreamChange::Snapshot { .. } => "snapshot",
-                            StreamChange::Patches { .. } => "patches",
+                tokio::select! {
+                    maybe_recovery = recovery_rx.recv() => {
+                        let Some(recovery) = maybe_recovery else {
+                            continue;
                         };
-                        debug!(
-                            "IPC in: ThreadStreamStateChanged server={} thread={} protocol_version={} change={}",
-                            loop_server_id, params.conversation_id, params.version, change_type
-                        );
-
-                        match handle_stream_state_change(
-                            &mut stream_cache,
-                            &app_store,
-                            &loop_server_id,
-                            &params,
-                        ) {
-                            Ok(()) => {}
-                            Err(StreamHandleError::NoCachedState) => {
+                        match recovery {
+                            PendingIpcStreamRecovery::Recovered {
+                                thread_id,
+                                conversation_state,
+                            } => {
+                                let queued_events =
+                                    pending_thread_events.get(&thread_id).map_or(0, VecDeque::len);
                                 debug!(
-                                    "IPC: no cached state for thread={}, seeding stream cache from RPC",
-                                    params.conversation_id
+                                    "IPC: async cache recovery completed server={} thread={} queued_events={}",
+                                    loop_server_id, thread_id, queued_events
                                 );
-                                if let Err(e) = recover_ipc_stream_cache_from_app_server(
+                                recovering_threads.remove(&thread_id);
+                                stream_cache.insert(thread_id.clone(), conversation_state);
+                                drain_pending_ipc_thread_events(
+                                    &thread_id,
+                                    &mut stream_cache,
+                                    &mut pending_thread_events,
+                                    &mut recovering_threads,
                                     Arc::clone(&session),
                                     Arc::clone(&app_store),
-                                    &mut stream_cache,
                                     &loop_server_id,
-                                    &params.conversation_id,
-                                )
-                                .await
-                                {
-                                    warn!(
-                                        "IPC: RPC cache recovery failed for thread {}: {}",
-                                        params.conversation_id, e
-                                    );
-                                }
+                                    &recovery_tx,
+                                );
                             }
-                            Err(StreamHandleError::DeserializeFailed(msg)) => {
+                            PendingIpcStreamRecovery::Failed { thread_id, error } => {
+                                recovering_threads.remove(&thread_id);
+                                pending_thread_events.remove(&thread_id);
                                 warn!(
-                                    "IPC: deserialize failed for thread={}: {}",
-                                    params.conversation_id, msg
+                                    "IPC: async cache recovery failed for thread {}: {}",
+                                    thread_id, error
                                 );
-                                stream_cache.remove(&params.conversation_id);
-                                if let Err(e) = recover_ipc_stream_cache_from_app_server(
-                                    Arc::clone(&session),
-                                    Arc::clone(&app_store),
-                                    &mut stream_cache,
-                                    &loop_server_id,
-                                    &params.conversation_id,
-                                )
-                                .await
-                                {
-                                    warn!(
-                                        "IPC: RPC cache recovery failed for thread {}: {}",
-                                        params.conversation_id, e
-                                    );
-                                }
-                            }
-                            Err(StreamHandleError::PatchFailed(msg)) => {
-                                warn!(
-                                    "IPC: patch failed for thread={}: {}",
-                                    params.conversation_id, msg
-                                );
-                                stream_cache.remove(&params.conversation_id);
-                                if let Err(e) = recover_ipc_stream_cache_from_app_server(
-                                    Arc::clone(&session),
-                                    Arc::clone(&app_store),
-                                    &mut stream_cache,
-                                    &loop_server_id,
-                                    &params.conversation_id,
-                                )
-                                .await
-                                {
-                                    warn!(
-                                        "IPC: RPC cache recovery failed for thread {}: {}",
-                                        params.conversation_id, e
-                                    );
-                                }
                             }
                         }
                     }
-                    Ok(TypedBroadcast::ThreadArchived(ref params)) => {
-                        stream_cache.remove(&params.conversation_id);
-                        debug!(
-                            "IPC in: ThreadArchived server={} thread={}",
-                            loop_server_id, params.conversation_id
-                        );
-                        if let Err(error) = refresh_thread_list_from_app_server(
-                            Arc::clone(&session),
-                            Arc::clone(&app_store),
-                            &loop_server_id,
-                        )
-                        .await
-                        {
-                            warn!(
-                                "MobileClient: failed to refresh IPC thread list on {}: {}",
-                                loop_server_id, error
+                    broadcast = broadcasts.recv() => match broadcast {
+                        Ok(TypedBroadcast::ThreadStreamStateChanged(params)) => {
+                            let change_type = match &params.change {
+                                StreamChange::Snapshot { .. } => "snapshot",
+                                StreamChange::Patches { .. } => "patches",
+                            };
+                            debug!(
+                                "IPC in: ThreadStreamStateChanged server={} thread={} protocol_version={} change={}",
+                                loop_server_id, params.conversation_id, params.version, change_type
+                            );
+                            handle_ipc_thread_stream_event(
+                                &mut stream_cache,
+                                &mut pending_thread_events,
+                                &mut recovering_threads,
+                                Arc::clone(&session),
+                                Arc::clone(&app_store),
+                                &loop_server_id,
+                                params,
+                                &recovery_tx,
                             );
                         }
-                    }
-                    Ok(TypedBroadcast::ThreadUnarchived(_))
-                    | Ok(TypedBroadcast::ThreadQueuedFollowupsChanged(_))
-                    | Ok(TypedBroadcast::QueryCacheInvalidate(_)) => {
-                        debug!(
-                            "IPC in: thread list change broadcast server={}",
-                            loop_server_id
-                        );
-                        if let Err(error) = refresh_thread_list_from_app_server(
-                            Arc::clone(&session),
-                            Arc::clone(&app_store),
-                            &loop_server_id,
-                        )
-                        .await
-                        {
-                            warn!(
-                                "MobileClient: failed to refresh IPC thread list on {}: {}",
-                                loop_server_id, error
+                        Ok(TypedBroadcast::ThreadArchived(ref params)) => {
+                            stream_cache.remove(&params.conversation_id);
+                            pending_thread_events.remove(&params.conversation_id);
+                            recovering_threads.remove(&params.conversation_id);
+                            debug!(
+                                "IPC in: ThreadArchived server={} thread={}",
+                                loop_server_id, params.conversation_id
+                            );
+                            if let Err(error) = refresh_thread_list_from_app_server(
+                                Arc::clone(&session),
+                                Arc::clone(&app_store),
+                                &loop_server_id,
+                            )
+                            .await
+                            {
+                                warn!(
+                                    "MobileClient: failed to refresh IPC thread list on {}: {}",
+                                    loop_server_id, error
+                                );
+                            }
+                        }
+                        Ok(TypedBroadcast::ThreadUnarchived(_))
+                        | Ok(TypedBroadcast::QueryCacheInvalidate(_)) => {
+                            debug!(
+                                "IPC in: thread list change broadcast server={}",
+                                loop_server_id
+                            );
+                            if let Err(error) = refresh_thread_list_from_app_server(
+                                Arc::clone(&session),
+                                Arc::clone(&app_store),
+                                &loop_server_id,
+                            )
+                            .await
+                            {
+                                warn!(
+                                    "MobileClient: failed to refresh IPC thread list on {}: {}",
+                                    loop_server_id, error
+                                );
+                            }
+                        }
+                        Ok(TypedBroadcast::ThreadQueuedFollowupsChanged(params)) => {
+                            let drafts = queued_follow_up_drafts_from_message_values(&params.messages);
+                            debug!(
+                                "IPC in: ThreadQueuedFollowupsChanged server={} thread={} previews={}",
+                                loop_server_id,
+                                params.conversation_id,
+                                drafts.len()
+                            );
+                            if let Err(error) = refresh_thread_list_from_app_server(
+                                Arc::clone(&session),
+                                Arc::clone(&app_store),
+                                &loop_server_id,
+                            )
+                            .await
+                            {
+                                warn!(
+                                    "MobileClient: failed to refresh IPC thread list on {}: {}",
+                                    loop_server_id, error
+                                );
+                            }
+                            app_store.set_thread_follow_up_drafts(
+                                &ThreadKey {
+                                    server_id: loop_server_id.clone(),
+                                    thread_id: params.conversation_id,
+                                },
+                                drafts,
                             );
                         }
-                    }
-                    Ok(TypedBroadcast::ClientStatusChanged(params)) => {
-                        debug!(
-                            "IPC in: ClientStatusChanged server={} client_type={} status={:?}",
-                            loop_server_id, params.client_type, params.status
-                        );
-                        if params.client_type != "mobile" {
-                            match params.status {
-                                ClientStatus::Connected => {
-                                    app_store.update_server_ipc_state(&loop_server_id, true);
-                                }
-                                ClientStatus::Disconnected => {
-                                    app_store.update_server_ipc_state(&loop_server_id, false);
+                        Ok(TypedBroadcast::ClientStatusChanged(params)) => {
+                            debug!(
+                                "IPC in: ClientStatusChanged server={} client_type={} status={:?}",
+                                loop_server_id, params.client_type, params.status
+                            );
+                            if params.client_type != "mobile" {
+                                match params.status {
+                                    ClientStatus::Connected => {
+                                        app_store.update_server_ipc_state(&loop_server_id, true);
+                                    }
+                                    ClientStatus::Disconnected => {
+                                        app_store.update_server_ipc_state(&loop_server_id, false);
+                                    }
                                 }
                             }
                         }
-                    }
-                    Ok(TypedBroadcast::Unknown { method, .. }) => {
-                        debug!(
-                            "MobileClient: ignoring unknown IPC broadcast for {} method={}",
-                            loop_server_id, method
-                        );
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        info!("IPC in: broadcast stream closed server={}", loop_server_id);
-                        app_store.update_server_ipc_state(&loop_server_id, false);
-                        break;
-                    }
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        warn!("MobileClient: lagged {skipped} IPC events for {loop_server_id}");
-                        stream_cache.clear();
+                        Ok(TypedBroadcast::Unknown { method, .. }) => {
+                            debug!(
+                                "MobileClient: ignoring unknown IPC broadcast for {} method={}",
+                                loop_server_id, method
+                            );
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            info!("IPC in: broadcast stream closed server={}", loop_server_id);
+                            app_store.update_server_ipc_state(&loop_server_id, false);
+                            break;
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            warn!("MobileClient: lagged {skipped} IPC events for {loop_server_id}");
+                            stream_cache.clear();
+                            pending_thread_events.clear();
+                        }
                     }
                 }
             }
@@ -1664,11 +2166,25 @@ impl Default for MobileClient {
     }
 }
 
-fn spawn_store_listener(app_store: Arc<AppStoreReducer>, mut rx: broadcast::Receiver<UiEvent>) {
+fn spawn_store_listener(
+    app_store: Arc<AppStoreReducer>,
+    sessions: Arc<RwLock<HashMap<String, Arc<ServerSession>>>>,
+    mut rx: broadcast::Receiver<UiEvent>,
+) {
     MobileClient::spawn_detached(async move {
         loop {
             match rx.recv().await {
-                Ok(event) => app_store.apply_ui_event(&event),
+                Ok(event) => {
+                    app_store.apply_ui_event(&event);
+                    if let UiEvent::TurnCompleted { key, .. } = &event {
+                        maybe_send_next_local_queued_follow_up(
+                            Arc::clone(&app_store),
+                            Arc::clone(&sessions),
+                            key.clone(),
+                        )
+                        .await;
+                    }
+                }
                 Err(broadcast::error::RecvError::Closed) => break,
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
                     warn!("MobileClient: lagged {skipped} UI events");
@@ -1676,6 +2192,57 @@ fn spawn_store_listener(app_store: Arc<AppStoreReducer>, mut rx: broadcast::Rece
             }
         }
     });
+}
+
+async fn maybe_send_next_local_queued_follow_up(
+    app_store: Arc<AppStoreReducer>,
+    sessions: Arc<RwLock<HashMap<String, Arc<ServerSession>>>>,
+    key: ThreadKey,
+) {
+    let snapshot = app_store.snapshot();
+    let server_has_ipc = snapshot
+        .servers
+        .get(&key.server_id)
+        .map(|server| server.has_ipc)
+        .unwrap_or(false);
+    let Some(thread) = snapshot.threads.get(&key).cloned() else {
+        return;
+    };
+    if thread.active_turn_id.is_some() || thread.queued_follow_up_drafts.is_empty() {
+        return;
+    }
+
+    let session = match sessions.read() {
+        Ok(guard) => guard.get(&key.server_id).cloned(),
+        Err(error) => {
+            warn!("MobileClient: recovering poisoned sessions read lock");
+            error.into_inner().get(&key.server_id).cloned()
+        }
+    };
+    let Some(session) = session else {
+        return;
+    };
+    if session.ipc_client().is_some() && server_has_ipc {
+        return;
+    }
+
+    let next = thread.queued_follow_up_drafts.first().cloned();
+    let Some(draft) = next else {
+        return;
+    };
+    let response = session.request(
+        "turn/start",
+        serde_json::json!({
+            "threadId": key.thread_id,
+            "input": draft.inputs,
+        }),
+    );
+    if let Err(error) = response.await {
+        warn!(
+            "MobileClient: failed to autosend queued follow-up for {} thread {}: {}",
+            key.server_id, key.thread_id, error
+        );
+    }
 }
 
 #[derive(Clone)]
@@ -1857,9 +2424,35 @@ fn list_servers_tool_output(targets: &[DynamicToolSessionTarget]) -> String {
         })
         .collect::<Vec<_>>();
 
+    let summary = match items.len() {
+        0 => "No connected servers found.".to_string(),
+        1 => {
+            let name = items[0]
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("the server");
+            format!("Found 1 connected server: {name}.")
+        }
+        count => {
+            let names = items
+                .iter()
+                .take(3)
+                .filter_map(|item| item.get("name").and_then(serde_json::Value::as_str))
+                .collect::<Vec<_>>();
+            let listed = names.join(", ");
+            let extra = count.saturating_sub(names.len());
+            if extra > 0 {
+                format!("Found {count} connected servers: {listed}, and {extra} more.")
+            } else {
+                format!("Found {count} connected servers: {listed}.")
+            }
+        }
+    };
+
     serialize_dynamic_tool_payload(
         serde_json::json!({
             "type": "servers",
+            "summary": summary,
             "items": items,
         }),
         24_000,
@@ -1942,8 +2535,50 @@ async fn list_sessions_tool_output(
         items.truncate(limit as usize);
     }
 
+    let summary = if items.is_empty() {
+        if errors.is_empty() {
+            "No sessions found.".to_string()
+        } else {
+            format!(
+                "No sessions found. {} server lookup{} failed.",
+                errors.len(),
+                if errors.len() == 1 { "" } else { "s" }
+            )
+        }
+    } else {
+        let server_count = items
+            .iter()
+            .filter_map(|item| item.get("serverId").and_then(serde_json::Value::as_str))
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        let preview = items[0]
+            .get("preview")
+            .and_then(serde_json::Value::as_str)
+            .map(|value| truncate_dynamic_tool_text(value, 80))
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "an untitled session".to_string());
+        let server_name = items[0]
+            .get("serverName")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown server");
+        let mut summary = format!(
+            "Found {} session{} across {} server{}. The most recent is {} on {}.",
+            items.len(),
+            if items.len() == 1 { "" } else { "s" },
+            server_count,
+            if server_count == 1 { "" } else { "s" },
+            preview,
+            server_name,
+        );
+        if !errors.is_empty() {
+            summary.push_str(" Some servers could not be queried.");
+        }
+        summary
+    };
+
     let mut payload = serde_json::json!({
         "type": "sessions",
+        "summary": summary,
         "items": items,
     });
     if let serde_json::Value::Object(object) = &mut payload
@@ -2007,6 +2642,7 @@ pub fn thread_snapshot_from_upstream_thread_with_overrides(
 }
 
 pub fn copy_thread_runtime_fields(source: &ThreadSnapshot, target: &mut ThreadSnapshot) {
+    target.collaboration_mode = source.collaboration_mode;
     if target.model.is_none() {
         target.model = source.model.clone();
     }
@@ -2016,15 +2652,48 @@ pub fn copy_thread_runtime_fields(source: &ThreadSnapshot, target: &mut ThreadSn
     if target.queued_follow_ups.is_empty() {
         target.queued_follow_ups = source.queued_follow_ups.clone();
     }
+    if target.queued_follow_up_drafts.is_empty() {
+        target.queued_follow_up_drafts = source.queued_follow_up_drafts.clone();
+    }
     target.context_tokens_used = source.context_tokens_used;
     target.model_context_window = source.model_context_window;
     target.rate_limits = source.rate_limits.clone();
     target.realtime_session_id = source.realtime_session_id.clone();
+    if target.active_plan_progress.is_none() {
+        target.active_plan_progress = source.active_plan_progress.clone();
+    }
+    if target.pending_plan_implementation_turn_id.is_none() {
+        target.pending_plan_implementation_turn_id =
+            source.pending_plan_implementation_turn_id.clone();
+    }
 }
 
+#[cfg(test)]
 fn queued_follow_up_preview_from_inputs(
     inputs: &[upstream::UserInput],
+    kind: AppQueuedFollowUpKind,
 ) -> Option<AppQueuedFollowUpPreview> {
+    queued_follow_up_draft_from_inputs(inputs, kind).map(|draft| draft.preview)
+}
+
+fn queued_follow_up_draft_from_inputs(
+    inputs: &[upstream::UserInput],
+    kind: AppQueuedFollowUpKind,
+) -> Option<crate::store::QueuedFollowUpDraft> {
+    let text = queued_follow_up_text_from_inputs(inputs)?;
+
+    Some(crate::store::QueuedFollowUpDraft {
+        preview: AppQueuedFollowUpPreview {
+            id: uuid::Uuid::new_v4().to_string(),
+            kind,
+            text,
+        },
+        inputs: inputs.to_vec(),
+        source_message_json: queued_follow_up_message_json_from_inputs(inputs),
+    })
+}
+
+fn queued_follow_up_text_from_inputs(inputs: &[upstream::UserInput]) -> Option<String> {
     let mut text_parts: Vec<String> = Vec::new();
     let mut attachment_count = 0usize;
 
@@ -2043,22 +2712,399 @@ fn queued_follow_up_preview_from_inputs(
         }
     }
 
-    let text = if !text_parts.is_empty() {
-        text_parts.join("\n")
-    } else if attachment_count > 0 {
-        if attachment_count == 1 {
-            "1 image attachment".to_string()
-        } else {
-            format!("{attachment_count} image attachments")
-        }
+    if !text_parts.is_empty() {
+        Some(text_parts.join("\n"))
     } else {
-        return None;
+        attachment_summary(attachment_count)
+    }
+}
+
+fn queued_follow_up_drafts_from_message_values(
+    messages: &[serde_json::Value],
+) -> Vec<crate::store::QueuedFollowUpDraft> {
+    build_queued_follow_up_drafts(
+        messages.iter().enumerate(),
+        AppQueuedFollowUpKind::Message,
+        "ipc-message",
+    )
+}
+
+fn queued_follow_up_drafts_from_conversation_json(
+    conversation_state: &serde_json::Value,
+) -> Vec<crate::store::QueuedFollowUpDraft> {
+    conversation_state
+        .get("inputState")
+        .or_else(|| conversation_state.get("input_state"))
+        .map(queued_follow_up_drafts_from_input_state)
+        .unwrap_or_default()
+}
+
+fn queued_follow_up_drafts_from_input_state(
+    input_state: &serde_json::Value,
+) -> Vec<crate::store::QueuedFollowUpDraft> {
+    let mut drafts = Vec::new();
+    let sections = [
+        (
+            input_state
+                .get("pending_steers")
+                .or_else(|| input_state.get("pendingSteers")),
+            AppQueuedFollowUpKind::PendingSteer,
+            "pending-steer",
+        ),
+        (
+            input_state
+                .get("rejected_steers_queue")
+                .or_else(|| input_state.get("rejectedSteersQueue"))
+                .or_else(|| input_state.get("rejectedSteers")),
+            AppQueuedFollowUpKind::RetryingSteer,
+            "rejected-steer",
+        ),
+        (
+            input_state
+                .get("queued_user_messages")
+                .or_else(|| input_state.get("queuedUserMessages"))
+                .or_else(|| input_state.get("queued_messages"))
+                .or_else(|| input_state.get("queuedMessages")),
+            AppQueuedFollowUpKind::Message,
+            "queued-message",
+        ),
+    ];
+
+    for (section_value, fallback_kind, id_scope) in sections {
+        let Some(messages) = section_value.and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        drafts.extend(build_queued_follow_up_drafts(
+            messages.iter().enumerate(),
+            fallback_kind,
+            id_scope,
+        ));
+    }
+
+    drafts
+}
+
+fn build_queued_follow_up_drafts<'a>(
+    messages: impl IntoIterator<Item = (usize, &'a serde_json::Value)>,
+    fallback_kind: AppQueuedFollowUpKind,
+    id_scope: &str,
+) -> Vec<crate::store::QueuedFollowUpDraft> {
+    messages
+        .into_iter()
+        .filter_map(|(index, message)| {
+            let text = queued_follow_up_text_from_json_value(message)?;
+            let kind = queued_follow_up_kind_from_json_value(message).unwrap_or(fallback_kind);
+            Some(crate::store::QueuedFollowUpDraft {
+                preview: AppQueuedFollowUpPreview {
+                    id: stable_follow_up_preview_id(id_scope, index, &text),
+                    kind,
+                    text,
+                },
+                inputs: queued_follow_up_inputs_from_json_value(message),
+                source_message_json: Some(message.clone()),
+            })
+        })
+        .collect()
+}
+
+fn queued_follow_up_kind_from_json_value(
+    value: &serde_json::Value,
+) -> Option<AppQueuedFollowUpKind> {
+    let object = value.as_object()?;
+    let raw_kind = object
+        .get("kind")
+        .or_else(|| object.get("category"))
+        .or_else(|| object.get("queueKind"))
+        .or_else(|| object.get("queue_kind"))
+        .and_then(serde_json::Value::as_str)?
+        .trim()
+        .to_ascii_lowercase();
+
+    match raw_kind.as_str() {
+        "pending_steer" | "pending-steer" | "pendingsteer" | "steer" => {
+            Some(AppQueuedFollowUpKind::PendingSteer)
+        }
+        "rejected_steer" | "rejected-steer" | "rejectedsteer" | "retrying_steer"
+        | "retrying-steer" | "retryingsteer" => Some(AppQueuedFollowUpKind::RetryingSteer),
+        "queued" | "queued_follow_up" | "queued-follow-up" | "queuedfollowup" => {
+            Some(AppQueuedFollowUpKind::Message)
+        }
+        _ => None,
+    }
+}
+
+fn queued_follow_up_text_from_json_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => {
+            let trimmed = text.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }
+        serde_json::Value::Object(object) => {
+            if let Some(nested) = object
+                .get("userMessage")
+                .or_else(|| object.get("user_message"))
+            {
+                return queued_follow_up_text_from_json_value(nested);
+            }
+
+            if let Some(text) = string_field(object, &["text", "message", "summary"]) {
+                return Some(text);
+            }
+
+            let attachment_count = array_field_len(object, &["localImages", "local_images"])
+                + array_field_len(object, &["remoteImageUrls", "remote_image_urls"])
+                + array_field_len(object, &["images", "imageUrls", "image_urls"]);
+
+            attachment_summary(attachment_count)
+        }
+        _ => None,
+    }
+}
+
+fn queued_follow_up_inputs_from_json_value(value: &serde_json::Value) -> Vec<upstream::UserInput> {
+    let Some(object) = value.as_object() else {
+        return Vec::new();
     };
 
-    Some(AppQueuedFollowUpPreview {
-        id: uuid::Uuid::new_v4().to_string(),
-        text,
+    let message = object
+        .get("userMessage")
+        .or_else(|| object.get("user_message"))
+        .and_then(serde_json::Value::as_object)
+        .unwrap_or(object);
+
+    let mut inputs = Vec::new();
+
+    let text_elements = message
+        .get("textElements")
+        .or_else(|| message.get("text_elements"))
+        .cloned()
+        .and_then(|value| serde_json::from_value::<Vec<upstream::TextElement>>(value).ok())
+        .unwrap_or_default();
+
+    if let Some(text) = string_field(message, &["text", "message", "summary"]) {
+        inputs.push(upstream::UserInput::Text {
+            text,
+            text_elements,
+        });
+    }
+
+    let remote_images = message
+        .get("remoteImageUrls")
+        .or_else(|| message.get("remote_image_urls"))
+        .or_else(|| message.get("images"))
+        .or_else(|| message.get("imageUrls"))
+        .or_else(|| message.get("image_urls"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(|url| upstream::UserInput::Image {
+            url: url.to_string(),
+        });
+    inputs.extend(remote_images);
+
+    let local_images = message
+        .get("localImages")
+        .or_else(|| message.get("local_images"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_object)
+        .filter_map(|image| {
+            image
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .map(std::path::PathBuf::from)
+        })
+        .map(|path| upstream::UserInput::LocalImage { path });
+    inputs.extend(local_images);
+
+    let mentions = message
+        .get("mentionBindings")
+        .or_else(|| message.get("mention_bindings"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_object)
+        .filter_map(|binding| {
+            let name = binding
+                .get("mention")
+                .or_else(|| binding.get("name"))
+                .and_then(serde_json::Value::as_str)?;
+            let path = binding.get("path").and_then(serde_json::Value::as_str)?;
+            Some(upstream::UserInput::Mention {
+                name: name.to_string(),
+                path: path.to_string(),
+            })
+        });
+    inputs.extend(mentions);
+
+    let skills = message
+        .get("skillBindings")
+        .or_else(|| message.get("skill_bindings"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_object)
+        .filter_map(|binding| {
+            let name = binding
+                .get("name")
+                .or_else(|| binding.get("skill"))
+                .and_then(serde_json::Value::as_str)?;
+            let path = binding.get("path").and_then(serde_json::Value::as_str)?;
+            Some(upstream::UserInput::Skill {
+                name: name.to_string(),
+                path: std::path::PathBuf::from(path),
+            })
+        });
+    inputs.extend(skills);
+
+    inputs
+}
+
+fn queued_follow_up_message_json_from_inputs(
+    inputs: &[upstream::UserInput],
+) -> Option<serde_json::Value> {
+    let mut text = None;
+    let mut text_elements = Vec::new();
+    let mut remote_image_urls = Vec::new();
+    let mut local_images = Vec::new();
+    let mut mention_bindings = Vec::new();
+    let mut skill_bindings = Vec::new();
+
+    for input in inputs {
+        match input {
+            upstream::UserInput::Text {
+                text: current_text,
+                text_elements: current_elements,
+            } => {
+                let trimmed = current_text.trim();
+                if !trimmed.is_empty() {
+                    text = Some(trimmed.to_string());
+                }
+                text_elements = current_elements.clone();
+            }
+            upstream::UserInput::Image { url } => {
+                remote_image_urls.push(url.clone());
+            }
+            upstream::UserInput::LocalImage { path } => {
+                let placeholder = format!("[Image #{}]", local_images.len() + 1);
+                local_images.push(serde_json::json!({
+                    "placeholder": placeholder,
+                    "path": path,
+                }));
+            }
+            upstream::UserInput::Mention { name, path } => {
+                mention_bindings.push(serde_json::json!({
+                    "mention": name,
+                    "path": path,
+                }));
+            }
+            upstream::UserInput::Skill { name, path } => {
+                skill_bindings.push(serde_json::json!({
+                    "name": name,
+                    "path": path,
+                }));
+            }
+        }
+    }
+
+    if text.is_none()
+        && text_elements.is_empty()
+        && remote_image_urls.is_empty()
+        && local_images.is_empty()
+        && mention_bindings.is_empty()
+        && skill_bindings.is_empty()
+    {
+        return None;
+    }
+
+    Some(serde_json::json!({
+        "text": text.unwrap_or_default(),
+        "textElements": text_elements,
+        "remoteImageUrls": remote_image_urls,
+        "localImages": local_images,
+        "mentionBindings": mention_bindings,
+        "skillBindings": skill_bindings,
+    }))
+}
+
+fn queued_follow_up_state_json_from_drafts(
+    drafts: &[crate::store::QueuedFollowUpDraft],
+) -> serde_json::Value {
+    let mut pending_steers = Vec::new();
+    let mut rejected_steers_queue = Vec::new();
+    let mut queued_user_messages = Vec::new();
+
+    for draft in drafts {
+        let Some(message_json) = draft
+            .source_message_json
+            .clone()
+            .or_else(|| queued_follow_up_message_json_from_inputs(&draft.inputs))
+        else {
+            continue;
+        };
+
+        match draft.preview.kind {
+            AppQueuedFollowUpKind::PendingSteer => pending_steers.push(message_json),
+            AppQueuedFollowUpKind::RetryingSteer => rejected_steers_queue.push(message_json),
+            AppQueuedFollowUpKind::Message => queued_user_messages.push(message_json),
+        }
+    }
+
+    serde_json::json!({
+        "pendingSteers": pending_steers,
+        "rejectedSteersQueue": rejected_steers_queue,
+        "queuedUserMessages": queued_user_messages,
     })
+}
+
+fn string_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    keys: &[&str],
+) -> Option<String> {
+    keys.iter()
+        .filter_map(|key| object.get(*key))
+        .find_map(|value| match value {
+            serde_json::Value::String(text) => {
+                let trimmed = text.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            }
+            serde_json::Value::Array(values) => {
+                let joined = values
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                (!joined.is_empty()).then_some(joined)
+            }
+            _ => None,
+        })
+}
+
+fn array_field_len(object: &serde_json::Map<String, serde_json::Value>, keys: &[&str]) -> usize {
+    keys.iter()
+        .filter_map(|key| object.get(*key))
+        .find_map(|value| value.as_array().map(Vec::len))
+        .unwrap_or(0)
+}
+
+fn attachment_summary(attachment_count: usize) -> Option<String> {
+    match attachment_count {
+        0 => None,
+        1 => Some("1 image attachment".to_string()),
+        count => Some(format!("{count} image attachments")),
+    }
+}
+
+fn stable_follow_up_preview_id(scope: &str, index: usize, text: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    scope.hash(&mut hasher);
+    index.hash(&mut hasher);
+    text.hash(&mut hasher);
+    format!("{scope}-{index}-{:016x}", hasher.finish())
 }
 
 fn remote_oauth_callback_port(auth_url: &str) -> Result<u16, RpcError> {
@@ -2139,7 +3185,9 @@ fn user_boundary_text_for_turn(
             RpcError::Deserialization(format!("unknown user turn index {}", selected_turn_index))
         })?;
     match &item.content {
-        crate::conversation_uniffi::HydratedConversationItemContent::User(data) => Ok(data.text.clone()),
+        crate::conversation_uniffi::HydratedConversationItemContent::User(data) => {
+            Ok(data.text.clone())
+        }
         _ => Err(RpcError::Deserialization(
             "selected turn has no editable text".to_string(),
         )),
@@ -2169,10 +3217,59 @@ pub fn reasoning_effort_from_string(value: &str) -> Option<crate::types::Reasoni
     }
 }
 
+fn core_reasoning_effort_from_mobile(
+    value: crate::types::ReasoningEffort,
+) -> codex_protocol::openai_models::ReasoningEffort {
+    match value {
+        crate::types::ReasoningEffort::None => codex_protocol::openai_models::ReasoningEffort::None,
+        crate::types::ReasoningEffort::Minimal => {
+            codex_protocol::openai_models::ReasoningEffort::Minimal
+        }
+        crate::types::ReasoningEffort::Low => codex_protocol::openai_models::ReasoningEffort::Low,
+        crate::types::ReasoningEffort::Medium => {
+            codex_protocol::openai_models::ReasoningEffort::Medium
+        }
+        crate::types::ReasoningEffort::High => codex_protocol::openai_models::ReasoningEffort::High,
+        crate::types::ReasoningEffort::XHigh => {
+            codex_protocol::openai_models::ReasoningEffort::XHigh
+        }
+    }
+}
+
+fn collaboration_mode_from_thread(
+    thread: &ThreadSnapshot,
+    mode: AppModeKind,
+    model_override: Option<String>,
+    effort_override: Option<codex_protocol::openai_models::ReasoningEffort>,
+) -> Option<codex_protocol::config_types::CollaborationMode> {
+    let model = model_override
+        .or_else(|| thread.model.clone())
+        .or_else(|| thread.info.model.clone())?;
+    let reasoning_effort = effort_override.or_else(|| {
+        thread
+            .reasoning_effort
+            .as_deref()
+            .and_then(reasoning_effort_from_string)
+            .map(core_reasoning_effort_from_mobile)
+    });
+    Some(codex_protocol::config_types::CollaborationMode {
+        mode: match mode {
+            AppModeKind::Default => codex_protocol::config_types::ModeKind::Default,
+            AppModeKind::Plan => codex_protocol::config_types::ModeKind::Plan,
+        },
+        settings: codex_protocol::config_types::Settings {
+            model,
+            reasoning_effort,
+            developer_instructions: None,
+        },
+    })
+}
+
 fn map_rpc_client_error(error: crate::RpcClientError) -> RpcError {
     match error {
-        crate::RpcClientError::Rpc(message)
-        | crate::RpcClientError::Serialization(message) => RpcError::Deserialization(message),
+        crate::RpcClientError::Rpc(message) | crate::RpcClientError::Serialization(message) => {
+            RpcError::Deserialization(message)
+        }
     }
 }
 
@@ -2201,15 +3298,74 @@ async fn refresh_thread_list_from_app_server(
     Ok(())
 }
 
-async fn refresh_thread_snapshot_from_app_server(
+async fn refresh_account_from_app_server(
     session: Arc<ServerSession>,
     app_store: Arc<AppStoreReducer>,
+    sessions: Arc<RwLock<HashMap<String, Arc<ServerSession>>>>,
     server_id: &str,
-    thread_id: &str,
 ) -> Result<(), RpcError> {
-    let response = read_thread_response_from_app_server(session, thread_id).await?;
-    upsert_thread_snapshot_from_app_server_read_response(&app_store, server_id, response)?;
+    let response = session
+        .request("account/read", serde_json::json!({ "refreshToken": false }))
+        .await?;
+    if !session_is_current(&sessions, server_id, &session) {
+        return Ok(());
+    }
+    let response = serde_json::from_value::<upstream::GetAccountResponse>(response)
+        .map_err(|error| RpcError::Deserialization(format!(
+            "deserialize account/read response: {error}"
+        )))?;
+    app_store.update_server_account(
+        server_id,
+        response.account.map(Into::into),
+        response.requires_openai_auth,
+    );
     Ok(())
+}
+
+async fn refresh_thread_list_from_app_server_if_current(
+    session: Arc<ServerSession>,
+    app_store: Arc<AppStoreReducer>,
+    sessions: Arc<RwLock<HashMap<String, Arc<ServerSession>>>>,
+    server_id: &str,
+) -> Result<(), RpcError> {
+    if !session_is_current(&sessions, server_id, &session) {
+        return Ok(());
+    }
+    let response = session
+        .request("thread/list", serde_json::json!({}))
+        .await?;
+    if !session_is_current(&sessions, server_id, &session) {
+        return Ok(());
+    }
+    let threads = response
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| RpcError::Deserialization("thread/list response missing data".to_string()))?
+        .iter()
+        .cloned()
+        .filter_map(|value| serde_json::from_value::<upstream::Thread>(value).ok())
+        .map(ThreadInfo::from)
+        .collect::<Vec<_>>();
+    app_store.sync_thread_list(server_id, &threads);
+    Ok(())
+}
+
+fn session_is_current(
+    sessions: &Arc<RwLock<HashMap<String, Arc<ServerSession>>>>,
+    server_id: &str,
+    session: &Arc<ServerSession>,
+) -> bool {
+    match sessions.read() {
+        Ok(guard) => guard
+            .get(server_id)
+            .map(|current| Arc::ptr_eq(current, session))
+            .unwrap_or(false),
+        Err(error) => error
+            .into_inner()
+            .get(server_id)
+            .map(|current| Arc::ptr_eq(current, session))
+            .unwrap_or(false),
+    }
 }
 
 async fn read_thread_response_from_app_server(
@@ -2257,13 +3413,57 @@ fn upsert_thread_snapshot_from_app_server_read_response(
     Ok(())
 }
 
-async fn recover_ipc_stream_cache_from_app_server(
-    session: Arc<ServerSession>,
-    app_store: Arc<AppStoreReducer>,
+fn seed_ipc_stream_cache_from_existing_app_state(
+    app_store: &AppStoreReducer,
     cache: &mut HashMap<String, serde_json::Value>,
     server_id: &str,
     thread_id: &str,
-) -> Result<(), RpcError> {
+) -> bool {
+    let key = ThreadKey {
+        server_id: server_id.to_string(),
+        thread_id: thread_id.to_string(),
+    };
+    let snapshot = app_store.snapshot();
+    let existing_thread = snapshot.threads.get(&key).cloned();
+    let pending_approvals = snapshot
+        .pending_approvals
+        .iter()
+        .filter(|approval| {
+            approval.server_id == server_id && approval.thread_id.as_deref() == Some(thread_id)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let pending_user_inputs = snapshot
+        .pending_user_inputs
+        .iter()
+        .filter(|request| request.server_id == server_id && request.thread_id == thread_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    drop(snapshot);
+
+    let Some(existing_thread) = existing_thread else {
+        return false;
+    };
+
+    let mut conversation_state =
+        minimal_ipc_conversation_state_from_thread_snapshot(&existing_thread);
+    hydrate_seeded_ipc_conversation_state(
+        app_store,
+        &mut conversation_state,
+        Some(&existing_thread),
+        &pending_approvals,
+        &pending_user_inputs,
+    );
+    cache.insert(thread_id.to_string(), conversation_state);
+    true
+}
+
+async fn recover_ipc_stream_cache_from_app_server(
+    session: Arc<ServerSession>,
+    app_store: Arc<AppStoreReducer>,
+    server_id: &str,
+    thread_id: &str,
+) -> Result<serde_json::Value, RpcError> {
     let key = ThreadKey {
         server_id: server_id.to_string(),
         thread_id: thread_id.to_string(),
@@ -2298,8 +3498,41 @@ async fn recover_ipc_stream_cache_from_app_server(
         &pending_approvals,
         &pending_user_inputs,
     );
-    cache.insert(thread_id.to_string(), conversation_state);
-    Ok(())
+    Ok(conversation_state)
+}
+
+fn minimal_ipc_conversation_state_from_thread_snapshot(
+    thread: &ThreadSnapshot,
+) -> serde_json::Value {
+    serde_json::json!({
+        "title": thread.info.title.clone(),
+        "cwd": thread.info.cwd.clone().unwrap_or_default(),
+        "rolloutPath": thread.info.path.clone(),
+        "source": upstream::SessionSource::default(),
+        "gitInfo": serde_json::Value::Null,
+        "turns": [],
+        "createdAt": thread.info.created_at.unwrap_or_default(),
+        "updatedAt": thread.info.updated_at.unwrap_or_default(),
+        "threadRuntimeStatus": upstream_thread_status_from_summary_status(thread.info.status.clone()),
+        "ephemeral": false,
+        "modelProvider": thread.info.model_provider.clone().unwrap_or_default(),
+        "cliVersion": "",
+        "agentNickname": thread.info.agent_nickname.clone(),
+        "agentRole": thread.info.agent_role.clone(),
+        "requests": [],
+    })
+}
+
+fn upstream_thread_status_from_summary_status(
+    status: ThreadSummaryStatus,
+) -> upstream::ThreadStatus {
+    match status {
+        ThreadSummaryStatus::NotLoaded | ThreadSummaryStatus::Idle => upstream::ThreadStatus::Idle,
+        ThreadSummaryStatus::Active => upstream::ThreadStatus::Active {
+            active_flags: Vec::new(),
+        },
+        ThreadSummaryStatus::SystemError => upstream::ThreadStatus::SystemError,
+    }
 }
 
 fn thread_snapshot_from_upstream_thread(
@@ -2350,8 +3583,8 @@ fn thread_projection_from_conversation_json(
     conversation_state: &serde_json::Value,
 ) -> Result<ThreadProjection, String> {
     project_conversation_state(conversation_id, conversation_state)
-        .map(|projection| ThreadProjection {
-            snapshot: thread_snapshot_from_upstream_thread_state(
+        .map(|projection| {
+            let mut snapshot = thread_snapshot_from_upstream_thread_state(
                 server_id,
                 projection.thread,
                 projection.latest_model,
@@ -2359,17 +3592,27 @@ fn thread_projection_from_conversation_json(
                 None,
                 None,
                 projection.active_turn_id,
-            ),
-            pending_approvals: projection
-                .pending_approvals
-                .into_iter()
-                .map(|approval| pending_approval_from_ipc_projection(server_id, approval))
-                .collect(),
-            pending_user_inputs: projection
-                .pending_user_inputs
-                .into_iter()
-                .map(|request| pending_user_input_from_ipc_projection(server_id, request))
-                .collect(),
+            );
+            snapshot.queued_follow_up_drafts =
+                queued_follow_up_drafts_from_conversation_json(conversation_state);
+            snapshot.queued_follow_ups = snapshot
+                .queued_follow_up_drafts
+                .iter()
+                .map(|draft| draft.preview.clone())
+                .collect();
+            ThreadProjection {
+                snapshot,
+                pending_approvals: projection
+                    .pending_approvals
+                    .into_iter()
+                    .map(|approval| pending_approval_from_ipc_projection(server_id, approval))
+                    .collect(),
+                pending_user_inputs: projection
+                    .pending_user_inputs
+                    .into_iter()
+                    .map(|request| pending_user_input_from_ipc_projection(server_id, request))
+                    .collect(),
+            }
         })
         .or_else(|ipc_error| {
             let thread: upstream::Thread = serde_json::from_value(conversation_state.clone())
@@ -2713,6 +3956,27 @@ struct IncrementalMutationResult {
     emitted_command_updates: Vec<IncrementalCommandExecutionUpdate>,
     emitted_item_upserts: Vec<crate::conversation_uniffi::HydratedConversationItem>,
     emit_thread_state_update: bool,
+}
+
+const MAX_INCREMENTAL_IPC_GRANULAR_NON_STREAMING_UPDATES: usize = 8;
+const MAX_INCREMENTAL_IPC_GRANULAR_TURN_UPDATES: usize = 1;
+
+fn should_emit_thread_upsert_for_incremental_patch_burst(
+    summary: &IncrementalIpcPatchSummary,
+    result: &IncrementalMutationResult,
+) -> bool {
+    if result.requires_thread_upsert {
+        return true;
+    }
+
+    let non_streaming_update_count =
+        result.emitted_item_upserts.len() + result.emitted_command_updates.len();
+    if non_streaming_update_count >= MAX_INCREMENTAL_IPC_GRANULAR_NON_STREAMING_UPDATES {
+        return true;
+    }
+
+    summary.affected_turn_indices.len() > MAX_INCREMENTAL_IPC_GRANULAR_TURN_UPDATES
+        && non_streaming_update_count > 0
 }
 
 fn summarize_incremental_ipc_patches(patches: &[ImmerPatch]) -> Option<IncrementalIpcPatchSummary> {
@@ -3390,7 +4654,7 @@ fn try_apply_incremental_ipc_patch_burst(
         return Ok(false);
     };
 
-    if mutation_result.requires_thread_upsert {
+    if should_emit_thread_upsert_for_incremental_patch_burst(summary, &mutation_result) {
         app_store.emit_thread_upsert(&key);
     } else {
         if mutation_result.emit_thread_state_update {
@@ -3432,6 +4696,216 @@ enum StreamHandleError {
     NoCachedState,
     DeserializeFailed(String),
     PatchFailed(String),
+}
+
+enum PendingIpcStreamRecovery {
+    Recovered {
+        thread_id: String,
+        conversation_state: serde_json::Value,
+    },
+    Failed {
+        thread_id: String,
+        error: String,
+    },
+}
+
+fn handle_ipc_thread_stream_event(
+    stream_cache: &mut HashMap<String, serde_json::Value>,
+    pending_thread_events: &mut HashMap<String, VecDeque<ThreadStreamStateChangedParams>>,
+    recovering_threads: &mut HashSet<String>,
+    session: Arc<ServerSession>,
+    app_store: Arc<AppStoreReducer>,
+    server_id: &str,
+    params: ThreadStreamStateChangedParams,
+    recovery_tx: &mpsc::UnboundedSender<PendingIpcStreamRecovery>,
+) {
+    let thread_id = params.conversation_id.clone();
+    if recovering_threads.contains(&thread_id) {
+        let queued_events = {
+            let queue = pending_thread_events.entry(thread_id.clone()).or_default();
+            queue.push_back(params);
+            queue.len()
+        };
+        trace!(
+            "IPC: queued stream event during cache recovery server={} thread={} queued_events={}",
+            server_id, thread_id, queued_events
+        );
+        return;
+    }
+
+    match handle_stream_state_change(stream_cache, &app_store, server_id, &params) {
+        Ok(()) => {}
+        Err(StreamHandleError::NoCachedState) => {
+            let mut recovered_from_local_state = false;
+            if seed_ipc_stream_cache_from_existing_app_state(
+                &app_store,
+                stream_cache,
+                server_id,
+                &thread_id,
+            ) {
+                match handle_stream_state_change(stream_cache, &app_store, server_id, &params) {
+                    Ok(()) => {
+                        debug!(
+                            "IPC: recovered cached state for thread={} from local app state",
+                            thread_id
+                        );
+                        recovered_from_local_state = true;
+                    }
+                    Err(error) => {
+                        debug!(
+                            "IPC: local app-state seed failed for thread {}: {:?}",
+                            thread_id, error
+                        );
+                        stream_cache.remove(&thread_id);
+                    }
+                }
+            }
+
+            if !recovered_from_local_state {
+                queue_ipc_thread_stream_recovery(
+                    pending_thread_events,
+                    recovering_threads,
+                    session,
+                    app_store,
+                    server_id,
+                    params,
+                    "missing cached state",
+                    recovery_tx,
+                );
+            }
+        }
+        Err(StreamHandleError::DeserializeFailed(msg)) => {
+            warn!("IPC: deserialize failed for thread={}: {}", thread_id, msg);
+            stream_cache.remove(&thread_id);
+            queue_ipc_thread_stream_recovery(
+                pending_thread_events,
+                recovering_threads,
+                session,
+                app_store,
+                server_id,
+                params,
+                "deserialize failed",
+                recovery_tx,
+            );
+        }
+        Err(StreamHandleError::PatchFailed(msg)) => {
+            warn!("IPC: patch failed for thread={}: {}", thread_id, msg);
+            stream_cache.remove(&thread_id);
+            queue_ipc_thread_stream_recovery(
+                pending_thread_events,
+                recovering_threads,
+                session,
+                app_store,
+                server_id,
+                params,
+                "patch failed",
+                recovery_tx,
+            );
+        }
+    }
+}
+
+fn queue_ipc_thread_stream_recovery(
+    pending_thread_events: &mut HashMap<String, VecDeque<ThreadStreamStateChangedParams>>,
+    recovering_threads: &mut HashSet<String>,
+    session: Arc<ServerSession>,
+    app_store: Arc<AppStoreReducer>,
+    server_id: &str,
+    params: ThreadStreamStateChangedParams,
+    reason: &str,
+    recovery_tx: &mpsc::UnboundedSender<PendingIpcStreamRecovery>,
+) {
+    let thread_id = params.conversation_id.clone();
+    let queued_events = {
+        let queue = pending_thread_events.entry(thread_id.clone()).or_default();
+        queue.push_back(params);
+        queue.len()
+    };
+
+    if !recovering_threads.insert(thread_id.clone()) {
+        return;
+    }
+
+    debug!(
+        "IPC: starting async cache recovery server={} thread={} reason={} queued_events={}",
+        server_id, thread_id, reason, queued_events
+    );
+    spawn_ipc_thread_stream_recovery(
+        session,
+        app_store,
+        server_id.to_string(),
+        thread_id,
+        recovery_tx.clone(),
+    );
+}
+
+fn spawn_ipc_thread_stream_recovery(
+    session: Arc<ServerSession>,
+    app_store: Arc<AppStoreReducer>,
+    server_id: String,
+    thread_id: String,
+    recovery_tx: mpsc::UnboundedSender<PendingIpcStreamRecovery>,
+) {
+    MobileClient::spawn_detached(async move {
+        let recovery = match recover_ipc_stream_cache_from_app_server(
+            session, app_store, &server_id, &thread_id,
+        )
+        .await
+        {
+            Ok(conversation_state) => PendingIpcStreamRecovery::Recovered {
+                thread_id,
+                conversation_state,
+            },
+            Err(error) => PendingIpcStreamRecovery::Failed {
+                thread_id,
+                error: error.to_string(),
+            },
+        };
+        let _ = recovery_tx.send(recovery);
+    });
+}
+
+fn drain_pending_ipc_thread_events(
+    thread_id: &str,
+    stream_cache: &mut HashMap<String, serde_json::Value>,
+    pending_thread_events: &mut HashMap<String, VecDeque<ThreadStreamStateChangedParams>>,
+    recovering_threads: &mut HashSet<String>,
+    session: Arc<ServerSession>,
+    app_store: Arc<AppStoreReducer>,
+    server_id: &str,
+    recovery_tx: &mpsc::UnboundedSender<PendingIpcStreamRecovery>,
+) {
+    loop {
+        let maybe_params = pending_thread_events
+            .get_mut(thread_id)
+            .and_then(VecDeque::pop_front);
+        let Some(params) = maybe_params else {
+            pending_thread_events.remove(thread_id);
+            break;
+        };
+
+        if pending_thread_events
+            .get(thread_id)
+            .is_some_and(VecDeque::is_empty)
+        {
+            pending_thread_events.remove(thread_id);
+        }
+
+        handle_ipc_thread_stream_event(
+            stream_cache,
+            pending_thread_events,
+            recovering_threads,
+            Arc::clone(&session),
+            Arc::clone(&app_store),
+            server_id,
+            params,
+            recovery_tx,
+        );
+
+        if recovering_threads.contains(thread_id) {
+            break;
+        }
+    }
 }
 
 fn handle_stream_state_change(
@@ -3527,7 +5001,7 @@ async fn send_ipc_approval_response(
     approval: &PendingApproval,
     thread_id: &str,
     decision: ApprovalDecisionValue,
-) -> Result<bool, RpcError> {
+) -> Result<bool, IpcError> {
     tracing::info!(
         "IPC out: approval_response thread={} request_id={} kind={:?} decision={:?}",
         thread_id,
@@ -3550,10 +5024,7 @@ async fn send_ipc_approval_response(
                         ApprovalDecisionValue::Cancel => CommandExecutionApprovalDecision::Cancel,
                     },
                 })
-                .await
-                .map_err(|error| {
-                    RpcError::Deserialization(format!("IPC approval response: {error}"))
-                })?;
+                .await?;
             Ok(true)
         }
         crate::types::ApprovalKind::FileChange => {
@@ -3570,10 +5041,7 @@ async fn send_ipc_approval_response(
                         ApprovalDecisionValue::Cancel => FileChangeApprovalDecision::Cancel,
                     },
                 })
-                .await
-                .map_err(|error| {
-                    RpcError::Deserialization(format!("IPC file approval response: {error}"))
-                })?;
+                .await?;
             Ok(true)
         }
         crate::types::ApprovalKind::Permissions | crate::types::ApprovalKind::McpElicitation => {
@@ -3587,7 +5055,7 @@ async fn send_ipc_user_input_response(
     thread_id: &str,
     request_id: &str,
     answers: Vec<PendingUserInputAnswer>,
-) -> Result<bool, RpcError> {
+) -> Result<bool, IpcError> {
     let response = upstream::ToolRequestUserInputResponse {
         answers: answers
             .into_iter()
@@ -3612,8 +5080,7 @@ async fn send_ipc_user_input_response(
             request_id: request_id.to_string(),
             response,
         })
-        .await
-        .map_err(|error| RpcError::Deserialization(format!("IPC user input response: {error}")))?;
+        .await?;
     Ok(true)
 }
 
@@ -3720,7 +5187,9 @@ mod mobile_client_tests {
     use std::path::PathBuf;
     use tokio::sync::broadcast::error::TryRecvError;
 
-    fn drain_app_updates(rx: &mut tokio::sync::broadcast::Receiver<AppStoreUpdateRecord>) -> Vec<AppStoreUpdateRecord> {
+    fn drain_app_updates(
+        rx: &mut tokio::sync::broadcast::Receiver<AppStoreUpdateRecord>,
+    ) -> Vec<AppStoreUpdateRecord> {
         let mut updates = Vec::new();
         loop {
             match rx.try_recv() {
@@ -3776,6 +5245,7 @@ mod mobile_client_tests {
                 thread_id: "thread-1".to_string(),
             },
             info: make_thread_info("thread-1"),
+            collaboration_mode: AppModeKind::Plan,
             model: Some("gpt-5".to_string()),
             reasoning_effort: Some("high".to_string()),
             effective_approval_policy: None,
@@ -3784,8 +5254,10 @@ mod mobile_client_tests {
             local_overlay_items: Vec::new(),
             queued_follow_ups: vec![AppQueuedFollowUpPreview {
                 id: "queued-1".to_string(),
+                kind: AppQueuedFollowUpKind::Message,
                 text: "follow-up".to_string(),
             }],
+            queued_follow_up_drafts: Vec::new(),
             active_turn_id: Some("turn-1".to_string()),
             context_tokens_used: Some(12_345),
             model_context_window: Some(200_000),
@@ -3795,12 +5267,22 @@ mod mobile_client_tests {
                 reset_at: Some("2026-03-25T12:00:00Z".to_string()),
             }),
             realtime_session_id: Some("rt-1".to_string()),
+            active_plan_progress: Some(crate::types::AppPlanProgressSnapshot {
+                turn_id: "turn-1".to_string(),
+                explanation: Some("Ship plan mode".to_string()),
+                plan: vec![crate::types::AppPlanStep {
+                    step: "Build parser".to_string(),
+                    status: crate::types::AppPlanStepStatus::InProgress,
+                }],
+            }),
+            pending_plan_implementation_turn_id: Some("turn-1".to_string()),
         };
         let mut target = ThreadSnapshot::from_info("srv", make_thread_info("thread-1"));
 
         copy_thread_runtime_fields(&source, &mut target);
 
         assert_eq!(target.model.as_deref(), Some("gpt-5"));
+        assert_eq!(target.collaboration_mode, AppModeKind::Plan);
         assert_eq!(target.reasoning_effort.as_deref(), Some("high"));
         assert_eq!(target.queued_follow_ups, source.queued_follow_ups);
         assert_eq!(target.active_turn_id, None);
@@ -3814,6 +5296,11 @@ mod mobile_client_tests {
             Some(20_000)
         );
         assert_eq!(target.realtime_session_id.as_deref(), Some("rt-1"));
+        assert_eq!(target.active_plan_progress, source.active_plan_progress);
+        assert_eq!(
+            target.pending_plan_implementation_turn_id,
+            source.pending_plan_implementation_turn_id
+        );
     }
 
     #[test]
@@ -3824,6 +5311,7 @@ mod mobile_client_tests {
                 thread_id: "thread-1".to_string(),
             },
             info: make_thread_info("thread-1"),
+            collaboration_mode: AppModeKind::Default,
             model: None,
             reasoning_effort: None,
             effective_approval_policy: Some(crate::types::AppAskForApproval::Never),
@@ -3831,11 +5319,14 @@ mod mobile_client_tests {
             items: Vec::new(),
             local_overlay_items: Vec::new(),
             queued_follow_ups: Vec::new(),
+            queued_follow_up_drafts: Vec::new(),
             active_turn_id: None,
             context_tokens_used: None,
             model_context_window: None,
             rate_limits: None,
             realtime_session_id: None,
+            active_plan_progress: None,
+            pending_plan_implementation_turn_id: None,
         };
         let mut target = ThreadSnapshot::from_info("srv", make_thread_info("thread-1"));
 
@@ -4272,6 +5763,91 @@ mod mobile_client_tests {
     }
 
     #[test]
+    fn handle_stream_state_change_coalesces_large_non_streaming_patch_bursts() {
+        let app_store = AppStoreReducer::new();
+        let mut updates = app_store.subscribe();
+        let mut cache = HashMap::new();
+        let thread_id = "thread-1";
+        let server_id = "srv";
+        let key = ThreadKey {
+            server_id: server_id.to_string(),
+            thread_id: thread_id.to_string(),
+        };
+
+        let snapshot_params = ThreadStreamStateChangedParams {
+            conversation_id: thread_id.to_string(),
+            version: 5,
+            change: StreamChange::Snapshot {
+                conversation_state: json!({
+                    "turns": [
+                        {
+                            "turnId": "turn-1",
+                            "status": "inProgress",
+                            "params": {
+                                "input": [
+                                    { "type": "text", "text": "hello", "textElements": [] }
+                                ]
+                            },
+                            "items": []
+                        }
+                    ],
+                    "requests": []
+                }),
+            },
+        };
+        handle_stream_state_change(&mut cache, &app_store, server_id, &snapshot_params).unwrap();
+        drain_app_updates(&mut updates);
+
+        let patches = (0..MAX_INCREMENTAL_IPC_GRANULAR_NON_STREAMING_UPDATES)
+            .map(|index| codex_ipc::ImmerPatch {
+                op: codex_ipc::ImmerOp::Add,
+                path: vec![
+                    codex_ipc::ImmerPathSegment::Key("turns".to_string()),
+                    codex_ipc::ImmerPathSegment::Index(0),
+                    codex_ipc::ImmerPathSegment::Key("items".to_string()),
+                    codex_ipc::ImmerPathSegment::Index(index),
+                ],
+                value: Some(json!({
+                    "id": format!("assistant-{index}"),
+                    "type": "agentMessage",
+                    "text": format!("part {index}"),
+                })),
+            })
+            .collect();
+
+        let patch_params = ThreadStreamStateChangedParams {
+            conversation_id: thread_id.to_string(),
+            version: 5,
+            change: StreamChange::Patches { patches },
+        };
+        handle_stream_state_change(&mut cache, &app_store, server_id, &patch_params).unwrap();
+
+        let emitted = drain_app_updates(&mut updates);
+        assert!(emitted.iter().any(|update| matches!(
+            update,
+            AppStoreUpdateRecord::ThreadUpserted { thread, .. } if thread.key == key
+        )));
+        assert!(!emitted.iter().any(|update| matches!(
+            update,
+            AppStoreUpdateRecord::ThreadItemUpserted { key: emitted_key, .. } if emitted_key == &key
+        )));
+
+        let snapshot = app_store.snapshot();
+        let thread = snapshot.threads.get(&key).unwrap();
+        assert_eq!(
+            thread
+                .items
+                .iter()
+                .filter(|item| matches!(
+                    item.content,
+                    HydratedConversationItemContent::Assistant(_)
+                ))
+                .count(),
+            MAX_INCREMENTAL_IPC_GRANULAR_NON_STREAMING_UPDATES
+        );
+    }
+
+    #[test]
     fn handle_stream_state_change_marks_shell_turn_active_before_real_turn_id_arrives() {
         let app_store = AppStoreReducer::new();
         let mut cache = HashMap::new();
@@ -4370,5 +5946,116 @@ mod mobile_client_tests {
             }),
             Some("h")
         );
+    }
+
+    #[test]
+    fn thread_projection_restores_queued_follow_up_previews_from_input_state() {
+        let projection = thread_projection_from_conversation_json(
+            "srv",
+            "thread-1",
+            &json!({
+                "title": "IPC Thread",
+                "cwd": "/repo",
+                "rolloutPath": "/repo/.codex/session.jsonl",
+                "createdAt": 1710000000000i64,
+                "updatedAt": 1710000005000i64,
+                "threadRuntimeStatus": { "type": "active", "activeFlags": [] },
+                "source": "vscode",
+                "turns": [],
+                "requests": [],
+                "inputState": {
+                    "pendingSteers": [
+                        { "text": "Please continue." }
+                    ],
+                    "rejectedSteersQueue": [
+                        { "text": "Try again after the tool call." }
+                    ],
+                    "queuedUserMessages": [
+                        { "text": "Queued follow-up" }
+                    ]
+                }
+            }),
+        )
+        .expect("thread projection should succeed");
+
+        assert_eq!(
+            projection
+                .snapshot
+                .queued_follow_ups
+                .iter()
+                .map(|preview| (preview.kind, preview.text.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (AppQueuedFollowUpKind::PendingSteer, "Please continue."),
+                (
+                    AppQueuedFollowUpKind::RetryingSteer,
+                    "Try again after the tool call.",
+                ),
+                (AppQueuedFollowUpKind::Message, "Queued follow-up"),
+            ]
+        );
+    }
+
+    #[test]
+    fn queued_followups_broadcast_payload_supports_text_and_attachment_only_messages() {
+        let drafts = queued_follow_up_drafts_from_message_values(&[
+            json!("Queued follow-up"),
+            json!({
+                "kind": "pending_steer",
+                "text": "Please continue."
+            }),
+            json!({
+                "kind": "rejected_steer",
+                "localImages": [{}],
+                "remoteImageUrls": ["https://example.com/image.png"]
+            }),
+        ]);
+
+        assert_eq!(
+            drafts
+                .iter()
+                .map(|draft| (draft.preview.kind, draft.preview.text.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (AppQueuedFollowUpKind::Message, "Queued follow-up"),
+                (AppQueuedFollowUpKind::PendingSteer, "Please continue."),
+                (AppQueuedFollowUpKind::RetryingSteer, "2 image attachments",),
+            ]
+        );
+    }
+
+    #[test]
+    fn queued_follow_up_message_json_round_trips_skill_inputs() {
+        let inputs = vec![
+            upstream::UserInput::Text {
+                text: "Use the repo skill here.".to_string(),
+                text_elements: Vec::new(),
+            },
+            upstream::UserInput::Skill {
+                name: "repo-helper".to_string(),
+                path: PathBuf::from("/tmp/repo-helper/SKILL.md"),
+            },
+        ];
+
+        let message_json = queued_follow_up_message_json_from_inputs(&inputs)
+            .expect("queued message json should serialize");
+        let round_trip_inputs = queued_follow_up_inputs_from_json_value(&message_json);
+
+        assert_eq!(round_trip_inputs, inputs);
+    }
+
+    #[test]
+    fn queued_follow_up_preview_from_inputs_can_mark_pending_steers() {
+        let preview = queued_follow_up_preview_from_inputs(
+            &[upstream::UserInput::Text {
+                text: "Please try the same search again.".to_string(),
+                text_elements: Vec::new(),
+            }],
+            AppQueuedFollowUpKind::PendingSteer,
+        )
+        .expect("preview should be generated");
+
+        assert_eq!(preview.kind, AppQueuedFollowUpKind::PendingSteer);
+        assert_eq!(preview.text, "Please try the same search again.");
     }
 }

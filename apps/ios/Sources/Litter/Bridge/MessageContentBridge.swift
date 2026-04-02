@@ -26,6 +26,10 @@ enum MessageContentBridge {
         store.parseToolCallsTyped(text: text).compactMap { $0.toToolCallCardModel() }
     }
 
+    static func parseCodeReview(text: String) -> ConversationCodeReviewData? {
+        store.parseCodeReviewTyped(text: text)?.toConversationCodeReviewData()
+    }
+
     private static let store = MessageParser()
 
     private static func assistantContentSegments(from rustSegments: [AppMessageSegment]) -> [AssistantContentSegment] {
@@ -113,6 +117,44 @@ private extension AppToolCallKind {
         case .widget: return .widget
         case .unknown: return nil
         }
+    }
+}
+
+private extension AppCodeReviewPayload {
+    func toConversationCodeReviewData() -> ConversationCodeReviewData {
+        ConversationCodeReviewData(
+            findings: findings.map { $0.toConversationCodeReviewFinding() },
+            overallCorrectness: overallCorrectness,
+            overallExplanation: overallExplanation,
+            overallConfidenceScore: overallConfidenceScore
+        )
+    }
+}
+
+private extension AppCodeReviewFinding {
+    func toConversationCodeReviewFinding() -> ConversationCodeReviewFinding {
+        ConversationCodeReviewFinding(
+            title: title,
+            body: body,
+            confidenceScore: confidenceScore,
+            priority: priority.map(Int.init),
+            codeLocation: codeLocation?.toConversationCodeReviewLocation()
+        )
+    }
+}
+
+private extension AppCodeReviewCodeLocation {
+    func toConversationCodeReviewLocation() -> ConversationCodeReviewLocation {
+        ConversationCodeReviewLocation(
+            absoluteFilePath: absoluteFilePath,
+            lineRange: lineRange?.toConversationCodeReviewLineRange()
+        )
+    }
+}
+
+private extension AppCodeReviewLineRange {
+    func toConversationCodeReviewLineRange() -> ConversationCodeReviewLineRange {
+        ConversationCodeReviewLineRange(start: Int(start), end: Int(end))
     }
 }
 

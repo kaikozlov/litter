@@ -14,7 +14,7 @@ enum SavedServerStore {
         let decoded = (try? JSONDecoder().decode([SavedServer].self, from: data)) ?? []
         let migrated = decoded.map { saved -> SavedServer in
             let server = saved.toDiscoveredServer()
-            return SavedServer.from(server)
+            return SavedServer.from(server, rememberedByUser: saved.rememberedByUser)
         }
         if migrated != decoded {
             save(migrated)
@@ -24,11 +24,26 @@ enum SavedServerStore {
 
     static func upsert(_ server: DiscoveredServer) {
         var saved = load()
-        saved.removeAll { existing in
-            existing.id == server.id || existing.toDiscoveredServer().deduplicationKey == server.deduplicationKey
-        }
-        saved.append(SavedServer.from(server))
+        let existing = existingMatch(for: server, in: saved)
+        saved.removeAll { entry in matches(server, entry) }
+        saved.append(
+            SavedServer.from(
+                server,
+                rememberedByUser: existing?.rememberedByUser ?? false
+            )
+        )
         save(saved)
+    }
+
+    static func remember(_ server: DiscoveredServer) {
+        var saved = load()
+        saved.removeAll { entry in matches(server, entry) }
+        saved.append(SavedServer.from(server, rememberedByUser: true))
+        save(saved)
+    }
+
+    static func rememberedServers() -> [SavedServer] {
+        load().filter(\.rememberedByUser)
     }
 
     static func remove(serverId: String) {
@@ -54,8 +69,17 @@ enum SavedServerStore {
             preferredConnectionMode: old.preferredConnectionMode,
             preferredCodexPort: old.preferredCodexPort,
             sshPortForwardingEnabled: old.sshPortForwardingEnabled,
-            websocketURL: old.websocketURL
+            websocketURL: old.websocketURL,
+            rememberedByUser: old.rememberedByUser
         )
         save(saved)
+    }
+
+    private static func existingMatch(for server: DiscoveredServer, in saved: [SavedServer]) -> SavedServer? {
+        saved.first { matches(server, $0) }
+    }
+
+    private static func matches(_ server: DiscoveredServer, _ savedServer: SavedServer) -> Bool {
+        savedServer.id == server.id || savedServer.toDiscoveredServer().deduplicationKey == server.deduplicationKey
     }
 }

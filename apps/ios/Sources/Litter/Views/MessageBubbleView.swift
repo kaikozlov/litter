@@ -141,7 +141,7 @@ struct UserBubble: View {
             Spacer(minLength: compact ? 30 : 60)
             VStack(alignment: .trailing, spacing: compact ? 4 : 8) {
                 ForEach(images) { img in
-                    if let uiImage = UserBubble.decodeImage(from: img.data, cacheKey: "user-\(img.id.uuidString)") {
+                    if let uiImage = UserBubble.decodeImage(img) {
                         Image(uiImage: uiImage)
                             .resizable()
                             .scaledToFit()
@@ -164,12 +164,29 @@ struct UserBubble: View {
 
     private static let imageCache = NSCache<NSString, UIImage>()
 
-    private static func decodeImage(from data: Data, cacheKey: String) -> UIImage? {
-        let key = cacheKey as NSString
+    private static func decodeImage(_ image: ChatImage) -> UIImage? {
+        let key = image.cacheKey as NSString
         if let cached = imageCache.object(forKey: key) { return cached }
+        guard let data = imageData(for: image) else { return nil }
         guard let image = UIImage(data: data) else { return nil }
         imageCache.setObject(image, forKey: key)
         return image
+    }
+
+    private static func imageData(for image: ChatImage) -> Data? {
+        let source = image.source
+        guard source.hasPrefix("data:") || source.hasPrefix("file://") else {
+            return nil
+        }
+
+        if source.hasPrefix("file://") {
+            let path = String(source.dropFirst("file://".count))
+            return FileManager.default.contents(atPath: path)
+        }
+
+        guard let commaIndex = source.firstIndex(of: ",") else { return nil }
+        let base64 = String(source[source.index(after: commaIndex)...])
+        return Data(base64Encoded: base64, options: .ignoreUnknownCharacters)
     }
 }
 

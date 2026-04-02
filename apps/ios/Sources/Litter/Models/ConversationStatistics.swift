@@ -25,6 +25,9 @@ struct ConversationStatistics {
             case .assistant:
                 stats.assistantMessageCount += 1
                 stats.totalMessages += 1
+            case .codeReview:
+                stats.assistantMessageCount += 1
+                stats.totalMessages += 1
             case .commandExecution(let data):
                 stats.commandsExecuted += 1
                 switch data.status {
@@ -90,7 +93,7 @@ struct ServerUsageData {
         // Token usage by thread
         data.tokensByThread = threads.compactMap { thread in
             guard let tokens = thread.contextTokensUsed, tokens > 0 else { return nil }
-            let title = thread.info.title ?? "Untitled"
+            let title = thread.displayTitle
             return TokenEntry(threadTitle: title, tokens: tokens)
         }.sorted { $0.tokens > $1.tokens }
 

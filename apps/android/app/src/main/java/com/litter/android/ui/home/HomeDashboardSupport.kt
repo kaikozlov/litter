@@ -19,7 +19,7 @@ object HomeDashboardSupport {
     fun sortedConnectedServers(snapshot: AppSnapshotRecord): List<AppServerSnapshot> {
         val seen = mutableSetOf<String>()
         return snapshot.servers
-            .filter { it.health == AppServerHealth.CONNECTED }
+            .filter { it.health != AppServerHealth.DISCONNECTED || it.connectionProgress != null }
             .sortedWith(compareBy<AppServerSnapshot> {
                 // Active server (has active thread on it) sorts first
                 val activeServerId = snapshot.activeThread?.let { key ->

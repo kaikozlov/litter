@@ -554,6 +554,9 @@ final class VoiceRuntimeController: VoiceActions {
                     switch conversationItem.content {
                     case .assistant(let data):
                         return (conversationItem.id, data.text)
+                    case .codeReview(let data):
+                        guard let first = data.findings.first else { return nil }
+                        return (conversationItem.id, "[review] \(first.title)")
                     case .commandExecution(let data):
                         return (conversationItem.id, "[cmd] \(data.command.prefix(80)) \(data.status.displayLabel)")
                     case .mcpToolCall(let data):

@@ -93,6 +93,17 @@ fun InlineHandoffView(
                     )
                 }
 
+                is HydratedConversationItemContent.CodeReview -> {
+                    val text = content.v1.findings.firstOrNull()?.title ?: "Code review"
+                    Text(
+                        text = "Review: $text",
+                        color = LitterTheme.textPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(vertical = 2.dp),
+                    )
+                }
+
                 is HydratedConversationItemContent.Reasoning -> {
                     Text(
                         text = content.v1.summary.joinToString(" "),

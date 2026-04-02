@@ -257,12 +257,10 @@ struct HeaderView: View {
                             searchTerm: nil
                         )
                     )
-                    let nextKey = try? await appModel.client.resumeThread(
-                        serverId: thread.key.serverId,
-                        params: reloadLaunchConfig().threadResumeRequest(
-                            threadId: thread.key.threadId,
-                            cwdOverride: thread.info.cwd
-                        )
+                    let nextKey = try? await appModel.resumeThreadPreferringIPC(
+                        key: thread.key,
+                        launchConfig: reloadLaunchConfig(),
+                        cwdOverride: thread.info.cwd
                     )
                     if let nextKey {
                         appModel.store.setActiveThread(

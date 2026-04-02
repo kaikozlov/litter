@@ -1,6 +1,20 @@
 import Foundation
 
 extension AppThreadSnapshot {
+    var displayTitle: String {
+        let explicitTitle = info.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !explicitTitle.isEmpty {
+            return explicitTitle
+        }
+
+        let preview = info.preview?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !preview.isEmpty {
+            return preview
+        }
+
+        return "Untitled session"
+    }
+
     var hasActiveTurn: Bool {
         if activeTurnId != nil {
             return true
@@ -19,11 +33,7 @@ extension AppThreadSnapshot {
     }
 
     var resolvedPreview: String {
-        let explicitTitle = info.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !explicitTitle.isEmpty {
-            return explicitTitle
-        }
-        return info.preview?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        displayTitle
     }
 
     var contextPercent: Int {
@@ -38,8 +48,18 @@ extension AppThreadSnapshot {
     var latestAssistantSnippet: String? {
         let text = hydratedConversationItems
             .map(\.conversationItem)
-            .last(where: \.isAssistantItem)?
-            .assistantText?
+            .reversed()
+            .compactMap { item -> String? in
+                switch item.content {
+                case .assistant(let data):
+                    return data.text
+                case .codeReview(let data):
+                    return data.findings.first?.title
+                default:
+                    return nil
+                }
+            }
+            .first?
             .prefix(120) ?? ""
         let snippet = String(text)
             .replacingOccurrences(of: "\n", with: " ")

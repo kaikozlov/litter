@@ -62,6 +62,47 @@ struct TranscriptTurn: Identifiable, Equatable {
         )
     }
 
+    func replacingItems(_ items: [ConversationItem]) -> TranscriptTurn {
+        TranscriptTurn(
+            id: id,
+            items: items,
+            preview: Self.makePreview(from: items),
+            isLive: isLive,
+            isCollapsedByDefault: isCollapsedByDefault,
+            renderDigest: Self.makeRenderDigest(from: items, isLive: isLive)
+        )
+    }
+
+    static func mergeConsecutiveExplorationTurnsForRendering(
+        _ turns: [TranscriptTurn]
+    ) -> [TranscriptTurn] {
+        var merged: [TranscriptTurn] = []
+        var explorationBuffer: [TranscriptTurn] = []
+
+        func flushExplorationBuffer() {
+            guard !explorationBuffer.isEmpty else { return }
+            if explorationBuffer.count == 1, let single = explorationBuffer.first {
+                merged.append(single)
+            } else if let mergedTurn = mergedExplorationTurn(from: explorationBuffer) {
+                merged.append(mergedTurn)
+            }
+            explorationBuffer.removeAll(keepingCapacity: true)
+        }
+
+        for turn in turns {
+            guard let renderableTurn = renderableTurn(from: turn) else { continue }
+            if renderableTurn.items.allSatisfy(\.isExplorationCommandItem) {
+                explorationBuffer.append(renderableTurn)
+            } else {
+                flushExplorationBuffer()
+                merged.append(renderableTurn)
+            }
+        }
+
+        flushExplorationBuffer()
+        return merged
+    }
+
     private static func group(_ items: [ConversationItem]) -> [[ConversationItem]] {
         var groups: [[ConversationItem]] = []
         var current: [ConversationItem] = []
@@ -123,6 +164,27 @@ struct TranscriptTurn: Identifiable, Equatable {
         items.contains { item in
             item.isFromUserTurnBoundary || item.isUserItem
         }
+    }
+
+    private static func renderableTurn(from turn: TranscriptTurn) -> TranscriptTurn? {
+        let visibleItems = turn.items.filter { !$0.isVisuallyEmptyNeutralItem }
+        guard !visibleItems.isEmpty else { return nil }
+        guard visibleItems.count != turn.items.count else { return turn }
+        return turn.replacingItems(visibleItems)
+    }
+
+    private static func mergedExplorationTurn(from turns: [TranscriptTurn]) -> TranscriptTurn? {
+        guard let first = turns.first else { return nil }
+        let items = turns.flatMap(\.items)
+        let isLive = turns.contains(where: \.isLive)
+        return TranscriptTurn(
+            id: "exploration-turn-\(first.id)",
+            items: items,
+            preview: makePreview(from: items),
+            isLive: isLive,
+            isCollapsedByDefault: turns.allSatisfy(\.isCollapsedByDefault),
+            renderDigest: makeRenderDigest(from: items, isLive: isLive)
+        )
     }
 
     private static func turnIdentifier(for items: [ConversationItem], ordinal: Int) -> String {
@@ -201,7 +263,10 @@ struct TranscriptTurn: Identifiable, Equatable {
             if metrics.userTimestamp == nil, item.isUserItem {
                 metrics.userTimestamp = item.timestamp
             }
-            if item.isAssistantItem {
+            if item.isAssistantItem || {
+                if case .codeReview = item.content { return true }
+                return false
+            }() {
                 metrics.assistantTimestamp = item.timestamp
             }
 
@@ -231,6 +296,8 @@ struct TranscriptTurn: Identifiable, Equatable {
                     metrics.explicitDurationMillis += durationMs
                     metrics.hasExplicitDuration = true
                 }
+            case .codeReview:
+                metrics.eventCount += 1
             case .divider, .error, .note, .userInputResponse:
                 metrics.eventCount += 1
             default:
@@ -258,7 +325,7 @@ struct TranscriptTurn: Identifiable, Equatable {
 
     private static func isPreviewSecondary(_ item: ConversationItem) -> Bool {
         switch item.content {
-        case .note, .divider, .error, .reasoning:
+        case .codeReview, .note, .divider, .error, .reasoning:
             return true
         default:
             return false
@@ -279,6 +346,11 @@ struct TranscriptTurn: Identifiable, Equatable {
         case .assistant(let data):
             let trimmed = data.text.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? "Assistant response" : collapsedExcerpt(from: trimmed)
+        case .codeReview(let data):
+            if let first = data.findings.first {
+                return "Review: \(collapsedExcerpt(from: first.title))"
+            }
+            return "Code review"
         case .reasoning(let data):
             let body = (data.summary + data.content)
                 .joined(separator: " ")
@@ -489,7 +561,13 @@ struct TranscriptTurn: Identifiable, Equatable {
 
 private extension ConversationItem {
     var isFinalAnswerAssistantItem: Bool {
-        guard case .assistant(let data) = content else { return false }
-        return data.phase == .finalAnswer
+        switch content {
+        case .assistant(let data):
+            return data.phase == .finalAnswer
+        case .codeReview:
+            return true
+        default:
+            return false
+        }
     }
 }

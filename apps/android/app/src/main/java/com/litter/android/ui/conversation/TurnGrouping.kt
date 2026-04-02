@@ -10,17 +10,21 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,12 +67,25 @@ data class TranscriptTurn(
     val assistantSnippet: String?
         get() = (
             items.firstOrNull {
-                val assistant = (it.content as? HydratedConversationItemContent.Assistant)?.v1
-                assistant?.phase == AppMessagePhase.FINAL_ANSWER
+                when (val content = it.content) {
+                    is HydratedConversationItemContent.Assistant ->
+                        content.v1.phase == AppMessagePhase.FINAL_ANSWER
+                    is HydratedConversationItemContent.CodeReview -> true
+                    else -> false
+                }
             }
-                ?: items.lastOrNull { it.content is HydratedConversationItemContent.Assistant }
-            )
-            ?.let { (it.content as HydratedConversationItemContent.Assistant).v1.text }
+                ?: items.lastOrNull {
+                    it.content is HydratedConversationItemContent.Assistant ||
+                        it.content is HydratedConversationItemContent.CodeReview
+                }
+            )?.let {
+                when (val content = it.content) {
+                    is HydratedConversationItemContent.Assistant -> content.v1.text
+                    is HydratedConversationItemContent.CodeReview ->
+                        content.v1.findings.firstOrNull()?.title ?: "Code review"
+                    else -> null
+                }
+            }
             ?.take(120)
 
     val commandCount: Int
@@ -348,11 +365,15 @@ fun buildTimelineEntries(
  * Renders an exploration group as a collapsible summary.
  */
 @Composable
-fun ExplorationGroupRow(group: ExplorationGroup) {
+fun ExplorationGroupRow(
+    group: ExplorationGroup,
+    showsCollapsedPreview: Boolean,
+) {
     val textScale = LocalTextScale.current
     var expanded by remember { mutableStateOf(false) }
     val entries = remember(group.items) { group.explorationEntries() }
     val isActive = remember(entries) { entries.any { it.isInProgress } }
+    val previewScrollState = rememberScrollState()
     val shimmerProgress by rememberInfiniteTransition(label = "exploration-header-shimmer").animateFloat(
         initialValue = -1f,
         targetValue = 2f,
@@ -364,6 +385,18 @@ fun ExplorationGroupRow(group: ExplorationGroup) {
     )
     val bulletSize = (6f * textScale).dp
     val bulletTopPadding = (5f * textScale).dp
+    val previewHeight = (LitterTextStyle.caption.scaled.value * textScale * 3.6f).dp + 18.dp
+
+    LaunchedEffect(entries, previewScrollState.maxValue, expanded, showsCollapsedPreview) {
+        if (expanded || !showsCollapsedPreview || previewScrollState.maxValue <= 0) return@LaunchedEffect
+        previewScrollState.animateScrollTo(previewScrollState.maxValue)
+    }
+
+    LaunchedEffect(showsCollapsedPreview) {
+        if (!showsCollapsedPreview) {
+            expanded = false
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -396,7 +429,52 @@ fun ExplorationGroupRow(group: ExplorationGroup) {
             )
         }
 
-        if (expanded) {
+        if (!expanded && showsCollapsedPreview && entries.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 24.dp, top = 6.dp)
+                    .heightIn(min = 56.dp, max = previewHeight)
+                    .background(
+                        LitterTheme.surface.copy(alpha = 0.6f),
+                        RoundedCornerShape(8.dp),
+                    )
+                    .padding(horizontal = 8.dp, vertical = 8.dp)
+                    .verticalScroll(previewScrollState),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                entries.forEach { entry ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Spacer(
+                            modifier = Modifier
+                                .padding(top = bulletTopPadding)
+                                .width(bulletSize)
+                                .height(bulletSize)
+                                .background(
+                                    color = if (entry.isInProgress) {
+                                        LitterTheme.warning
+                                    } else {
+                                        LitterTheme.textMuted
+                                    },
+                                    shape = RoundedCornerShape(percent = 50),
+                                ),
+                        )
+                        Text(
+                            text = entry.label,
+                            color = LitterTheme.textSecondary,
+                            fontSize = LitterTextStyle.caption.scaled,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        } else if (expanded) {
             for (entry in entries) {
                 Row(
                     modifier = Modifier

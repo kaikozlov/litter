@@ -17,7 +17,11 @@ struct ConversationTranscriptSnapshot {
 
 struct ConversationComposerSnapshot {
     var threadKey: ThreadKey
+    var collaborationMode: AppModeKind
+    var activePlanProgress: AppPlanProgressSnapshot?
+    var pendingPlanImplementationPrompt: AppPlanImplementationPromptSnapshot?
     var pendingUserInputRequest: PendingUserInputRequest?
+    var activeTaskSummary: ConversationActiveTaskSummary?
     var queuedFollowUps: [AppQueuedFollowUpPreview]
     var composerPrefillRequest: AppModel.ComposerPrefillRequest?
     var activeTurnId: String?
@@ -33,7 +37,11 @@ struct ConversationComposerSnapshot {
 
     static let empty = ConversationComposerSnapshot(
         threadKey: ThreadKey(serverId: "", threadId: ""),
+        collaborationMode: .`default`,
+        activePlanProgress: nil,
+        pendingPlanImplementationPrompt: nil,
         pendingUserInputRequest: nil,
+        activeTaskSummary: nil,
         queuedFollowUps: [],
         composerPrefillRequest: nil,
         activeTurnId: nil,
@@ -47,6 +55,12 @@ struct ConversationComposerSnapshot {
         availableModels: [],
         isConnected: false
     )
+}
+
+struct ConversationActiveTaskSummary: Equatable {
+    var progressLabel: String
+    var title: String
+    var detail: String
 }
 
 @MainActor
@@ -107,12 +121,17 @@ final class ConversationScreenModel {
         let pendingUserInputRequest = appModel.snapshot?.pendingUserInputs.first {
             $0.serverId == thread.key.serverId && $0.threadId == thread.key.threadId
         }
+        let activeTaskSummary = items.latestActiveTaskSummary
         let composerPrefillRequest = appModel.composerPrefillRequest.flatMap { request in
             request.threadKey == thread.key ? request : nil
         }
         let composerSnapshot = ConversationComposerSnapshot(
             threadKey: thread.key,
+            collaborationMode: thread.collaborationMode,
+            activePlanProgress: thread.activePlanProgress,
+            pendingPlanImplementationPrompt: thread.pendingPlanImplementationPrompt,
             pendingUserInputRequest: pendingUserInputRequest,
+            activeTaskSummary: activeTaskSummary,
             queuedFollowUps: thread.queuedFollowUps,
             composerPrefillRequest: composerPrefillRequest,
             activeTurnId: activeTurnId,
@@ -155,5 +174,38 @@ private func conversationStatus(from thread: AppThreadSnapshot) -> ConversationS
         return .connecting
     case .idle:
         return .ready
+    }
+}
+
+private extension Array where Element == ConversationItem {
+    var latestActiveTaskSummary: ConversationActiveTaskSummary? {
+        for item in reversed() {
+            guard case .todoList(let data) = item.content else { continue }
+            let total = data.steps.count
+            guard total > 0 else { continue }
+
+            let activeSteps = data.steps.filter { $0.status != .completed }
+            guard !activeSteps.isEmpty else { continue }
+
+            let completed = data.completedCount
+            let focusStep = data.steps.first(where: { $0.status == .inProgress })
+                ?? data.steps.first(where: { $0.status == .pending })
+                ?? activeSteps.first
+            let detail = focusStep?.step.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let title: String
+            if activeSteps.count == 1 {
+                title = "1 active task"
+            } else {
+                title = "\(activeSteps.count) active tasks"
+            }
+
+            return ConversationActiveTaskSummary(
+                progressLabel: "\(completed)/\(total)",
+                title: title,
+                detail: detail.isEmpty ? title : detail
+            )
+        }
+
+        return nil
     }
 }

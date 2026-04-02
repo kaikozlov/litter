@@ -14,6 +14,19 @@ pub enum ThreadSummaryStatus {
     SystemError,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
+pub enum AppModeKind {
+    Default,
+    Plan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
+pub enum AppPlanStepStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
 impl From<upstream::ThreadStatus> for ThreadSummaryStatus {
     fn from(value: upstream::ThreadStatus) -> Self {
         match value {
@@ -21,6 +34,16 @@ impl From<upstream::ThreadStatus> for ThreadSummaryStatus {
             upstream::ThreadStatus::Idle => ThreadSummaryStatus::Idle,
             upstream::ThreadStatus::Active { .. } => ThreadSummaryStatus::Active,
             upstream::ThreadStatus::SystemError => ThreadSummaryStatus::SystemError,
+        }
+    }
+}
+
+impl From<codex_app_server_protocol::TurnPlanStepStatus> for AppPlanStepStatus {
+    fn from(value: codex_app_server_protocol::TurnPlanStepStatus) -> Self {
+        match value {
+            codex_app_server_protocol::TurnPlanStepStatus::Pending => Self::Pending,
+            codex_app_server_protocol::TurnPlanStepStatus::InProgress => Self::InProgress,
+            codex_app_server_protocol::TurnPlanStepStatus::Completed => Self::Completed,
         }
     }
 }
