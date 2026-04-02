@@ -89,6 +89,85 @@ final class AppSnapshotRuntimeTests: XCTestCase {
         XCTAssertEqual(snapshot.threadsWithTrackedTurns.map(\.key), [otherKey])
     }
 
+    @MainActor
+    func testReconcileBackgroundedTurnsWaitsForAllTrackedThreadsToFinishBeforeNotifying() {
+        let rootKey = ThreadKey(serverId: "srv", threadId: "thread-root")
+        let childKey = ThreadKey(serverId: "srv", threadId: "thread-child")
+        let snapshot = makeSnapshot(
+            threads: [
+                makeThreadSnapshot(
+                    key: rootKey,
+                    status: .active,
+                    activeTurnId: "turn-root"
+                ),
+                makeThreadSnapshot(
+                    key: childKey,
+                    parentThreadId: rootKey.threadId
+                )
+            ]
+        )
+
+        let controller = AppLifecycleController()
+        let reconciliation = controller.reconcileBackgroundedTurns(
+            snapshot: snapshot,
+            trackedKeys: [rootKey, childKey]
+        )
+
+        XCTAssertEqual(reconciliation.remainingKeys, [rootKey])
+        XCTAssertEqual(reconciliation.activeThreads.map(\.key), [rootKey])
+        XCTAssertNil(reconciliation.completedNotificationThread)
+    }
+
+    @MainActor
+    func testReconcileBackgroundedTurnsPrefersRootThreadForCompletionNotification() {
+        let rootKey = ThreadKey(serverId: "srv", threadId: "thread-root")
+        let childKey = ThreadKey(serverId: "srv", threadId: "thread-child")
+        let snapshot = makeSnapshot(
+            threads: [
+                makeThreadSnapshot(key: rootKey),
+                makeThreadSnapshot(
+                    key: childKey,
+                    parentThreadId: rootKey.threadId
+                )
+            ]
+        )
+
+        let controller = AppLifecycleController()
+        let reconciliation = controller.reconcileBackgroundedTurns(
+            snapshot: snapshot,
+            trackedKeys: [rootKey, childKey]
+        )
+
+        XCTAssertTrue(reconciliation.remainingKeys.isEmpty)
+        XCTAssertEqual(reconciliation.completedNotificationThread?.key, rootKey)
+    }
+
+    @MainActor
+    func testReconcileBackgroundedTurnsKeepsMissingThreadsTracked() {
+        let key = ThreadKey(serverId: "srv", threadId: "thread-1")
+        let snapshot = makeSnapshot(threads: [])
+
+        let controller = AppLifecycleController()
+        let reconciliation = controller.reconcileBackgroundedTurns(
+            snapshot: snapshot,
+            trackedKeys: [key]
+        )
+
+        XCTAssertEqual(reconciliation.remainingKeys, [key])
+        XCTAssertTrue(reconciliation.activeThreads.isEmpty)
+        XCTAssertNil(reconciliation.completedNotificationThread)
+    }
+
+    @MainActor
+    func testNotificationThreadKeyParsesThreadMetadata() {
+        let key = AppLifecycleController.notificationThreadKey(from: [
+            AppLifecycleController.notificationServerIdKey: "srv",
+            AppLifecycleController.notificationThreadIdKey: "thread-1"
+        ])
+
+        XCTAssertEqual(key, ThreadKey(serverId: "srv", threadId: "thread-1"))
+    }
+
     private func makeSnapshot(threads: [AppThreadSnapshot]) -> AppSnapshotRecord {
         let server = AppServerSnapshot(
             serverId: "srv",
@@ -160,7 +239,8 @@ final class AppSnapshotRuntimeTests: XCTestCase {
     private func makeThreadSnapshot(
         key: ThreadKey,
         status: ThreadSummaryStatus = .idle,
-        activeTurnId: String? = nil
+        activeTurnId: String? = nil,
+        parentThreadId: String? = nil
     ) -> AppThreadSnapshot {
         AppThreadSnapshot(
             key: key,
@@ -175,7 +255,7 @@ final class AppSnapshotRuntimeTests: XCTestCase {
                 modelProvider: nil,
                 agentNickname: nil,
                 agentRole: nil,
-                parentThreadId: nil,
+                parentThreadId: parentThreadId,
                 agentStatus: nil,
                 createdAt: nil,
                 updatedAt: nil

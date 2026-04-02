@@ -26,6 +26,17 @@ final class AppRuntimeController {
         await lifecycle.reconnectSavedServers(appModel: appModel)
     }
 
+    func openThreadFromNotification(key: ThreadKey) async {
+        guard let appModel else { return }
+        appModel.activateThread(key)
+        await appModel.refreshSnapshot()
+
+        if let resolvedKey = await appModel.ensureThreadLoaded(key: key) {
+            appModel.activateThread(resolvedKey)
+            await appModel.refreshSnapshot()
+        }
+    }
+
     func handleSnapshot(_ snapshot: AppSnapshotRecord?) {
         liveActivities.sync(snapshot)
     }

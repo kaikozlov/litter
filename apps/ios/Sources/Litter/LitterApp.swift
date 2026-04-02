@@ -1,10 +1,12 @@
 import SwiftUI
 import UIKit
+import UserNotifications
 import os
 
 
-class AppDelegate: NSObject, UIApplicationDelegate {
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     private var pendingPushToken: Data?
+    private var pendingNotificationThreadKey: ThreadKey?
     private var splashWindow: UIWindow?
     private var minTimeElapsed = false
     private var contentReady = false
@@ -15,6 +17,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             if let token = pendingPushToken {
                 appRuntime?.setDevicePushToken(token)
                 pendingPushToken = nil
+            }
+            if let key = pendingNotificationThreadKey {
+                pendingNotificationThreadKey = nil
+                openThreadFromNotification(key)
             }
         }
     }
@@ -30,6 +36,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             AppModel.prewarmRustBridges()
         }
         application.registerForRemoteNotifications()
+        UNUserNotificationCenter.current().delegate = self
         showSplashWindow()
         scheduleKeyboardWarmup()
         return true
@@ -140,6 +147,31 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         Task { @MainActor in
             await appRuntime.handleBackgroundPush()
             completionHandler(.newData)
+        }
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        if let key = AppLifecycleController.notificationThreadKey(
+            from: response.notification.request.content.userInfo
+        ) {
+            openThreadFromNotification(key)
+        }
+        completionHandler()
+    }
+
+    private func openThreadFromNotification(_ key: ThreadKey) {
+        if appRuntime == nil {
+            pendingNotificationThreadKey = key
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self, let appRuntime = self.appRuntime else { return }
+            await appRuntime.openThreadFromNotification(key: key)
         }
     }
 }

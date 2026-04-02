@@ -1,5 +1,6 @@
 package com.litter.android
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -30,8 +31,14 @@ import com.litter.android.ui.WallpaperManager
 import com.litter.android.util.LLog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import uniffi.codex_mobile_client.ThreadKey
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        const val EXTRA_NOTIFICATION_SERVER_ID = "litter.notification.serverId"
+        const val EXTRA_NOTIFICATION_THREAD_ID = "litter.notification.threadId"
+    }
+
     private var appModel: AppModel? = null
     private val lifecycleController = AppLifecycleController()
 
@@ -98,6 +105,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        handleNotificationIntent(intent)
     }
 
     override fun onResume() {
@@ -118,8 +127,40 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
     override fun onDestroy() {
         appModel?.stop()
         super.onDestroy()
+    }
+
+    private fun handleNotificationIntent(intent: Intent?) {
+        val threadKey = consumeNotificationThreadKey(intent) ?: return
+        val model = appModel ?: return
+        lifecycleScope.launch {
+            model.activateThread(threadKey)
+            model.refreshSnapshot()
+
+            val resolvedKey = model.ensureThreadLoaded(threadKey) ?: threadKey
+            model.activateThread(resolvedKey)
+            model.refreshSnapshot()
+        }
+    }
+
+    private fun consumeNotificationThreadKey(intent: Intent?): ThreadKey? {
+        intent ?: return null
+        val serverId = intent.getStringExtra(EXTRA_NOTIFICATION_SERVER_ID)?.trim().orEmpty()
+        val threadId = intent.getStringExtra(EXTRA_NOTIFICATION_THREAD_ID)?.trim().orEmpty()
+        if (serverId.isEmpty() || threadId.isEmpty()) {
+            return null
+        }
+
+        intent.removeExtra(EXTRA_NOTIFICATION_SERVER_ID)
+        intent.removeExtra(EXTRA_NOTIFICATION_THREAD_ID)
+        return ThreadKey(serverId = serverId, threadId = threadId)
     }
 }

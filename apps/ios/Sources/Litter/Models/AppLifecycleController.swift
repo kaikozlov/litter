@@ -5,6 +5,15 @@ import UserNotifications
 
 @MainActor
 final class AppLifecycleController {
+    static let notificationServerIdKey = "litter.notification.serverId"
+    static let notificationThreadIdKey = "litter.notification.threadId"
+
+    struct BackgroundTurnReconciliation {
+        let remainingKeys: Set<ThreadKey>
+        let activeThreads: [AppThreadSnapshot]
+        let completedNotificationThread: AppThreadSnapshot?
+    }
+
     private let pushProxy = PushProxyClient()
     private var pushProxyRegistrationId: String?
     private var devicePushToken: Data?
@@ -253,18 +262,20 @@ final class AppLifecycleController {
         await appModel.refreshSnapshot()
 
         guard let snapshot = appModel.snapshot else { return }
-        for key in keys {
-            guard let thread = snapshot.threadSnapshot(for: key) else { continue }
-            if snapshot.threadHasTrackedTurn(for: key) {
-                liveActivities.updateBackgroundWake(for: thread, pushCount: bgWakeCount)
-            } else {
-                backgroundedTurnKeys.remove(key)
-                liveActivities.endCurrent(phase: .completed, snapshot: snapshot)
-                postLocalNotificationIfNeeded(
-                    model: thread.resolvedModel,
-                    threadPreview: thread.resolvedPreview
-                )
-            }
+        let reconciliation = reconcileBackgroundedTurns(snapshot: snapshot, trackedKeys: keys)
+        backgroundedTurnKeys = reconciliation.remainingKeys
+
+        for thread in reconciliation.activeThreads {
+            liveActivities.updateBackgroundWake(for: thread, pushCount: bgWakeCount)
+        }
+
+        if let thread = reconciliation.completedNotificationThread {
+            liveActivities.endCurrent(phase: .completed, snapshot: snapshot)
+            postLocalNotificationIfNeeded(
+                model: thread.resolvedModel,
+                threadPreview: thread.resolvedPreview,
+                threadKey: thread.key
+            )
         }
 
         if backgroundedTurnKeys.isEmpty {
@@ -317,6 +328,45 @@ final class AppLifecycleController {
         }
 
         await appModel.refreshSnapshot()
+    }
+
+    func reconcileBackgroundedTurns(
+        snapshot: AppSnapshotRecord,
+        trackedKeys: Set<ThreadKey>
+    ) -> BackgroundTurnReconciliation {
+        var remainingKeys: Set<ThreadKey> = []
+        var activeThreads: [AppThreadSnapshot] = []
+        var completedThreads: [AppThreadSnapshot] = []
+
+        for key in trackedKeys {
+            guard let thread = snapshot.threadSnapshot(for: key) else {
+                // Keep tracking until we can observe a definitive thread state again.
+                remainingKeys.insert(key)
+                continue
+            }
+
+            if snapshot.threadHasTrackedTurn(for: key) {
+                remainingKeys.insert(key)
+                activeThreads.append(thread)
+            } else {
+                completedThreads.append(thread)
+            }
+        }
+
+        let completedNotificationThread: AppThreadSnapshot?
+        if remainingKeys.isEmpty {
+            completedNotificationThread = completedThreads.first(where: {
+                $0.info.parentThreadId == nil
+            }) ?? completedThreads.first
+        } else {
+            completedNotificationThread = nil
+        }
+
+        return BackgroundTurnReconciliation(
+            remainingKeys: remainingKeys,
+            activeThreads: activeThreads,
+            completedNotificationThread: completedNotificationThread
+        )
     }
 
     private func runReconnectPlan(
@@ -490,7 +540,24 @@ final class AppLifecycleController {
         backgroundTaskID = .invalid
     }
 
-    private func postLocalNotificationIfNeeded(model: String, threadPreview: String?) {
+    static func notificationThreadKey(from userInfo: [AnyHashable: Any]) -> ThreadKey? {
+        guard let serverId = userInfo[notificationServerIdKey] as? String,
+              let threadId = userInfo[notificationThreadIdKey] as? String else {
+            return nil
+        }
+
+        let trimmedServerId = serverId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedThreadId = threadId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedServerId.isEmpty, !trimmedThreadId.isEmpty else { return nil }
+
+        return ThreadKey(serverId: trimmedServerId, threadId: trimmedThreadId)
+    }
+
+    private func postLocalNotificationIfNeeded(
+        model: String,
+        threadPreview: String?,
+        threadKey: ThreadKey
+    ) {
         guard UIApplication.shared.applicationState != .active else { return }
         let content = UNMutableNotificationContent()
         content.title = "Turn completed"
@@ -499,6 +566,10 @@ final class AppLifecycleController {
         if !model.isEmpty { bodyParts.append(model) }
         content.body = bodyParts.joined(separator: " - ")
         content.sound = .default
+        content.userInfo = [
+            Self.notificationServerIdKey: threadKey.serverId,
+            Self.notificationThreadIdKey: threadKey.threadId
+        ]
         let request = UNNotificationRequest(
             identifier: UUID().uuidString,
             content: content,
