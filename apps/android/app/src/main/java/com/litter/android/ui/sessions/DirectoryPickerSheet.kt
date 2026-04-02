@@ -54,6 +54,7 @@ import com.litter.android.ui.LitterTheme
 import com.litter.android.ui.LocalAppModel
 import com.litter.android.ui.RecentDirectoryEntry
 import com.litter.android.ui.RecentDirectoryStore
+import com.litter.android.state.canBrowseDirectories
 import kotlinx.coroutines.launch
 import uniffi.codex_mobile_client.AbsolutePath
 import uniffi.codex_mobile_client.AppExecCommandRequest
@@ -97,7 +98,18 @@ fun DirectoryPickerSheet(
         onSelect(serverId, path)
     }
 
+    fun isDisconnectedError(error: Throwable): Boolean {
+        val message = error.message?.lowercase().orEmpty()
+        return "disconnected" in message ||
+            ("transport error" in message && "not connected" in message)
+    }
+
     suspend fun resolveHome(serverId: String): String {
+        val serverSnapshot = appModel.snapshot.value?.servers?.firstOrNull { it.serverId == serverId }
+        if (serverSnapshot?.canBrowseDirectories != true) {
+            errorMessage = "Selected server is not connected."
+            return "/"
+        }
         val response = runCatching {
             appModel.client.execCommand(
                 serverId,
@@ -121,6 +133,13 @@ fun DirectoryPickerSheet(
     }
 
     suspend fun listDirectory(serverId: String, path: String) {
+        val serverSnapshot = appModel.snapshot.value?.servers?.firstOrNull { it.serverId == serverId }
+        if (serverSnapshot?.canBrowseDirectories != true) {
+            isLoading = false
+            allEntries = emptyList()
+            errorMessage = "Selected server is not connected."
+            return
+        }
         val normalizedPath = path.trim().ifEmpty { "/" }
         isLoading = true
         errorMessage = null
@@ -162,7 +181,11 @@ fun DirectoryPickerSheet(
             }
         }.onFailure { error ->
             allEntries = emptyList()
-            errorMessage = error.message ?: "Failed to list directory."
+            errorMessage = if (isDisconnectedError(error)) {
+                "Selected server is not connected."
+            } else {
+                error.message ?: "Failed to list directory."
+            }
         }
         isLoading = false
     }

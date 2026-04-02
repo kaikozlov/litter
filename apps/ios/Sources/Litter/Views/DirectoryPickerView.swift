@@ -55,6 +55,18 @@ private let directoryPickerSignpostLog = OSLog(
     category: "DirectoryPicker"
 )
 
+private func isDisconnectedClientError(_ error: Error) -> Bool {
+    switch error {
+    case let ClientError.Transport(message):
+        return message.localizedCaseInsensitiveContains("disconnected")
+    case let ClientError.Rpc(message):
+        return message.localizedCaseInsensitiveContains("transport error") &&
+            message.localizedCaseInsensitiveContains("disconnected")
+    default:
+        return false
+    }
+}
+
 @MainActor
 @Observable
 private final class DirectoryPickerSheetModel {
@@ -179,7 +191,7 @@ private final class DirectoryPickerSheetModel {
             )
         }
 
-        guard appModel.snapshot?.servers.first(where: { $0.serverId == serverId })?.health == .connected else {
+        guard appModel.snapshot?.servers.first(where: { $0.serverId == serverId })?.canBrowseDirectories == true else {
             if serverId == lastLoadedServerId {
                 isLoading = false
                 allEntries = []
@@ -261,7 +273,9 @@ private final class DirectoryPickerSheetModel {
             }
         } catch {
             guard serverId == lastLoadedServerId else { return }
-            errorMessage = error.localizedDescription
+            errorMessage = isDisconnectedClientError(error) ?
+                DirectoryPickerStrings.serverNotConnected :
+                error.localizedDescription
         }
     }
 
@@ -322,7 +336,7 @@ private final class DirectoryPickerSheetModel {
         appModel: AppModel,
         isLocalServer: Bool
     ) async -> String {
-        guard appModel.snapshot?.servers.first(where: { $0.serverId == serverId })?.health == .connected else {
+        guard appModel.snapshot?.servers.first(where: { $0.serverId == serverId })?.canBrowseDirectories == true else {
             return "/"
         }
         if isLocalServer {
@@ -351,7 +365,11 @@ private final class DirectoryPickerSheetModel {
                     return home
                 }
             }
-        } catch {}
+        } catch {
+            if isDisconnectedClientError(error) {
+                errorMessage = DirectoryPickerStrings.serverNotConnected
+            }
+        }
         return "/"
     }
 
@@ -395,7 +413,9 @@ struct DirectoryPickerView: View {
     }
 
     private var canSelectPath: Bool {
-        !model.currentPath.isEmpty && selectedServerSnapshot?.health == .connected && selectedServerOption != nil
+        !model.currentPath.isEmpty &&
+            selectedServerSnapshot?.canBrowseDirectories == true &&
+            selectedServerOption != nil
     }
 
     private var showRecentDirectories: Bool {

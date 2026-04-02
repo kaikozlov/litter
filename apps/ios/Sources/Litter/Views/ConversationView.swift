@@ -1946,7 +1946,7 @@ private struct ConversationInputBar: View {
     }
 
     private func loadExperimentalFeatures() async {
-        guard appModel.snapshot?.servers.first(where: { $0.serverId == snapshot.threadKey.serverId })?.health == .connected else {
+        guard appModel.snapshot?.servers.first(where: { $0.serverId == snapshot.threadKey.serverId })?.canUseTransportActions == true else {
             experimentalFeatures = []
             slashErrorMessage = "Not connected to a server"
             return
@@ -1973,7 +1973,7 @@ private struct ConversationInputBar: View {
     }
 
     private func setExperimentalFeature(named featureName: String, enabled: Bool) async {
-        guard appModel.snapshot?.servers.first(where: { $0.serverId == snapshot.threadKey.serverId })?.health == .connected else {
+        guard appModel.snapshot?.servers.first(where: { $0.serverId == snapshot.threadKey.serverId })?.canUseTransportActions == true else {
             slashErrorMessage = "Not connected to a server"
             return
         }
@@ -2024,7 +2024,7 @@ private struct ConversationInputBar: View {
     }
 
     private func loadSkills(forceReload: Bool = false, showErrors: Bool) async {
-        guard appModel.snapshot?.servers.first(where: { $0.serverId == snapshot.threadKey.serverId })?.health == .connected else {
+        guard appModel.snapshot?.servers.first(where: { $0.serverId == snapshot.threadKey.serverId })?.canUseTransportActions == true else {
             skills = []
             mentionSkillPathsByName = [:]
             if showErrors {

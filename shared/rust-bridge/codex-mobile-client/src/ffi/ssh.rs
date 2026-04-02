@@ -356,7 +356,7 @@ impl SshBridge {
         let mobile_client = shared_mobile_client();
         mobile_client
             .app_store
-            .upsert_server(&config, ServerHealthSnapshot::Connecting);
+            .upsert_server(&config, ServerHealthSnapshot::Connecting, true);
         let initial_progress = AppConnectionProgressSnapshot::ssh_bootstrap();
         mobile_client
             .app_store

@@ -366,6 +366,7 @@ mod tests {
                 tls: false,
             },
             ServerHealthSnapshot::Connected,
+            false,
         );
 
         let response = upstream::GetAccountResponse {
@@ -404,6 +405,7 @@ mod tests {
                 tls: false,
             },
             ServerHealthSnapshot::Connected,
+            false,
         );
 
         let response = upstream::GetAccountRateLimitsResponse {
@@ -461,6 +463,7 @@ mod tests {
                 tls: false,
             },
             ServerHealthSnapshot::Connected,
+            false,
         );
 
         let response = upstream::ModelListResponse {
@@ -515,6 +518,7 @@ mod tests {
                 tls: false,
             },
             ServerHealthSnapshot::Connected,
+            false,
         );
 
         let list_response = upstream::ThreadListResponse {

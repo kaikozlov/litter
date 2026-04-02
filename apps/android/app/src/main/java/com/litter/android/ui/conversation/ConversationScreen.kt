@@ -64,7 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.litter.android.state.contextPercent
 import com.litter.android.state.hasActiveTurn
-import com.litter.android.state.isIpcConnected
+import com.litter.android.state.canResumeViaIpc
 import com.litter.android.state.isActiveStatus
 import com.litter.android.ui.BerkeleyMono
 import com.litter.android.ui.ChatWallpaperBackground
@@ -153,7 +153,7 @@ fun ConversationScreen(
             if (appModel.threadSnapshot(resolvedThreadKey) == null) {
                 val server = appModel.snapshot.value?.servers?.find { it.serverId == resolvedThreadKey.serverId }
                 val cwdOverride = appModel.threadSnapshot(resolvedThreadKey)?.info?.cwd
-                if (server?.isIpcConnected != true) {
+                if (server?.canResumeViaIpc != true) {
                     appModel.client.resumeThread(
                         resolvedThreadKey.serverId,
                         appModel.launchState.threadResumeRequest(

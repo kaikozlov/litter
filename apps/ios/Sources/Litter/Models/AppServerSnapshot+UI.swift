@@ -3,16 +3,35 @@ import SwiftUI
 
 extension AppServerSnapshot {
     var isConnected: Bool {
-        health == .connected
+        transportState == .connected
     }
 
     var isIpcConnected: Bool {
-        hasIpc && !isLocal && isConnected
+        ipcState == .ready
+    }
+
+    var canUseTransportActions: Bool {
+        capabilities.canUseTransportActions
+    }
+
+    var canBrowseDirectories: Bool {
+        capabilities.canBrowseDirectories
+    }
+
+    var canResumeViaIpc: Bool {
+        capabilities.canResumeViaIpc
     }
 
     var connectionModeLabel: String {
         guard !isLocal else { return "local" }
-        return isIpcConnected ? "remote · ipc" : "remote"
+        switch ipcState {
+        case .ready:
+            return "remote · ipc"
+        case .disconnected:
+            return "remote · no ipc"
+        case .unsupported:
+            return "remote"
+        }
     }
 
     var currentConnectionStep: AppConnectionStepSnapshot? {
@@ -50,10 +69,13 @@ extension AppServerSnapshot {
         if let connectionProgressLabel {
             return connectionProgressLabel
         }
-        if health == .connected, !isLocal, account == nil {
+        if transportState == .connected, !isLocal, account == nil {
             return "Sign in required"
         }
-        return health.displayLabel
+        if transportState == .connected, ipcState == .disconnected {
+            return "Connected, IPC unavailable"
+        }
+        return transportState.displayLabel
     }
 
     var statusColor: Color {
@@ -66,9 +88,12 @@ extension AppServerSnapshot {
         if connectionProgressLabel != nil {
             return LitterTheme.accent
         }
-        if health == .connected, !isLocal, account == nil {
+        if transportState == .connected, !isLocal, account == nil {
             return .orange
         }
-        return health.accentColor
+        if transportState == .connected, ipcState == .disconnected {
+            return .orange
+        }
+        return transportState.accentColor
     }
 }

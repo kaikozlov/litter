@@ -18,7 +18,7 @@ use codex_app_server_protocol::{
     ClientNotification, ClientRequest, JSONRPCErrorError, RequestId, Result as JsonRpcResult,
     ServerNotification, ServerRequest,
 };
-use codex_ipc::{IpcClient, TypedBroadcast};
+use codex_ipc::{IpcClient, ReconnectingIpcClient, TypedBroadcast};
 use serde_json::Value as JsonValue;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tracing::{debug, info, warn};
@@ -318,9 +318,9 @@ pub struct ServerConfig {
 pub struct RemoteSessionResources {
     pub ssh_client: Option<Arc<SshClient>>,
     pub ssh_pid: Option<u32>,
-    pub ipc_client: Option<IpcClient>,
+    pub ipc_client: Option<ReconnectingIpcClient>,
     pub ipc_ssh_client: Option<Arc<SshClient>>,
-    pub ipc_bridge_pid: Option<u32>,
+    pub ipc_bridge_pid: Option<Arc<StdMutex<Option<u32>>>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -407,29 +407,15 @@ pub struct ServerSession {
     health_rx: watch::Receiver<ConnectionHealth>,
     command_tx: mpsc::Sender<SessionCommand>,
     event_tx: broadcast::Sender<ServerEvent>,
-    ipc_event_tx: broadcast::Sender<TypedBroadcast>,
-    ipc_client: Option<IpcClient>,
+    ipc_client: Option<ReconnectingIpcClient>,
     ssh_client: Option<Arc<SshClient>>,
     ssh_pid: Option<u32>,
     ipc_ssh_client: Option<Arc<SshClient>>,
-    ipc_bridge_pid: Option<u32>,
+    ipc_bridge_pid: Option<Arc<StdMutex<Option<u32>>>>,
     worker_handle: tokio::task::JoinHandle<()>,
-    ipc_forward_handle: StdMutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl ServerSession {
-    fn ipc_forward_handle_lock(
-        &self,
-    ) -> std::sync::MutexGuard<'_, Option<tokio::task::JoinHandle<()>>> {
-        match self.ipc_forward_handle.lock() {
-            Ok(guard) => guard,
-            Err(error) => {
-                warn!("ServerSession: recovering poisoned ipc_forward_handle lock");
-                error.into_inner()
-            }
-        }
-    }
-
     /// Connect to a local (in-process) Codex server.
     pub async fn connect_local(
         config: ServerConfig,
@@ -638,14 +624,12 @@ impl ServerSession {
             health_rx,
             command_tx,
             event_tx,
-            ipc_event_tx: broadcast::channel::<TypedBroadcast>(32).0,
             ipc_client: None,
             ssh_client: None,
             ssh_pid: None,
             ipc_ssh_client: None,
             ipc_bridge_pid: None,
             worker_handle,
-            ipc_forward_handle: StdMutex::new(None),
         })
     }
 
@@ -844,39 +828,18 @@ impl ServerSession {
             config.display_name, url
         );
 
-        let (ipc_event_tx, _) = broadcast::channel::<TypedBroadcast>(256);
-        let ipc_forward_handle = resources.ipc_client.as_ref().map(|ipc_client| {
-            let mut broadcasts = ipc_client.subscribe_broadcasts();
-            let ipc_event_tx = ipc_event_tx.clone();
-            tokio::spawn(async move {
-                loop {
-                    match broadcasts.recv().await {
-                        Ok(event) => {
-                            let _ = ipc_event_tx.send(event);
-                        }
-                        Err(broadcast::error::RecvError::Closed) => break,
-                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                            warn!("ipc broadcast stream lagged by {skipped} events");
-                        }
-                    }
-                }
-            })
-        });
-
         Ok(Self {
             config,
             health_tx,
             health_rx,
             command_tx,
             event_tx,
-            ipc_event_tx,
             ipc_client: resources.ipc_client,
             ssh_client: resources.ssh_client,
             ssh_pid: resources.ssh_pid,
             ipc_ssh_client: resources.ipc_ssh_client,
             ipc_bridge_pid: resources.ipc_bridge_pid,
             worker_handle,
-            ipc_forward_handle: StdMutex::new(ipc_forward_handle),
         })
     }
 
@@ -952,15 +915,27 @@ impl ServerSession {
     }
 
     pub fn has_ipc(&self) -> bool {
-        self.ipc_client.is_some()
+        self.ipc_client
+            .as_ref()
+            .is_some_and(ReconnectingIpcClient::is_connected)
     }
 
     pub fn ipc_client(&self) -> Option<IpcClient> {
-        self.ipc_client.clone()
+        self.ipc_client
+            .as_ref()
+            .and_then(ReconnectingIpcClient::client)
     }
 
     pub fn ipc_broadcasts(&self) -> Option<broadcast::Receiver<TypedBroadcast>> {
-        self.has_ipc().then(|| self.ipc_event_tx.subscribe())
+        self.ipc_client
+            .as_ref()
+            .map(ReconnectingIpcClient::subscribe_broadcasts)
+    }
+
+    pub fn ipc_connection_state(&self) -> Option<watch::Receiver<bool>> {
+        self.ipc_client
+            .as_ref()
+            .map(ReconnectingIpcClient::subscribe_connection_state)
     }
 
     /// Respond to a server-initiated request.
@@ -1003,18 +978,24 @@ impl ServerSession {
     pub async fn disconnect(&self) {
         let _ = self.health_tx.send(ConnectionHealth::Disconnected);
         let _ = self.command_tx.send(SessionCommand::Shutdown).await;
-        if let Some(handle) = self.ipc_forward_handle_lock().take() {
-            handle.abort();
-        }
-        if let Some(ipc_client) = self.ipc_client.clone() {
-            ipc_client.disconnect().await;
+        if let Some(ipc_client) = self.ipc_client.as_ref() {
+            ipc_client.shutdown().await;
         }
         if let Some(ipc_ssh_client) = self.ipc_ssh_client.as_ref() {
             ipc_ssh_client.disconnect().await;
         }
         if let Some(ssh_client) = self.ssh_client.as_ref() {
-            if let Some(pid) = self.ipc_bridge_pid {
-                let _ = ssh_client.exec(&format!("kill {pid} 2>/dev/null")).await;
+            if let Some(ipc_bridge_pid) = self.ipc_bridge_pid.as_ref() {
+                let pid = match ipc_bridge_pid.lock() {
+                    Ok(mut guard) => guard.take(),
+                    Err(error) => {
+                        warn!("ServerSession: recovering poisoned ipc_bridge_pid lock");
+                        error.into_inner().take()
+                    }
+                };
+                if let Some(pid) = pid {
+                    let _ = ssh_client.exec(&format!("kill {pid} 2>/dev/null")).await;
+                }
             }
             if let Some(pid) = self.ssh_pid {
                 let _ = ssh_client.exec(&format!("kill {pid} 2>/dev/null")).await;

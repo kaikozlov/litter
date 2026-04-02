@@ -2,7 +2,9 @@ package com.litter.android.state
 
 import androidx.compose.ui.graphics.Color
 import uniffi.codex_mobile_client.AppServerHealth
+import uniffi.codex_mobile_client.AppServerIpcState
 import uniffi.codex_mobile_client.AppServerSnapshot
+import uniffi.codex_mobile_client.AppServerTransportState
 import uniffi.codex_mobile_client.AppSessionSummary
 import uniffi.codex_mobile_client.AppThreadSnapshot
 import uniffi.codex_mobile_client.HydratedConversationItemContent
@@ -34,17 +36,44 @@ val AppServerHealth.accentColor: Color
         AppServerHealth.DISCONNECTED, AppServerHealth.UNKNOWN -> SecondaryGray
     }
 
+val AppServerTransportState.displayLabel: String
+    get() = when (this) {
+        AppServerTransportState.CONNECTED -> "Connected"
+        AppServerTransportState.CONNECTING -> "Connecting\u2026"
+        AppServerTransportState.UNRESPONSIVE -> "Unresponsive"
+        AppServerTransportState.DISCONNECTED -> "Disconnected"
+        AppServerTransportState.UNKNOWN -> "Unknown"
+    }
+
+val AppServerTransportState.accentColor: Color
+    get() = when (this) {
+        AppServerTransportState.CONNECTED -> AccentGreen
+        AppServerTransportState.CONNECTING, AppServerTransportState.UNRESPONSIVE -> WarningOrange
+        AppServerTransportState.DISCONNECTED, AppServerTransportState.UNKNOWN -> SecondaryGray
+    }
+
 // --- AppServerSnapshot extensions --------------------------------------------
 
 val AppServerSnapshot.isConnected: Boolean
-    get() = health == AppServerHealth.CONNECTED
+    get() = transportState == AppServerTransportState.CONNECTED
 
 val AppServerSnapshot.isIpcConnected: Boolean
-    get() = hasIpc && !isLocal && isConnected
+    get() = ipcState == AppServerIpcState.READY
+
+val AppServerSnapshot.canUseTransportActions: Boolean
+    get() = capabilities.canUseTransportActions
+
+val AppServerSnapshot.canBrowseDirectories: Boolean
+    get() = capabilities.canBrowseDirectories
+
+val AppServerSnapshot.canResumeViaIpc: Boolean
+    get() = capabilities.canResumeViaIpc
 
 val AppServerSnapshot.connectionModeLabel: String
     get() = when {
         isLocal -> "local"
+        ipcState == AppServerIpcState.READY -> "remote · ipc"
+        ipcState == AppServerIpcState.DISCONNECTED -> "remote · no ipc"
         else -> "remote"
     }
 
@@ -74,8 +103,9 @@ val AppServerSnapshot.connectionProgressDetail: String?
 val AppServerSnapshot.statusLabel: String
     get() = when {
         connectionProgressLabel != null -> connectionProgressLabel!!
-        health == AppServerHealth.CONNECTED && !isLocal && account == null -> "Sign in required"
-        else -> health.displayLabel
+        transportState == AppServerTransportState.CONNECTED && !isLocal && account == null -> "Sign in required"
+        transportState == AppServerTransportState.CONNECTED && ipcState == AppServerIpcState.DISCONNECTED -> "Connected, IPC unavailable"
+        else -> transportState.displayLabel
     }
 
 val AppServerSnapshot.statusColor: Color
@@ -83,8 +113,9 @@ val AppServerSnapshot.statusColor: Color
         currentConnectionStep?.state == AppConnectionStepState.FAILED -> Color(0xFFFF6B6B)
         currentConnectionStep?.state == AppConnectionStepState.AWAITING_USER_INPUT -> WarningOrange
         connectionProgressLabel != null -> AccentGreen
-        health == AppServerHealth.CONNECTED && !isLocal && account == null -> WarningOrange
-        else -> health.accentColor
+        transportState == AppServerTransportState.CONNECTED && !isLocal && account == null -> WarningOrange
+        transportState == AppServerTransportState.CONNECTED && ipcState == AppServerIpcState.DISCONNECTED -> WarningOrange
+        else -> transportState.accentColor
     }
 
 // --- AppThreadSnapshot extensions --------------------------------------------

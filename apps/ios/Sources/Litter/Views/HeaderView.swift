@@ -146,18 +146,21 @@ struct HeaderView: View {
     }
 
     private var shouldPulse: Bool {
-        guard let health = server?.health else { return false }
-        return health == .connecting || health == .unresponsive
+        guard let transportState = server?.transportState else { return false }
+        return transportState == .connecting || transportState == .unresponsive
     }
 
     private var statusDotColor: Color {
         guard let server else {
             return LitterTheme.textMuted
         }
-        switch server.health {
+        switch server.transportState {
         case .connecting, .unresponsive:
             return .orange
         case .connected:
+            if server.ipcState == .disconnected {
+                return .orange
+            }
             if server.isLocal {
                 switch server.account {
                 case .chatgpt?, .apiKey?:

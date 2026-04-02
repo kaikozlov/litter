@@ -34,6 +34,9 @@ use super::snapshot::{
 use super::updates::{AppStoreUpdateRecord, ThreadStreamingDeltaKind};
 use super::voice::{VoiceDerivedUpdate, VoiceRealtimeState};
 
+const USER_INPUT_NOTE_PREFIX: &str = "user_note: ";
+const USER_INPUT_OTHER_OPTION_LABEL: &str = "None of the above";
+
 pub struct AppStoreReducer {
     snapshot: RwLock<AppSnapshot>,
     updates_tx: broadcast::Sender<AppStoreUpdateRecord>,
@@ -84,7 +87,12 @@ impl AppStoreReducer {
         self.updates_tx.subscribe()
     }
 
-    pub fn upsert_server(&self, config: &ServerConfig, health: ServerHealthSnapshot) {
+    pub fn upsert_server(
+        &self,
+        config: &ServerConfig,
+        health: ServerHealthSnapshot,
+        supports_ipc: bool,
+    ) {
         {
             let mut snapshot = self.snapshot.write().expect("app store lock poisoned");
             let (
@@ -92,6 +100,7 @@ impl AppStoreReducer {
                 requires_openai_auth,
                 existing_rate_limits,
                 existing_available_models,
+                existing_supports_ipc,
                 existing_has_ipc,
                 existing_connection_progress,
             ) = if let Some(existing) = snapshot.servers.get(&config.server_id) {
@@ -100,11 +109,12 @@ impl AppStoreReducer {
                     existing.requires_openai_auth,
                     existing.rate_limits.clone(),
                     existing.available_models.clone(),
+                    existing.supports_ipc,
                     existing.has_ipc,
                     existing.connection_progress.clone(),
                 )
             } else {
-                (None, false, None, None, false, None)
+                (None, false, None, None, false, false, None)
             };
             snapshot.servers.insert(
                 config.server_id.clone(),
@@ -114,6 +124,7 @@ impl AppStoreReducer {
                     host: config.host.clone(),
                     port: config.port,
                     is_local: config.is_local,
+                    supports_ipc: existing_supports_ipc || supports_ipc,
                     has_ipc: existing_has_ipc,
                     health,
                     account: existing_account,
@@ -1754,7 +1765,20 @@ fn answered_user_input_item(
                     let answer = answers
                         .iter()
                         .find(|answer| answer.question_id == question.id)
-                        .map(|answer| answer.answers.join("\n"))
+                        .map(|answer| {
+                            let hide_other_placeholder = answer
+                                .answers
+                                .iter()
+                                .any(|entry| is_user_input_note_answer(entry));
+                            answer
+                                .answers
+                                .iter()
+                                .filter_map(|entry| {
+                                    display_user_input_answer(entry, hide_other_placeholder)
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        })
                         .unwrap_or_default();
                     HydratedUserInputResponseQuestionData {
                         id: question.id.clone(),
@@ -1782,6 +1806,25 @@ fn answered_user_input_item(
         timestamp: None,
         is_from_user_turn_boundary: false,
     }
+}
+
+fn is_user_input_note_answer(answer: &str) -> bool {
+    answer.trim().starts_with(USER_INPUT_NOTE_PREFIX)
+}
+
+fn display_user_input_answer(answer: &str, hide_other_placeholder: bool) -> Option<String> {
+    let trimmed = answer.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(note) = trimmed.strip_prefix(USER_INPUT_NOTE_PREFIX) {
+        let note = note.trim();
+        return (!note.is_empty()).then(|| note.to_string());
+    }
+    if hide_other_placeholder && trimmed == USER_INPUT_OTHER_OPTION_LABEL {
+        return None;
+    }
+    Some(trimmed.to_string())
 }
 
 fn append_reasoning_delta(thread: &mut ThreadSnapshot, item_id: &str, delta: &str) -> bool {
@@ -2175,6 +2218,63 @@ mod tests {
             HydratedConversationItemContent::UserInputResponse(data) => {
                 assert_eq!(data.questions.len(), 1);
                 assert_eq!(data.questions[0].answer, "A");
+            }
+            other => panic!("expected user input response item, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolved_user_input_hides_other_placeholder_when_note_present() {
+        let reducer = AppStoreReducer::new();
+        let key = ThreadKey {
+            server_id: "srv".to_string(),
+            thread_id: "thread".to_string(),
+        };
+        reducer
+            .upsert_thread_snapshot(ThreadSnapshot::from_info("srv", make_thread_info("thread")));
+        reducer.replace_pending_user_inputs(vec![PendingUserInputRequest {
+            id: "req-1".to_string(),
+            server_id: key.server_id.clone(),
+            thread_id: key.thread_id.clone(),
+            turn_id: "turn-1".to_string(),
+            item_id: "tool-1".to_string(),
+            questions: vec![PendingUserInputQuestion {
+                id: "q-1".to_string(),
+                header: Some("Choice".to_string()),
+                question: "Pick one".to_string(),
+                is_other_allowed: true,
+                is_secret: false,
+                options: vec![PendingUserInputOption {
+                    label: "A".to_string(),
+                    description: Some("First".to_string()),
+                }],
+            }],
+            requester_agent_nickname: None,
+            requester_agent_role: None,
+        }]);
+
+        reducer.resolve_pending_user_input_with_response(
+            "req-1",
+            vec![PendingUserInputAnswer {
+                question_id: "q-1".to_string(),
+                answers: vec![
+                    "None of the above".to_string(),
+                    "user_note: Custom answer".to_string(),
+                ],
+            }],
+        );
+
+        let snapshot = reducer.snapshot();
+        let thread = snapshot.threads.get(&key).expect("thread exists");
+        let item = thread
+            .local_overlay_items
+            .iter()
+            .find(|item| item.id == "user-input-response:req-1")
+            .expect("response item exists");
+        match &item.content {
+            HydratedConversationItemContent::UserInputResponse(data) => {
+                assert_eq!(data.questions.len(), 1);
+                assert_eq!(data.questions[0].answer, "Custom answer");
             }
             other => panic!("expected user input response item, got {other:?}"),
         }

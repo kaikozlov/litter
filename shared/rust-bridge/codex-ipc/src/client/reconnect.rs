@@ -1,9 +1,12 @@
 //! Reconnecting IPC client wrapper with exponential backoff.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::RwLock as StdRwLock;
 use std::time::Duration;
 
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::{RwLock, broadcast, watch};
 use tracing::{error, info, warn};
 
 use crate::client::handle::{IpcClient, IpcClientConfig};
@@ -30,10 +33,11 @@ impl Default for ReconnectPolicy {
 
 /// IPC client wrapper that automatically reconnects on disconnection.
 pub struct ReconnectingIpcClient {
-    client: Arc<RwLock<Option<IpcClient>>>,
+    client: Arc<StdRwLock<Option<IpcClient>>>,
     handler: Arc<RwLock<Option<Arc<dyn RequestHandler>>>>,
     broadcast_tx: broadcast::Sender<TypedBroadcast>,
-    _reconnect_task: tokio::task::JoinHandle<()>,
+    connection_tx: watch::Sender<bool>,
+    reconnect_task: tokio::task::JoinHandle<()>,
 }
 
 impl ReconnectingIpcClient {
@@ -42,50 +46,124 @@ impl ReconnectingIpcClient {
         config: IpcClientConfig,
         policy: ReconnectPolicy,
     ) -> Result<Self, IpcError> {
-        let ipc_client = IpcClient::connect_with_config(&config).await?;
-        let client: Arc<RwLock<Option<IpcClient>>> =
-            Arc::new(RwLock::new(Some(ipc_client.clone())));
+        let config = Arc::new(config);
+        let connector = {
+            let config = Arc::clone(&config);
+            move || {
+                let config = Arc::clone(&config);
+                async move { IpcClient::connect_with_config(&config).await }
+            }
+        };
+        Self::connect_with_connector(connector, policy).await
+    }
+
+    /// Connect using a custom connector that can recreate the IPC stream.
+    pub async fn connect_with_connector<F, Fut>(
+        connector: F,
+        policy: ReconnectPolicy,
+    ) -> Result<Self, IpcError>
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<IpcClient, IpcError>> + Send + 'static,
+    {
+        let initial_client = connector().await?;
+        Ok(Self::start_with_connector(
+            Some(initial_client),
+            connector,
+            policy,
+        ))
+    }
+
+    /// Start the reconnecting wrapper with an optional initial client.
+    ///
+    /// When `initial_client` is `None`, the background task immediately starts
+    /// trying to connect using the supplied connector.
+    pub fn start_with_connector<F, Fut>(
+        initial_client: Option<IpcClient>,
+        connector: F,
+        policy: ReconnectPolicy,
+    ) -> Self
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<IpcClient, IpcError>> + Send + 'static,
+    {
+        let connector: Arc<
+            dyn Fn() -> Pin<Box<dyn Future<Output = Result<IpcClient, IpcError>> + Send>>
+                + Send
+                + Sync,
+        > = Arc::new(move || Box::pin(connector()));
+        let client = Arc::new(StdRwLock::new(initial_client));
         let handler: Arc<RwLock<Option<Arc<dyn RequestHandler>>>> = Arc::new(RwLock::new(None));
         let (broadcast_tx, _) = broadcast::channel::<TypedBroadcast>(256);
-
-        // Forward broadcasts from the initial client.
-        let fwd_task_broadcast_tx = broadcast_tx.clone();
-        let mut sub = ipc_client.subscribe_broadcasts();
-        tokio::spawn(async move {
-            while let Ok(msg) = sub.recv().await {
-                let _ = fwd_task_broadcast_tx.send(msg);
-            }
-        });
+        let (connection_tx, _) = watch::channel(Self::client_lock_read(&client).as_ref().is_some());
 
         let reconnect_task = {
             let client = Arc::clone(&client);
             let handler = Arc::clone(&handler);
             let broadcast_tx = broadcast_tx.clone();
+            let connection_tx = connection_tx.clone();
+            let connector = Arc::clone(&connector);
             tokio::spawn(Self::reconnect_loop(
-                config,
                 policy,
                 client,
                 handler,
                 broadcast_tx,
+                connection_tx,
+                connector,
             ))
         };
 
-        Ok(Self {
+        Self {
             client,
             handler,
             broadcast_tx,
-            _reconnect_task: reconnect_task,
-        })
+            connection_tx,
+            reconnect_task,
+        }
+    }
+
+    fn client_lock_read(
+        client: &StdRwLock<Option<IpcClient>>,
+    ) -> std::sync::RwLockReadGuard<'_, Option<IpcClient>> {
+        match client.read() {
+            Ok(guard) => guard,
+            Err(error) => {
+                warn!("ipc reconnect: recovering poisoned client read lock");
+                error.into_inner()
+            }
+        }
+    }
+
+    fn client_lock_write(
+        client: &StdRwLock<Option<IpcClient>>,
+    ) -> std::sync::RwLockWriteGuard<'_, Option<IpcClient>> {
+        match client.write() {
+            Ok(guard) => guard,
+            Err(error) => {
+                warn!("ipc reconnect: recovering poisoned client write lock");
+                error.into_inner()
+            }
+        }
     }
 
     /// Returns the current connected client, if any.
-    pub async fn client(&self) -> Option<IpcClient> {
-        self.client.read().await.clone()
+    pub fn client(&self) -> Option<IpcClient> {
+        Self::client_lock_read(&self.client).clone()
+    }
+
+    /// Returns whether the wrapper currently has an active IPC client.
+    pub fn is_connected(&self) -> bool {
+        self.client().is_some()
     }
 
     /// Subscribe to typed broadcasts. Subscriptions survive reconnections.
     pub fn subscribe_broadcasts(&self) -> broadcast::Receiver<TypedBroadcast> {
         self.broadcast_tx.subscribe()
+    }
+
+    /// Subscribe to IPC connection state changes.
+    pub fn subscribe_connection_state(&self) -> watch::Receiver<bool> {
+        self.connection_tx.subscribe()
     }
 
     /// Set the request handler. It will be re-registered on reconnect.
@@ -94,47 +172,60 @@ impl ReconnectingIpcClient {
             let mut guard = self.handler.write().await;
             *guard = Some(Arc::clone(&h));
         }
-        let guard = self.client.read().await;
-        if let Some(c) = guard.as_ref() {
+        if let Some(c) = self.client().as_ref() {
             c.set_request_handler(h).await;
         }
     }
 
+    /// Stop the reconnect loop and disconnect any currently attached IPC
+    /// client.
+    pub async fn shutdown(&self) {
+        self.reconnect_task.abort();
+        let client = {
+            let mut guard = Self::client_lock_write(&self.client);
+            guard.take()
+        };
+        if let Some(client) = client {
+            client.disconnect().await;
+        }
+        let _ = self.connection_tx.send(false);
+    }
+
     async fn reconnect_loop(
-        config: IpcClientConfig,
         policy: ReconnectPolicy,
-        client: Arc<RwLock<Option<IpcClient>>>,
+        client: Arc<StdRwLock<Option<IpcClient>>>,
         handler: Arc<RwLock<Option<Arc<dyn RequestHandler>>>>,
         broadcast_tx: broadcast::Sender<TypedBroadcast>,
+        connection_tx: watch::Sender<bool>,
+        connector: Arc<
+            dyn Fn() -> Pin<Box<dyn Future<Output = Result<IpcClient, IpcError>> + Send>>
+                + Send
+                + Sync,
+        >,
     ) {
         loop {
-            // Wait for the current client's broadcast subscription to end,
-            // which signals the connection has dropped.
-            {
-                let guard = client.read().await;
-                if let Some(c) = guard.as_ref() {
-                    let mut sub = c.subscribe_broadcasts();
-                    drop(guard);
-                    // Block until the channel is closed (recv returns Err).
-                    loop {
-                        match sub.recv().await {
-                            Ok(msg) => {
-                                let _ = broadcast_tx.send(msg);
-                            }
-                            Err(broadcast::error::RecvError::Closed) => break,
-                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            let current_client = {
+                let guard = Self::client_lock_read(&client);
+                guard.clone()
+            };
+            if let Some(current_client) = current_client {
+                let mut sub = current_client.subscribe_broadcasts();
+                loop {
+                    match sub.recv().await {
+                        Ok(msg) => {
+                            let _ = broadcast_tx.send(msg);
                         }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     }
-                } else {
-                    drop(guard);
                 }
             }
 
-            // Clear the client while we reconnect.
             {
-                let mut guard = client.write().await;
+                let mut guard = Self::client_lock_write(&client);
                 *guard = None;
             }
+            let _ = connection_tx.send(false);
 
             info!("ipc connection lost, starting reconnect");
 
@@ -153,7 +244,7 @@ impl ReconnectingIpcClient {
                 info!("ipc reconnecting, attempt {attempt}");
                 tokio::time::sleep(delay).await;
 
-                match IpcClient::connect_with_config(&config).await {
+                match connector().await {
                     Ok(c) => {
                         info!("ipc reconnected");
                         break c;
@@ -175,9 +266,10 @@ impl ReconnectingIpcClient {
 
             // Store the new client.
             {
-                let mut guard = client.write().await;
+                let mut guard = Self::client_lock_write(&client);
                 *guard = Some(new_client);
             }
+            let _ = connection_tx.send(true);
         }
     }
 }

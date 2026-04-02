@@ -118,6 +118,13 @@ impl ServerHealthSnapshot {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerIpcStateSnapshot {
+    Unsupported,
+    Disconnected,
+    Ready,
+}
+
 #[derive(Debug, Clone)]
 pub struct ServerSnapshot {
     pub server_id: String,
@@ -125,6 +132,7 @@ pub struct ServerSnapshot {
     pub host: String,
     pub port: u16,
     pub is_local: bool,
+    pub supports_ipc: bool,
     pub has_ipc: bool,
     pub health: ServerHealthSnapshot,
     pub account: Option<Account>,
@@ -132,6 +140,18 @@ pub struct ServerSnapshot {
     pub rate_limits: Option<RateLimitSnapshot>,
     pub available_models: Option<Vec<ModelInfo>>,
     pub connection_progress: Option<AppConnectionProgressSnapshot>,
+}
+
+impl ServerSnapshot {
+    pub fn ipc_state(&self) -> ServerIpcStateSnapshot {
+        if self.is_local || !self.supports_ipc {
+            ServerIpcStateSnapshot::Unsupported
+        } else if self.has_ipc {
+            ServerIpcStateSnapshot::Ready
+        } else {
+            ServerIpcStateSnapshot::Disconnected
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, uniffi::Record)]

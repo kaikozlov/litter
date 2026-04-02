@@ -6,7 +6,7 @@ use std::future::Future;
 use std::hash::{Hash, Hasher};
 #[cfg(target_os = "android")]
 use std::panic::AssertUnwindSafe;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tracing::{debug, info, trace, warn};
 use url::Url;
@@ -35,12 +35,12 @@ use codex_ipc::{
     ClientStatus, CommandExecutionApprovalDecision, ConversationStreamApplyError,
     FileChangeApprovalDecision, ImmerOp, ImmerPatch, ImmerPathSegment, IpcClient, IpcClientConfig,
     IpcError, ProjectedApprovalKind, ProjectedApprovalRequest, ProjectedUserInputRequest,
-    StreamChange, ThreadFollowerCommandApprovalDecisionParams,
-    ThreadFollowerFileApprovalDecisionParams, ThreadFollowerSetCollaborationModeParams,
-    ThreadFollowerStartTurnParams, ThreadFollowerSubmitUserInputParams,
-    ThreadStreamStateChangedParams, TypedBroadcast, apply_stream_change_to_conversation_state,
-    project_conversation_request_state, project_conversation_state, project_conversation_turn,
-    seed_conversation_state_from_thread,
+    ReconnectPolicy, ReconnectingIpcClient, StreamChange,
+    ThreadFollowerCommandApprovalDecisionParams, ThreadFollowerFileApprovalDecisionParams,
+    ThreadFollowerSetCollaborationModeParams, ThreadFollowerStartTurnParams,
+    ThreadFollowerSubmitUserInputParams, ThreadStreamStateChangedParams, TypedBroadcast,
+    apply_stream_change_to_conversation_state, project_conversation_request_state,
+    project_conversation_state, project_conversation_turn, seed_conversation_state_from_thread,
 };
 
 /// Top-level entry point for platform code (iOS / Android).
@@ -62,6 +62,10 @@ struct OAuthCallbackTunnel {
     local_port: u16,
 }
 
+const USER_INPUT_NOTE_PREFIX: &str = "user_note: ";
+const USER_INPUT_OTHER_OPTION_LABEL: &str = "None of the above";
+const USER_INPUT_RECONCILE_DELAYS_MS: [u64; 3] = [150, 800, 2500];
+
 fn ipc_command_error_clears_server_ipc_state(error: &IpcError) -> bool {
     matches!(error, IpcError::Transport(_) | IpcError::NotConnected)
 }
@@ -72,6 +76,86 @@ fn ipc_command_error_context(error: &IpcError) -> &'static str {
     } else {
         "IPC stream is still attached, but desktop follower commands are unavailable"
     }
+}
+
+fn server_supports_ipc(session: &ServerSession) -> bool {
+    session.ssh_client().is_some() || session.has_ipc()
+}
+
+fn normalize_pending_user_input_answers(
+    request: &PendingUserInputRequest,
+    answers: &[PendingUserInputAnswer],
+) -> Vec<PendingUserInputAnswer> {
+    request
+        .questions
+        .iter()
+        .map(|question| {
+            let raw_answers = answers
+                .iter()
+                .find(|answer| answer.question_id == question.id)
+                .map(|answer| answer.answers.as_slice())
+                .unwrap_or(&[]);
+            PendingUserInputAnswer {
+                question_id: question.id.clone(),
+                answers: normalize_pending_user_input_answer_entries(question, raw_answers),
+            }
+        })
+        .collect()
+}
+
+fn normalize_pending_user_input_answer_entries(
+    question: &crate::types::PendingUserInputQuestion,
+    raw_answers: &[String],
+) -> Vec<String> {
+    let mut selected_options = Vec::new();
+    let mut note_parts = Vec::new();
+
+    for raw_answer in raw_answers {
+        let trimmed = raw_answer.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if let Some(note) = trimmed.strip_prefix(USER_INPUT_NOTE_PREFIX) {
+            let note = note.trim();
+            if !note.is_empty() {
+                note_parts.push(note.to_string());
+            }
+            continue;
+        }
+
+        if !question.options.is_empty()
+            && (question
+                .options
+                .iter()
+                .any(|option| option.label == trimmed)
+                || trimmed == USER_INPUT_OTHER_OPTION_LABEL)
+        {
+            selected_options.push(trimmed.to_string());
+        } else {
+            note_parts.push(trimmed.to_string());
+        }
+    }
+
+    if question.options.is_empty() {
+        return if note_parts.is_empty() {
+            Vec::new()
+        } else {
+            vec![format!("{USER_INPUT_NOTE_PREFIX}{}", note_parts.join("\n"))]
+        };
+    }
+
+    if question.is_other_allowed && !note_parts.is_empty() && selected_options.is_empty() {
+        selected_options.push(USER_INPUT_OTHER_OPTION_LABEL.to_string());
+    }
+
+    if note_parts.is_empty() {
+        return selected_options;
+    }
+
+    let mut normalized = selected_options;
+    normalized.push(format!("{USER_INPUT_NOTE_PREFIX}{}", note_parts.join("\n")));
+    normalized
 }
 
 impl MobileClient {
@@ -296,8 +380,11 @@ impl MobileClient {
         }
         self.replace_existing_session(server_id.as_str()).await;
         let session = Arc::new(ServerSession::connect_local(config, in_process).await?);
-        self.app_store
-            .upsert_server(session.config(), ServerHealthSnapshot::Connected);
+        self.app_store.upsert_server(
+            session.config(),
+            ServerHealthSnapshot::Connected,
+            server_supports_ipc(&session),
+        );
 
         self.spawn_event_reader(server_id.clone(), Arc::clone(&session));
         self.spawn_health_reader(server_id.clone(), session.health());
@@ -321,8 +408,11 @@ impl MobileClient {
         }
         self.replace_existing_session(server_id.as_str()).await;
         let session = Arc::new(ServerSession::connect_remote(config).await?);
-        self.app_store
-            .upsert_server(session.config(), ServerHealthSnapshot::Connected);
+        self.app_store.upsert_server(
+            session.config(),
+            ServerHealthSnapshot::Connected,
+            server_supports_ipc(&session),
+        );
 
         self.spawn_event_reader(server_id.clone(), Arc::clone(&session));
         self.spawn_health_reader(server_id.clone(), session.health());
@@ -353,7 +443,7 @@ impl MobileClient {
             working_dir.as_deref().unwrap_or("<none>")
         );
         self.app_store
-            .upsert_server(&config, ServerHealthSnapshot::Connecting);
+            .upsert_server(&config, ServerHealthSnapshot::Connecting, true);
         self.app_store.update_server_connection_progress(
             server_id.as_str(),
             Some(AppConnectionProgressSnapshot::ssh_bootstrap()),
@@ -489,20 +579,93 @@ impl MobileClient {
             }
         };
         let ipc_attach_ssh_client = ipc_ssh_client.as_ref().unwrap_or(&ssh_client);
-        trace!(
-            "MobileClient: finish_connect_remote_over_ssh attaching IPC over SSH server_id={}",
-            server_id
-        );
-        let (ipc_client, ipc_bridge_pid) = attach_ipc_client_for_remote_session(
-            ipc_attach_ssh_client,
-            config.server_id.as_str(),
-            ipc_socket_path_override.as_deref(),
-        )
-        .await;
+        let ipc_enabled = ipc_socket_path_override
+            .as_deref()
+            .is_none_or(|path| !path.trim().is_empty());
+        let ipc_bridge_pid = ipc_enabled.then(|| Arc::new(StdMutex::new(None)));
+        let (initial_ipc_client, initial_ipc_bridge_pid) = if ipc_enabled {
+            trace!(
+                "MobileClient: finish_connect_remote_over_ssh attaching IPC over SSH server_id={}",
+                server_id
+            );
+            attach_ipc_client_for_remote_session(
+                ipc_attach_ssh_client,
+                config.server_id.as_str(),
+                ipc_socket_path_override.as_deref(),
+            )
+            .await
+        } else {
+            (None, None)
+        };
+        if let Some(bridge_pid_slot) = ipc_bridge_pid.as_ref() {
+            match bridge_pid_slot.lock() {
+                Ok(mut guard) => *guard = initial_ipc_bridge_pid,
+                Err(error) => {
+                    warn!("MobileClient: recovering poisoned ipc_bridge_pid lock");
+                    *error.into_inner() = initial_ipc_bridge_pid;
+                }
+            }
+        }
+        let ipc_client = if ipc_enabled {
+            let reconnect_ssh_client = Arc::clone(ipc_attach_ssh_client);
+            let reconnect_server_id = config.server_id.clone();
+            let reconnect_ipc_socket_path_override = ipc_socket_path_override.clone();
+            let reconnect_bridge_pid = ipc_bridge_pid.as_ref().map(Arc::clone);
+            Some(ReconnectingIpcClient::start_with_connector(
+                initial_ipc_client,
+                move || {
+                    let reconnect_ssh_client = Arc::clone(&reconnect_ssh_client);
+                    let reconnect_server_id = reconnect_server_id.clone();
+                    let reconnect_ipc_socket_path_override =
+                        reconnect_ipc_socket_path_override.clone();
+                    let reconnect_bridge_pid = reconnect_bridge_pid.as_ref().map(Arc::clone);
+                    async move {
+                        if let Some(bridge_pid_slot) = reconnect_bridge_pid.as_ref() {
+                            let previous_pid = match bridge_pid_slot.lock() {
+                                Ok(mut guard) => guard.take(),
+                                Err(error) => {
+                                    warn!("MobileClient: recovering poisoned ipc_bridge_pid lock");
+                                    error.into_inner().take()
+                                }
+                            };
+                            if let Some(pid) = previous_pid {
+                                let _ = reconnect_ssh_client
+                                    .exec(&format!("kill {pid} 2>/dev/null"))
+                                    .await;
+                            }
+                        }
+
+                        let (client, bridge_pid) = attach_ipc_client_for_remote_session(
+                            &reconnect_ssh_client,
+                            reconnect_server_id.as_str(),
+                            reconnect_ipc_socket_path_override.as_deref(),
+                        )
+                        .await;
+
+                        if let Some(bridge_pid_slot) = reconnect_bridge_pid.as_ref() {
+                            match bridge_pid_slot.lock() {
+                                Ok(mut guard) => *guard = bridge_pid,
+                                Err(error) => {
+                                    warn!("MobileClient: recovering poisoned ipc_bridge_pid lock");
+                                    *error.into_inner() = bridge_pid;
+                                }
+                            }
+                        }
+
+                        client.ok_or(IpcError::NotConnected)
+                    }
+                },
+                ReconnectPolicy::default(),
+            ))
+        } else {
+            None
+        };
         trace!(
             "MobileClient: finish_connect_remote_over_ssh IPC attach result server_id={} attached={}",
             server_id,
-            ipc_client.is_some()
+            ipc_client
+                .as_ref()
+                .is_some_and(ReconnectingIpcClient::is_connected)
         );
 
         let session = match ServerSession::connect_remote_with_resources(
@@ -534,8 +697,11 @@ impl MobileClient {
             }
         };
 
-        self.app_store
-            .upsert_server(session.config(), ServerHealthSnapshot::Connected);
+        self.app_store.upsert_server(
+            session.config(),
+            ServerHealthSnapshot::Connected,
+            server_supports_ipc(&session),
+        );
         trace!(
             "MobileClient: finish_connect_remote_over_ssh session connected server_id={} websocket_url={}",
             server_id,
@@ -553,6 +719,7 @@ impl MobileClient {
         self.spawn_event_reader(server_id.clone(), Arc::clone(&session));
         self.spawn_health_reader(server_id.clone(), session.health());
         self.spawn_ipc_reader(server_id.clone(), Arc::clone(&session));
+        self.spawn_ipc_connection_state_reader(server_id.clone(), Arc::clone(&session));
 
         self.sessions_write()
             .insert(server_id.clone(), Arc::clone(&session));
@@ -765,8 +932,9 @@ impl MobileClient {
                 server_id, thread_id
             );
         }
-        let response =
-            read_thread_response_from_app_server(Arc::clone(&session), thread_id).await?;
+        let response = read_thread_response_from_app_server(Arc::clone(&session), thread_id)
+            .await
+            .inspect_err(|error| self.reconcile_transport_error(server_id, error))?;
         upsert_thread_snapshot_from_app_server_read_response(&self.app_store, server_id, response)?;
         Ok(())
     }
@@ -1196,15 +1364,16 @@ impl MobileClient {
         request_id: &str,
         answers: Vec<PendingUserInputAnswer>,
     ) -> Result<(), RpcError> {
-        let answered_inputs = answers.clone();
         let request = self.pending_user_input(request_id)?;
+        let normalized_answers = normalize_pending_user_input_answers(&request, &answers);
+        let answered_inputs = normalized_answers.clone();
         let session = self.get_session(&request.server_id)?;
         if let Some(ipc_client) = session.ipc_client() {
             match send_ipc_user_input_response(
                 &ipc_client,
                 &request.thread_id,
                 &request.id,
-                answers.clone(),
+                normalized_answers.clone(),
             )
             .await
             {
@@ -1215,6 +1384,11 @@ impl MobileClient {
                     );
                     self.app_store
                         .resolve_pending_user_input_with_response(request_id, answered_inputs);
+                    self.spawn_post_user_input_reconcile(
+                        request.server_id.clone(),
+                        request.thread_id.clone(),
+                        Arc::clone(&session),
+                    );
                     return Ok(());
                 }
                 Ok(false) => {}
@@ -1234,7 +1408,7 @@ impl MobileClient {
             }
         }
         let response = upstream::ToolRequestUserInputResponse {
-            answers: answers
+            answers: normalized_answers
                 .into_iter()
                 .map(|answer| {
                     (
@@ -1258,7 +1432,57 @@ impl MobileClient {
         );
         self.app_store
             .resolve_pending_user_input_with_response(request_id, answered_inputs);
+        self.spawn_post_user_input_reconcile(
+            request.server_id.clone(),
+            request.thread_id.clone(),
+            Arc::clone(&session),
+        );
         Ok(())
+    }
+
+    fn spawn_post_user_input_reconcile(
+        &self,
+        server_id: String,
+        thread_id: String,
+        session: Arc<ServerSession>,
+    ) {
+        let app_store = Arc::clone(&self.app_store);
+        Self::spawn_detached(async move {
+            for delay_ms in USER_INPUT_RECONCILE_DELAYS_MS {
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                match read_thread_response_from_app_server(Arc::clone(&session), &thread_id).await {
+                    Ok(response) => {
+                        if let Err(error) = upsert_thread_snapshot_from_app_server_read_response(
+                            &app_store, &server_id, response,
+                        ) {
+                            warn!(
+                                "MobileClient: failed to reconcile thread after user input for server={} thread={}: {}",
+                                server_id, thread_id, error
+                            );
+                            continue;
+                        }
+                        let key = ThreadKey {
+                            server_id: server_id.clone(),
+                            thread_id: thread_id.clone(),
+                        };
+                        let should_keep_polling = app_store
+                            .snapshot()
+                            .threads
+                            .get(&key)
+                            .is_some_and(|thread| thread.active_turn_id.is_some());
+                        if !should_keep_polling {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        warn!(
+                            "MobileClient: failed to refresh thread after user input for server={} thread={}: {}",
+                            server_id, thread_id, error
+                        );
+                    }
+                }
+            }
+        });
     }
 
     pub fn snapshot(&self) -> AppSnapshot {
@@ -1513,6 +1737,22 @@ impl MobileClient {
         });
     }
 
+    fn spawn_ipc_connection_state_reader(&self, server_id: String, session: Arc<ServerSession>) {
+        let Some(mut ipc_state_rx) = session.ipc_connection_state() else {
+            return;
+        };
+        let app_store = Arc::clone(&self.app_store);
+        Self::spawn_detached(async move {
+            loop {
+                let has_ipc = *ipc_state_rx.borrow();
+                app_store.update_server_ipc_state(&server_id, has_ipc);
+                if ipc_state_rx.changed().await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
     fn spawn_ipc_reader(&self, server_id: String, session: Arc<ServerSession>) {
         let Some(mut broadcasts) = session.ipc_broadcasts() else {
             return;
@@ -1695,11 +1935,23 @@ impl MobileClient {
         });
     }
 
+    fn mark_server_transport_disconnected(&self, server_id: &str) {
+        self.app_store
+            .update_server_health(server_id, ServerHealthSnapshot::Disconnected);
+        self.app_store.update_server_ipc_state(server_id, false);
+    }
+
+    fn reconcile_transport_error(&self, server_id: &str, error: &RpcError) {
+        if matches!(error, RpcError::Transport(_)) {
+            self.mark_server_transport_disconnected(server_id);
+        }
+    }
+
     pub(crate) fn get_session(&self, server_id: &str) -> Result<Arc<ServerSession>, RpcError> {
-        self.sessions_read()
-            .get(server_id)
-            .cloned()
-            .ok_or_else(|| RpcError::Transport(TransportError::Disconnected))
+        self.sessions_read().get(server_id).cloned().ok_or_else(|| {
+            self.mark_server_transport_disconnected(server_id);
+            RpcError::Transport(TransportError::Disconnected)
+        })
     }
 
     /// Send a raw `ClientRequest` and return the JSON response value.
@@ -1710,10 +1962,10 @@ impl MobileClient {
         request: upstream::ClientRequest,
     ) -> Result<serde_json::Value, String> {
         let session = self.get_session(server_id).map_err(|e| e.to_string())?;
-        session
-            .request_client(request)
-            .await
-            .map_err(|e| e.to_string())
+        session.request_client(request).await.map_err(|error| {
+            self.reconcile_transport_error(server_id, &error);
+            error.to_string()
+        })
     }
 
     /// Return the configs of all currently connected servers (public for tooling).
@@ -1742,10 +1994,10 @@ impl MobileClient {
         R: serde::de::DeserializeOwned,
     {
         let session = self.get_session(server_id).map_err(|e| e.to_string())?;
-        let value = session
-            .request_client(request)
-            .await
-            .map_err(|e| e.to_string())?;
+        let value = session.request_client(request).await.map_err(|error| {
+            self.reconcile_transport_error(server_id, &error);
+            error.to_string()
+        })?;
         serde_json::from_value(value.clone()).map_err(|e| {
             warn!("deserialize typed RPC response: {e}\nraw payload: {value}");
             format!("deserialize typed RPC response: {e}")
@@ -5079,6 +5331,7 @@ mod mobile_client_tests {
     use crate::store::AppStoreUpdateRecord;
     use crate::store::updates::ThreadStreamingDeltaKind;
     use crate::types::ThreadSummaryStatus;
+    use crate::types::{PendingUserInputOption, PendingUserInputQuestion};
     use serde_json::json;
     use std::path::PathBuf;
     use tokio::sync::broadcast::error::TryRecvError;
@@ -5116,6 +5369,19 @@ mod mobile_client_tests {
         }
     }
 
+    fn make_user_input_request(question: PendingUserInputQuestion) -> PendingUserInputRequest {
+        PendingUserInputRequest {
+            id: "req-1".to_string(),
+            server_id: "srv".to_string(),
+            thread_id: "thread".to_string(),
+            turn_id: "turn-1".to_string(),
+            item_id: "item-1".to_string(),
+            questions: vec![question],
+            requester_agent_nickname: None,
+            requester_agent_role: None,
+        }
+    }
+
     #[test]
     fn reasoning_effort_parsing_accepts_known_values() {
         assert_eq!(
@@ -5131,6 +5397,68 @@ mod mobile_client_tests {
             Some(crate::types::ReasoningEffort::High)
         );
         assert_eq!(reasoning_effort_from_string(""), None);
+    }
+
+    #[test]
+    fn normalize_pending_user_input_wraps_freeform_answers_as_notes() {
+        let request = make_user_input_request(PendingUserInputQuestion {
+            id: "q-1".to_string(),
+            header: None,
+            question: "Explain the choice".to_string(),
+            is_other_allowed: true,
+            is_secret: false,
+            options: Vec::new(),
+        });
+
+        let normalized = normalize_pending_user_input_answers(
+            &request,
+            &[PendingUserInputAnswer {
+                question_id: "q-1".to_string(),
+                answers: vec!["Need to update the reducer".to_string()],
+            }],
+        );
+
+        assert_eq!(
+            normalized,
+            vec![PendingUserInputAnswer {
+                question_id: "q-1".to_string(),
+                answers: vec!["user_note: Need to update the reducer".to_string()],
+            }]
+        );
+    }
+
+    #[test]
+    fn normalize_pending_user_input_injects_other_option_for_custom_answers() {
+        let request = make_user_input_request(PendingUserInputQuestion {
+            id: "q-1".to_string(),
+            header: None,
+            question: "Choose one".to_string(),
+            is_other_allowed: true,
+            is_secret: false,
+            options: vec![PendingUserInputOption {
+                label: "Option A".to_string(),
+                description: None,
+            }],
+        });
+
+        let normalized = normalize_pending_user_input_answers(
+            &request,
+            &[PendingUserInputAnswer {
+                question_id: "q-1".to_string(),
+                answers: vec!["My custom answer".to_string()],
+            }],
+        );
+
+        assert_eq!(
+            normalized,
+            vec![PendingUserInputAnswer {
+                question_id: "q-1".to_string(),
+                answers: vec![
+                    "None of the above".to_string(),
+                    "user_note: My custom answer".to_string(),
+                ],
+            }]
+        );
     }
 
     #[test]

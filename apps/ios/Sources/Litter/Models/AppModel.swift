@@ -178,10 +178,14 @@ final class AppModel {
             launchConfig: launchConfig,
             cwdOverride: cwdOverride
         ) {
-            // Raw desktop IPC already streams thread updates to mobile in the
-            // background; the renderer-only resume controls in Codex.desktop
-            // are not exposed as a socket RPC. Ordinary opens should just bind
-            // the active thread and let passive IPC or deferred hydration win.
+            // Treat ordinary opens the same as reloads: perform an explicit
+            // IPC-backed thread/read before we claim success. That keeps stale
+            // "connected" snapshot state from turning a dead IPC tunnel into a
+            // ghost-success open followed by downstream activation crashes.
+            try await store.externalResumeThread(
+                key: key,
+                hostId: nil
+            )
             return key
         }
 
@@ -251,7 +255,7 @@ final class AppModel {
             !launchConfig.persistExtendedHistory
 
         return !requiresResumeOverrides &&
-            snapshot?.serverSnapshot(for: key.serverId)?.isIpcConnected == true
+            snapshot?.serverSnapshot(for: key.serverId)?.canResumeViaIpc == true
     }
 
     private func requiresResumeCwdOverride(

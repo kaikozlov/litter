@@ -9,7 +9,7 @@ use crate::types::{
 
 use super::snapshot::{
     AppConnectionProgressSnapshot, AppQueuedFollowUpPreview, AppSnapshot, AppVoiceSessionSnapshot,
-    ServerHealthSnapshot, ServerSnapshot, ThreadSnapshot,
+    ServerHealthSnapshot, ServerIpcStateSnapshot, ServerSnapshot, ThreadSnapshot,
 };
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -19,8 +19,12 @@ pub struct AppServerSnapshot {
     pub host: String,
     pub port: u16,
     pub is_local: bool,
+    pub supports_ipc: bool,
     pub has_ipc: bool,
     pub health: AppServerHealth,
+    pub transport_state: AppServerTransportState,
+    pub ipc_state: AppServerIpcState,
+    pub capabilities: AppServerCapabilities,
     pub account: Option<crate::types::Account>,
     pub requires_openai_auth: bool,
     pub rate_limits: Option<crate::types::RateLimitSnapshot>,
@@ -35,6 +39,32 @@ pub enum AppServerHealth {
     Connected,
     Unresponsive,
     Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum AppServerTransportState {
+    Disconnected,
+    Connecting,
+    Connected,
+    Unresponsive,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum AppServerIpcState {
+    Unsupported,
+    Disconnected,
+    Ready,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct AppServerCapabilities {
+    pub can_use_transport_actions: bool,
+    pub can_browse_directories: bool,
+    pub can_start_threads: bool,
+    pub can_resume_threads: bool,
+    pub can_use_ipc: bool,
+    pub can_resume_via_ipc: bool,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -165,19 +195,39 @@ impl TryFrom<AppSnapshot> for AppSnapshotRecord {
             .servers
             .values()
             .cloned()
-            .map(|server| AppServerSnapshot {
-                server_id: server.server_id,
-                display_name: server.display_name,
-                host: server.host,
-                port: server.port,
-                is_local: server.is_local,
-                has_ipc: server.has_ipc,
-                health: server.health.into(),
-                account: server.account,
-                requires_openai_auth: server.requires_openai_auth,
-                rate_limits: server.rate_limits,
-                available_models: server.available_models,
-                connection_progress: server.connection_progress,
+            .map(|server| {
+                let transport_state = AppServerTransportState::from(server.health.clone());
+                let ipc_state = AppServerIpcState::from(server.ipc_state());
+                let can_use_transport_actions =
+                    transport_state == AppServerTransportState::Connected;
+                let can_use_ipc =
+                    can_use_transport_actions && ipc_state == AppServerIpcState::Ready;
+
+                AppServerSnapshot {
+                    server_id: server.server_id,
+                    display_name: server.display_name,
+                    host: server.host,
+                    port: server.port,
+                    is_local: server.is_local,
+                    supports_ipc: server.supports_ipc,
+                    has_ipc: server.has_ipc,
+                    health: server.health.into(),
+                    transport_state,
+                    ipc_state,
+                    capabilities: AppServerCapabilities {
+                        can_use_transport_actions,
+                        can_browse_directories: can_use_transport_actions,
+                        can_start_threads: can_use_transport_actions,
+                        can_resume_threads: can_use_transport_actions,
+                        can_use_ipc,
+                        can_resume_via_ipc: can_use_ipc,
+                    },
+                    account: server.account,
+                    requires_openai_auth: server.requires_openai_auth,
+                    rate_limits: server.rate_limits,
+                    available_models: server.available_models,
+                    connection_progress: server.connection_progress,
+                }
             })
             .collect::<Vec<_>>();
         servers.sort_by(|lhs, rhs| lhs.server_id.cmp(&rhs.server_id));
@@ -477,6 +527,28 @@ impl From<ServerHealthSnapshot> for AppServerHealth {
             ServerHealthSnapshot::Connected => Self::Connected,
             ServerHealthSnapshot::Unresponsive => Self::Unresponsive,
             ServerHealthSnapshot::Unknown(_) => Self::Unknown,
+        }
+    }
+}
+
+impl From<ServerHealthSnapshot> for AppServerTransportState {
+    fn from(value: ServerHealthSnapshot) -> Self {
+        match value {
+            ServerHealthSnapshot::Disconnected => Self::Disconnected,
+            ServerHealthSnapshot::Connecting => Self::Connecting,
+            ServerHealthSnapshot::Connected => Self::Connected,
+            ServerHealthSnapshot::Unresponsive => Self::Unresponsive,
+            ServerHealthSnapshot::Unknown(_) => Self::Unknown,
+        }
+    }
+}
+
+impl From<ServerIpcStateSnapshot> for AppServerIpcState {
+    fn from(value: ServerIpcStateSnapshot) -> Self {
+        match value {
+            ServerIpcStateSnapshot::Unsupported => Self::Unsupported,
+            ServerIpcStateSnapshot::Disconnected => Self::Disconnected,
+            ServerIpcStateSnapshot::Ready => Self::Ready,
         }
     }
 }
