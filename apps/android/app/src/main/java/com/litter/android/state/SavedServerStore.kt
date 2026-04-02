@@ -280,4 +280,29 @@ object SavedServerStore {
             save(context, renamed)
         }
     }
+
+    fun updateWakeMac(context: Context, serverId: String, host: String, wakeMac: String?) {
+        val normalizedWakeMac = SavedServer.normalizeWakeMac(wakeMac) ?: return
+        val existing = load(context)
+        val updated = existing.map { server ->
+            if (server.id == serverId || normalizedHostKey(server.hostname) == normalizedHostKey(host)) {
+                if (server.wakeMAC != normalizedWakeMac) server.copy(wakeMAC = normalizedWakeMac) else server
+            } else {
+                server
+            }
+        }
+        if (updated != existing) {
+            save(context, updated)
+        }
+    }
+
+    private fun normalizedHostKey(host: String): String {
+        val trimmed = host.trim().trimStart('[').trimEnd(']').replace("%25", "%")
+        val withoutScope = if (!trimmed.contains(":")) {
+            trimmed.substringBefore('%')
+        } else {
+            trimmed
+        }
+        return withoutScope.lowercase()
+    }
 }

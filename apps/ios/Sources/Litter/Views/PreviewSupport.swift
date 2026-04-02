@@ -347,6 +347,7 @@ enum LitterPreviewData {
             displayName: sampleServer.name,
             host: sampleServer.hostname,
             port: UInt16(sampleServer.port ?? 8390),
+            wakeMac: sampleServer.wakeMAC,
             isLocal: false,
             supportsIpc: true,
             hasIpc: true,

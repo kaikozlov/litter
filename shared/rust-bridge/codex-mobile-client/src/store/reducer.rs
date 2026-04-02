@@ -96,6 +96,7 @@ impl AppStoreReducer {
         {
             let mut snapshot = self.snapshot.write().expect("app store lock poisoned");
             let (
+                existing_wake_mac,
                 existing_account,
                 requires_openai_auth,
                 existing_rate_limits,
@@ -105,6 +106,7 @@ impl AppStoreReducer {
                 existing_connection_progress,
             ) = if let Some(existing) = snapshot.servers.get(&config.server_id) {
                 (
+                    existing.wake_mac.clone(),
                     existing.account.clone(),
                     existing.requires_openai_auth,
                     existing.rate_limits.clone(),
@@ -114,7 +116,7 @@ impl AppStoreReducer {
                     existing.connection_progress.clone(),
                 )
             } else {
-                (None, false, None, None, false, false, None)
+                (None, None, false, None, None, false, false, None)
             };
             snapshot.servers.insert(
                 config.server_id.clone(),
@@ -123,6 +125,7 @@ impl AppStoreReducer {
                     display_name: config.display_name.clone(),
                     host: config.host.clone(),
                     port: config.port,
+                    wake_mac: existing_wake_mac,
                     is_local: config.is_local,
                     supports_ipc: existing_supports_ipc || supports_ipc,
                     has_ipc: existing_has_ipc,
@@ -816,6 +819,18 @@ impl AppStoreReducer {
             let mut snapshot = self.snapshot.write().expect("app store lock poisoned");
             if let Some(server) = snapshot.servers.get_mut(server_id) {
                 server.connection_progress = connection_progress;
+            }
+        }
+        self.emit(AppStoreUpdateRecord::ServerChanged {
+            server_id: server_id.to_string(),
+        });
+    }
+
+    pub fn update_server_wake_mac(&self, server_id: &str, wake_mac: Option<String>) {
+        {
+            let mut snapshot = self.snapshot.write().expect("app store lock poisoned");
+            if let Some(server) = snapshot.servers.get_mut(server_id) {
+                server.wake_mac = wake_mac;
             }
         }
         self.emit(AppStoreUpdateRecord::ServerChanged {
@@ -1992,6 +2007,18 @@ mod tests {
         updates
     }
 
+    fn make_server_config(server_id: &str) -> ServerConfig {
+        ServerConfig {
+            server_id: server_id.to_string(),
+            display_name: format!("Server {server_id}"),
+            host: "example.local".to_string(),
+            port: 22,
+            websocket_url: None,
+            is_local: false,
+            tls: false,
+        }
+    }
+
     #[test]
     fn sync_thread_list_preserves_active_missing_thread() {
         let reducer = AppStoreReducer::new();
@@ -2019,6 +2046,20 @@ mod tests {
             update,
             AppStoreUpdateRecord::ThreadUpserted { thread, .. } if thread.key.thread_id == "other"
         )));
+    }
+
+    #[test]
+    fn update_server_wake_mac_persists_across_upsert() {
+        let reducer = AppStoreReducer::new();
+        let config = make_server_config("srv");
+
+        reducer.upsert_server(&config, ServerHealthSnapshot::Connecting, true);
+        reducer.update_server_wake_mac("srv", Some("aa:bb:cc:dd:ee:ff".to_string()));
+        reducer.upsert_server(&config, ServerHealthSnapshot::Connected, true);
+
+        let snapshot = reducer.snapshot();
+        let server = snapshot.servers.get("srv").expect("server snapshot");
+        assert_eq!(server.wake_mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
     }
 
     #[test]

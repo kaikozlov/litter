@@ -314,8 +314,19 @@ final class AppModel {
         let mergedSnapshot = snapshot.map(mergingCachedThreadSnapshots)
         self.snapshot = mergedSnapshot
         if let mergedSnapshot {
+            persistWakeMACs(from: mergedSnapshot.servers)
             mergedSnapshot.threads.forEach(cacheThreadSnapshot)
             lastError = nil
+        }
+    }
+
+    private func persistWakeMACs(from servers: [AppServerSnapshot]) {
+        for server in servers {
+            SavedServerStore.updateWakeMAC(
+                serverId: server.serverId,
+                host: server.host,
+                wakeMAC: server.wakeMac
+            )
         }
     }
 

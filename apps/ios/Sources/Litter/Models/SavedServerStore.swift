@@ -75,11 +75,56 @@ enum SavedServerStore {
         save(saved)
     }
 
+    static func updateWakeMAC(serverId: String, host: String, wakeMAC: String?) {
+        guard let normalizedWakeMAC = DiscoveredServer.normalizeWakeMAC(wakeMAC) else { return }
+
+        var saved = load()
+        guard let index = saved.firstIndex(where: { entry in
+            entry.id == serverId || normalizedHost(entry.hostname) == normalizedHost(host)
+        }) else {
+            return
+        }
+
+        let existing = saved[index]
+        guard existing.wakeMAC != normalizedWakeMAC else { return }
+
+        saved[index] = SavedServer(
+            id: existing.id,
+            name: existing.name,
+            hostname: existing.hostname,
+            port: existing.port,
+            codexPorts: existing.codexPorts,
+            sshPort: existing.sshPort,
+            source: existing.source,
+            hasCodexServer: existing.hasCodexServer,
+            wakeMAC: normalizedWakeMAC,
+            preferredConnectionMode: existing.preferredConnectionMode,
+            preferredCodexPort: existing.preferredCodexPort,
+            sshPortForwardingEnabled: existing.sshPortForwardingEnabled,
+            websocketURL: existing.websocketURL,
+            rememberedByUser: existing.rememberedByUser
+        )
+        save(saved)
+    }
+
     private static func existingMatch(for server: DiscoveredServer, in saved: [SavedServer]) -> SavedServer? {
         saved.first { matches(server, $0) }
     }
 
     private static func matches(_ server: DiscoveredServer, _ savedServer: SavedServer) -> Bool {
         savedServer.id == server.id || savedServer.toDiscoveredServer().deduplicationKey == server.deduplicationKey
+    }
+
+    private static func normalizedHost(_ host: String) -> String {
+        var normalized = host
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+            .replacingOccurrences(of: "%25", with: "%")
+
+        if !normalized.contains(":"), let scopeIndex = normalized.firstIndex(of: "%") {
+            normalized = String(normalized[..<scopeIndex])
+        }
+
+        return normalized.lowercased()
     }
 }

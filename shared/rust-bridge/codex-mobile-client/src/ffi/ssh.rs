@@ -13,6 +13,17 @@ use std::sync::atomic::Ordering;
 use tokio::sync::oneshot;
 use tracing::{debug, info, trace, warn};
 
+const WAKE_MAC_SCRIPT: &str = r#"iface="$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
+if [ -z "$iface" ]; then iface="en0"; fi
+mac="$(ifconfig "$iface" 2>/dev/null | awk '/ether /{print $2; exit}')"
+if [ -z "$mac" ]; then
+  mac="$(ifconfig en0 2>/dev/null | awk '/ether /{print $2; exit}')"
+fi
+if [ -z "$mac" ]; then
+  mac="$(ifconfig 2>/dev/null | awk '/ether /{print $2; exit}')"
+fi
+printf '%s' "$mac""#;
+
 #[derive(Clone)]
 pub(crate) struct ManagedSshSession {
     pub(crate) client: Arc<SshClient>,
@@ -456,28 +467,22 @@ impl SshBridge {
     }
 
     pub(crate) async fn ssh_read_wake_mac(&self, session: Arc<SshClient>) -> Option<String> {
-        const WAKE_MAC_SCRIPT: &str = r#"iface="$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
-if [ -z "$iface" ]; then iface="en0"; fi
-mac="$(ifconfig "$iface" 2>/dev/null | awk '/ether /{print $2; exit}')"
-if [ -z "$mac" ]; then
-  mac="$(ifconfig en0 2>/dev/null | awk '/ether /{print $2; exit}')"
-fi
-if [ -z "$mac" ]; then
-  mac="$(ifconfig 2>/dev/null | awk '/ether /{print $2; exit}')"
-fi
-printf '%s' "$mac""#;
         let rt = Arc::clone(&self.rt);
         let result = tokio::task::spawn_blocking(move || {
-            rt.block_on(async move { session.exec(WAKE_MAC_SCRIPT).await.map_err(map_ssh_error) })
+            rt.block_on(async move { read_wake_mac(session).await })
         })
         .await
-        .ok()?
         .ok()?;
-        if result.exit_code != 0 {
-            return None;
-        }
-        normalize_wake_mac(&result.stdout)
+        result
     }
+}
+
+async fn read_wake_mac(session: Arc<SshClient>) -> Option<String> {
+    let result = session.exec(WAKE_MAC_SCRIPT).await.map_err(map_ssh_error).ok()?;
+    if result.exit_code != 0 {
+        return None;
+    }
+    normalize_wake_mac(&result.stdout)
 }
 
 async fn run_guided_ssh_connect(
@@ -515,6 +520,18 @@ async fn run_guided_ssh_connect(
         credentials.host.as_str(),
         credentials.port
     );
+    let wake_mac_server_id = server_id.clone();
+    let wake_mac_store = Arc::clone(&mobile_client.app_store);
+    let wake_mac_client = Arc::clone(&ssh_client);
+    tokio::spawn(async move {
+        if let Some(wake_mac) = read_wake_mac(wake_mac_client).await {
+            info!(
+                "guided ssh connect discovered wake mac server_id={} wake_mac={}",
+                wake_mac_server_id, wake_mac
+            );
+            wake_mac_store.update_server_wake_mac(&wake_mac_server_id, Some(wake_mac));
+        }
+    });
     progress.update_step(
         AppConnectionStepKind::ConnectingToSsh,
         AppConnectionStepState::Completed,

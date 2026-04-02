@@ -131,6 +131,7 @@ pub struct ServerSnapshot {
     pub display_name: String,
     pub host: String,
     pub port: u16,
+    pub wake_mac: Option<String>,
     pub is_local: bool,
     pub supports_ipc: bool,
     pub has_ipc: bool,

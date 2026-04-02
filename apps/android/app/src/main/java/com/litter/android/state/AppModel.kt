@@ -188,8 +188,20 @@ class AppModel private constructor(context: android.content.Context) {
             ?.let(::mergeCachedThreadSnapshots)
         _snapshot.value = merged
         if (merged != null) {
+            persistWakeMacs(merged)
             merged.threads.forEach(::cacheThreadSnapshot)
             _lastError.value = null
+        }
+    }
+
+    private fun persistWakeMacs(snapshot: AppSnapshotRecord) {
+        snapshot.servers.forEach { server ->
+            SavedServerStore.updateWakeMac(
+                context = appContext,
+                serverId = server.serverId,
+                host = server.host,
+                wakeMac = server.wakeMac,
+            )
         }
     }
 
