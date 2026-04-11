@@ -397,6 +397,7 @@ pub trait ProviderTransport: Send + Sync + 'static {
 }
 
 pub mod codex;
+pub mod error_handling;
 pub mod mapping;
 
 // ── Factory functions ──────────────────────────────────────────────────────

@@ -125,7 +125,30 @@ Wraps existing `AppServerClient` behind `ProviderTransport`. Creates an internal
 - Future milestones will add factory methods for Pi, Droid, ACP providers
 
 ## Test Coverage
-- 468 total tests pass (447 pre-existing + 21 new)
+- 499 total tests pass (468 pre-existing + 31 new error handling tests)
 - New tests in `provider::codex::tests` (12 tests): mock provider, factory functions, object safety
 - New tests in `session::connection::tests` (5 tests): from_provider lifecycle, request, events, disconnect, notify
 - New tests in `mobile_client::tests` (4 tests): connect_with_provider, session reuse, unsupported agent type rejection
+- New tests in `provider::error_handling::tests` (31 tests): comprehensive error handling coverage
+
+## Provider Error Handling (provider/error_handling.rs)
+
+### ErrorMockProvider
+- Configurable mock provider for testing all error handling scenarios
+- Uses `Arc<MockProviderState>` for shared state access behind `Box<dyn ProviderTransport>`
+- Supports error injection: connect failure, handshake timeout, streaming state, config change rejection
+- Config changes (model, reasoning_effort) via `thread/update` or `config/change`:
+  - Rejected during active streaming with `RpcError::Server { code: -32600 }`
+  - Succeed when idle, applied to internal state
+  - Server-side rejection (queued error response) prevents state mutation
+
+### Error Handling Contract
+- **Mid-stream disconnect**: Emits `ProviderEvent::Disconnected`, no panic (VAL-PROV-012)
+- **Reconnection**: `connect()` after `disconnect()` succeeds, provider reusable (VAL-PROV-013)
+- **Connect failure**: Returns `TransportError::ConnectionFailed`, provider reusable (VAL-PROV-003)
+- **Disconnect idempotent**: Multiple `disconnect()` calls are no-ops (VAL-PROV-004)
+- **Post-disconnect**: `send_request`/`send_notification`/`list_sessions` return `TransportError::Disconnected`
+- **Handshake timeout**: Returns `TransportError::Timeout`, provider in clean state for retry (VAL-PROV-018)
+- **Cancel mid-stream**: Streaming state cleared, next prompt succeeds (VAL-PROV-016)
+- **Config change idle**: Model and reasoning_effort changes succeed (VAL-PROV-019)
+- **Config change streaming**: Returns error, stream not disrupted, previous config preserved (VAL-PROV-019)
