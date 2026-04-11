@@ -1762,4 +1762,171 @@ mod mobile_client_tests {
         let error = IpcError::Request(RequestError::ClientDisconnected);
         assert!(ipc_command_error_clears_server_ipc_state(&error));
     }
+
+    // ── Provider-aware connect tests ──────────────────────────────────
+
+    use crate::provider::{ProviderConfig, ProviderEvent, ProviderTransport, SessionInfo};
+
+    /// Minimal mock provider for MobileClient tests.
+    struct TestProvider {
+        connected: bool,
+        events: tokio::sync::broadcast::Sender<ProviderEvent>,
+    }
+
+    impl TestProvider {
+        fn new() -> Self {
+            let (event_tx, _) = tokio::sync::broadcast::channel(256);
+            Self {
+                connected: false,
+                events: event_tx,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ProviderTransport for TestProvider {
+        async fn connect(&mut self, _config: &ProviderConfig) -> Result<(), TransportError> {
+            self.connected = true;
+            Ok(())
+        }
+
+        async fn disconnect(&mut self) {
+            self.connected = false;
+        }
+
+        async fn send_request(
+            &mut self,
+            method: &str,
+            _params: serde_json::Value,
+        ) -> Result<serde_json::Value, RpcError> {
+            if !self.connected {
+                return Err(RpcError::Transport(TransportError::Disconnected));
+            }
+            Ok(serde_json::json!({"ok": true, "method": method}))
+        }
+
+        async fn send_notification(
+            &mut self,
+            _method: &str,
+            _params: serde_json::Value,
+        ) -> Result<(), RpcError> {
+            Ok(())
+        }
+
+        fn next_event(&self) -> Option<ProviderEvent> {
+            self.events.subscribe().try_recv().ok()
+        }
+
+        fn event_receiver(&self) -> tokio::sync::broadcast::Receiver<ProviderEvent> {
+            self.events.subscribe()
+        }
+
+        async fn list_sessions(&mut self) -> Result<Vec<SessionInfo>, RpcError> {
+            Ok(vec![])
+        }
+
+        fn is_connected(&self) -> bool {
+            self.connected
+        }
+    }
+
+    #[tokio::test]
+    async fn mobile_client_connect_with_provider_succeeds() {
+        let client = MobileClient::new();
+        let config = make_server_config("provider-test");
+
+        let server_id = client
+            .connect_with_provider(config, Box::new(TestProvider::new()))
+            .await
+            .expect("connect_with_provider should succeed");
+
+        assert_eq!(server_id, "provider-test");
+
+        // Verify server is in the store.
+        let snapshot = client.app_store.snapshot();
+        assert!(snapshot.servers.contains_key("provider-test"));
+    }
+
+    #[tokio::test]
+    async fn mobile_client_connect_with_provider_reuses_existing() {
+        let client = MobileClient::new();
+        let config = make_server_config("reuse-test");
+
+        let id1 = client
+            .connect_with_provider(config.clone(), Box::new(TestProvider::new()))
+            .await
+            .expect("first connect should succeed");
+
+        // Second connect should reuse the existing session.
+        let id2 = client
+            .connect_with_provider(config, Box::new(TestProvider::new()))
+            .await
+            .expect("second connect should succeed");
+
+        assert_eq!(id1, id2);
+    }
+
+    #[tokio::test]
+    async fn mobile_client_rejects_unsupported_agent_type() {
+        use crate::provider::{AgentType, create_provider_for_agent_type};
+
+        // PiAcp is not yet supported.
+        let result = create_provider_for_agent_type(AgentType::PiAcp);
+        assert!(result.is_err());
+
+        let err = result.err().unwrap();
+        match err {
+            TransportError::ConnectionFailed(msg) => {
+                assert!(
+                    msg.contains("unsupported agent type"),
+                    "expected 'unsupported agent type', got: {msg}"
+                );
+            }
+            other => panic!("expected ConnectionFailed, got: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn mobile_client_dispatches_codex_provider() {
+        let client = MobileClient::new();
+        let config = make_server_config("codex-dispatch");
+
+        // Connect with a mock provider that simulates Codex behavior.
+        let server_id = client
+            .connect_with_provider(config, Box::new(TestProvider::new()))
+            .await
+            .expect("connect should succeed");
+
+        assert_eq!(server_id, "codex-dispatch");
+
+        // Verify we can disconnect.
+        client.disconnect_server("codex-dispatch");
+
+        let snapshot = client.app_store.snapshot();
+        assert!(!snapshot.servers.contains_key("codex-dispatch"));
+    }
+
+    #[test]
+    fn agent_type_unsupported_rejection_message_clear() {
+        use crate::provider::{AgentType, create_provider_for_agent_type};
+
+        for agent_type in [
+            AgentType::PiAcp,
+            AgentType::PiNative,
+            AgentType::DroidAcp,
+            AgentType::DroidNative,
+            AgentType::GenericAcp,
+        ] {
+            let result = create_provider_for_agent_type(agent_type);
+            assert!(result.is_err(), "expected error for {agent_type:?}");
+            let msg = match result.err().unwrap() {
+                TransportError::ConnectionFailed(msg) => msg,
+                other => panic!("expected ConnectionFailed for {agent_type:?}, got: {other}"),
+            };
+            assert!(
+                msg.contains("unsupported agent type"),
+                "error for {agent_type:?} should mention 'unsupported agent type': {msg}"
+            );
+        }
+    }
 }

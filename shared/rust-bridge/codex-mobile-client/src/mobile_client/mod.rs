@@ -571,6 +571,50 @@ impl MobileClient {
         Ok(server_id)
     }
 
+    /// Connect to a server using a provider transport.
+    ///
+    /// This is the provider-aware connect method. It creates a `ServerSession`
+    /// backed by the given `ProviderTransport` and wires up the event reader
+    /// and health monitor.
+    ///
+    /// Returns the `server_id` from the config on success.
+    pub async fn connect_with_provider(
+        &self,
+        config: ServerConfig,
+        provider: Box<dyn crate::provider::ProviderTransport>,
+    ) -> Result<String, TransportError> {
+        let server_id = config.server_id.clone();
+        if self.existing_active_session(server_id.as_str()).is_some() {
+            info!("MobileClient: reusing existing provider session {server_id}");
+            return Ok(server_id);
+        }
+        self.replace_existing_session(server_id.as_str()).await;
+
+        let session = Arc::new(
+            ServerSession::from_provider(config, provider)
+                .await
+                .map_err(|e| {
+                    warn!("MobileClient: provider session connect failed for {server_id}: {e}");
+                    e
+                })?,
+        );
+
+        self.app_store.upsert_server(
+            session.config(),
+            ServerHealthSnapshot::Connected,
+            server_supports_ipc(&session),
+        );
+
+        self.spawn_event_reader(server_id.clone(), Arc::clone(&session));
+        self.spawn_health_reader(server_id.clone(), session.health());
+
+        self.sessions_write()
+            .insert(server_id.clone(), Arc::clone(&session));
+
+        info!("MobileClient: connected provider-backed server {server_id}");
+        Ok(server_id)
+    }
+
     pub async fn connect_remote_over_ssh(
         &self,
         config: ServerConfig,

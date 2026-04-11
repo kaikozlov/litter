@@ -396,7 +396,43 @@ pub trait ProviderTransport: Send + Sync + 'static {
     fn is_connected(&self) -> bool;
 }
 
+pub mod codex;
 pub mod mapping;
+
+// ── Factory functions ──────────────────────────────────────────────────────
+
+/// Create a provider for the given agent type.
+///
+/// For Milestone 1, only `AgentType::Codex` is supported via
+/// `create_codex_provider()`. Other agent types return an error with a clear
+/// message indicating the unsupported agent type.
+pub fn create_provider_for_agent_type(
+    agent_type: AgentType,
+) -> Result<Box<dyn ProviderTransport>, TransportError> {
+    match agent_type {
+        AgentType::Codex => {
+            // CodexProvider requires an AppServerClient at construction time,
+            // so we can't create a blank one here. The caller should use
+            // CodexProvider::new() directly with an established client.
+            Err(TransportError::ConnectionFailed(
+                "Codex provider requires an existing AppServerClient; use CodexProvider::new()".to_string(),
+            ))
+        }
+        other => Err(TransportError::ConnectionFailed(format!(
+            "unsupported agent type: {other}"
+        ))),
+    }
+}
+
+/// Create a `CodexProvider` from an existing `AppServerClient`.
+///
+/// This is the primary factory for Codex connections. The client should
+/// already be connected (in-process or remote).
+pub fn create_codex_provider(
+    client: codex_app_server_client::AppServerClient,
+) -> Box<dyn ProviderTransport> {
+    Box::new(codex::CodexProvider::new(client))
+}
 
 // ── Tests ──────────────────────────────────────────────────────────────────
 
