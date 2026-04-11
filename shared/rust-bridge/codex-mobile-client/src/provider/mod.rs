@@ -396,6 +396,8 @@ pub trait ProviderTransport: Send + Sync + 'static {
     fn is_connected(&self) -> bool;
 }
 
+pub mod mapping;
+
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
