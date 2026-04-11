@@ -47,6 +47,17 @@ pub struct DiscoveredServer {
     #[serde(skip)]
     pub last_seen: Instant,
     pub reachable: bool,
+    /// Detected agent types available on this server.
+    ///
+    /// Defaults to `[AgentType::Codex]` for backward compatibility when
+    /// no agent type probing has been performed yet.
+    #[serde(default = "default_agent_types")]
+    pub agent_types: Vec<crate::provider::AgentType>,
+}
+
+/// Default agent types for backward compatibility.
+fn default_agent_types() -> Vec<crate::provider::AgentType> {
+    vec![crate::provider::AgentType::Codex]
 }
 
 /// A resolved mDNS/Bonjour service seed supplied by the platform layer.
@@ -509,6 +520,7 @@ impl DiscoveryService {
             metadata: HashMap::new(),
             last_seen: Instant::now(),
             reachable: false, // will be verified on next scan
+            agent_types: default_agent_types(),
         };
 
         self.manual_servers.lock().unwrap().push((host, port));
@@ -789,6 +801,7 @@ impl DiscoveryService {
                 metadata,
                 last_seen: Instant::now(),
                 reachable,
+                agent_types: default_agent_types(),
             });
         }
 
@@ -862,6 +875,7 @@ impl DiscoveryService {
                     metadata: HashMap::new(),
                     last_seen: Instant::now(),
                     reachable,
+                    agent_types: default_agent_types(),
                 }
             }));
         }
@@ -951,6 +965,7 @@ async fn server_from_reachable_ports(
         metadata,
         last_seen: Instant::now(),
         reachable: true,
+        agent_types: default_agent_types(),
     }
 }
 
@@ -1507,6 +1522,7 @@ mod tests {
             metadata: HashMap::new(),
             last_seen: Instant::now(),
             reachable: true,
+            agent_types: default_agent_types(),
         };
         let cloned = server.clone();
         assert_eq!(cloned.id, server.id);
@@ -1528,6 +1544,7 @@ mod tests {
             metadata: HashMap::new(),
             last_seen: Instant::now(),
             reachable: true,
+            agent_types: default_agent_types(),
         };
         let newer = DiscoveredServer {
             id: "server-1".to_string(),
@@ -1541,6 +1558,7 @@ mod tests {
             metadata: HashMap::new(),
             last_seen: Instant::now(),
             reachable: true,
+            agent_types: default_agent_types(),
         };
 
         let reconciled = reconcile_discovered_servers(vec![older, newer]);
@@ -1595,5 +1613,102 @@ mod tests {
             assert!(!srv.host.is_empty());
             assert!(srv.port > 0);
         }
+    }
+
+    // ── Agent types ────────────────────────────────────────────────────
+
+    #[test]
+    fn discovered_server_default_agent_type_is_codex() {
+        let server = DiscoveredServer {
+            id: "test-1".to_string(),
+            display_name: "Test".to_string(),
+            host: "10.0.0.1".to_string(),
+            port: 8390,
+            codex_port: Some(8390),
+            codex_ports: vec![8390],
+            ssh_port: None,
+            source: DiscoverySource::LanProbe,
+            metadata: HashMap::new(),
+            last_seen: Instant::now(),
+            reachable: true,
+            agent_types: default_agent_types(),
+        };
+        assert_eq!(server.agent_types, vec![crate::provider::AgentType::Codex]);
+    }
+
+    #[test]
+    fn discovered_server_multi_agent_types() {
+        let server = DiscoveredServer {
+            id: "test-1".to_string(),
+            display_name: "Test".to_string(),
+            host: "10.0.0.1".to_string(),
+            port: 8390,
+            codex_port: Some(8390),
+            codex_ports: vec![8390],
+            ssh_port: Some(22),
+            source: DiscoverySource::LanProbe,
+            metadata: HashMap::new(),
+            last_seen: Instant::now(),
+            reachable: true,
+            agent_types: vec![
+                crate::provider::AgentType::Codex,
+                crate::provider::AgentType::PiAcp,
+            ],
+        };
+        assert_eq!(server.agent_types.len(), 2);
+        assert_eq!(server.agent_types[0], crate::provider::AgentType::Codex);
+        assert_eq!(server.agent_types[1], crate::provider::AgentType::PiAcp);
+    }
+
+    #[test]
+    fn app_discovered_server_agent_types_preserved() {
+        use crate::discovery_uniffi::AppDiscoveredServer;
+        use crate::provider::AgentType;
+
+        let server = DiscoveredServer {
+            id: "test-1".to_string(),
+            display_name: "Test".to_string(),
+            host: "10.0.0.1".to_string(),
+            port: 8390,
+            codex_port: Some(8390),
+            codex_ports: vec![8390],
+            ssh_port: None,
+            source: DiscoverySource::LanProbe,
+            metadata: HashMap::new(),
+            last_seen: Instant::now(),
+            reachable: true,
+            agent_types: vec![AgentType::Codex, AgentType::DroidNative],
+        };
+
+        let app_server: AppDiscoveredServer = server.into();
+        assert_eq!(app_server.agent_types.len(), 2);
+        assert_eq!(app_server.agent_types[0], AgentType::Codex);
+        assert_eq!(app_server.agent_types[1], AgentType::DroidNative);
+    }
+
+    #[test]
+    fn app_discovered_server_roundtrip_preserves_agent_types() {
+        use crate::discovery_uniffi::AppDiscoveredServer;
+        use crate::provider::AgentType;
+
+        let app = AppDiscoveredServer {
+            id: "test-2".to_string(),
+            display_name: "Test".to_string(),
+            host: "10.0.0.2".to_string(),
+            port: 22,
+            codex_port: None,
+            codex_ports: vec![],
+            ssh_port: Some(22),
+            source: crate::discovery_uniffi::AppDiscoverySource::Manual,
+            reachable: true,
+            os: None,
+            ssh_banner: None,
+            agent_types: vec![AgentType::PiNative, AgentType::PiAcp],
+        };
+
+        let server: DiscoveredServer = app.into();
+        assert_eq!(server.agent_types.len(), 2);
+        assert_eq!(server.agent_types[0], AgentType::PiNative);
+        assert_eq!(server.agent_types[1], AgentType::PiAcp);
     }
 }

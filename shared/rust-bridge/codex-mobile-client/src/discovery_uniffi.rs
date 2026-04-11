@@ -2,6 +2,7 @@ use crate::discovery::{
     DiscoveredServer, DiscoverySource, MdnsSeed, ProgressiveDiscoveryUpdate,
     ProgressiveDiscoveryUpdateKind,
 };
+use crate::provider::AgentType;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -74,6 +75,10 @@ pub struct AppDiscoveredServer {
     pub reachable: bool,
     pub os: Option<String>,
     pub ssh_banner: Option<String>,
+    /// Detected agent types available on this server.
+    ///
+    /// Defaults to `[AgentType::Codex]` when no agent probing has been done.
+    pub agent_types: Vec<AgentType>,
 }
 
 impl From<DiscoveredServer> for AppDiscoveredServer {
@@ -92,6 +97,7 @@ impl From<DiscoveredServer> for AppDiscoveredServer {
             reachable: value.reachable,
             os,
             ssh_banner,
+            agent_types: value.agent_types,
         }
     }
 }
@@ -117,6 +123,7 @@ impl From<AppDiscoveredServer> for DiscoveredServer {
             metadata,
             last_seen: Instant::now(),
             reachable: value.reachable,
+            agent_types: value.agent_types,
         }
     }
 }

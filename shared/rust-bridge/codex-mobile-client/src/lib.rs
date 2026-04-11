@@ -20,6 +20,7 @@ pub mod markdown_blocks;
 mod mobile_client;
 pub mod parser;
 pub mod permissions;
+pub mod provider;
 pub mod reconnect;
 pub mod session;
 pub mod ssh;
