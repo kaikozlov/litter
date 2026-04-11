@@ -65,7 +65,8 @@ node_modules/
 .envrc
 
 # Factory/Droid
-.factory/
+# .factory/ is committed — contains mission infrastructure (skills, services, library)
+.claude/
 .claude/
 shared/third_party/codex/
 .wrangler/

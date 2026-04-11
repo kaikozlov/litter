@@ -1,0 +1,15 @@
+commands:
+  install: cargo build
+  typecheck: cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml
+  build: cargo build --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml
+  test: cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml
+  lint: cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml -- -D warnings
+  bindings: ./shared/rust-bridge/generate-bindings.sh
+
+ssh:
+  gvps:
+    host: 100.82.102.84
+    port: 5132
+    user: ubuntu
+    alias: gvps
+    note: Pi 0.66.1 + Droid 0.99.0 installed via bun (PATH includes ~/.bun/bin)
