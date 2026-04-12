@@ -1,0 +1,51 @@
+{
+  "featureId": "codex-provider-refactor",
+  "reviewedAt": "2026-04-11T23:15:00Z",
+  "commitId": "178a8df",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation correctly creates CodexProvider wrapping AppServerClient behind the ProviderTransport trait, adds ServerSession::from_provider() for provider-backed sessions, and adds MobileClient::connect_with_provider() for provider-aware routing. The existing connect_local/connect_remote/connect_remote_over_ssh paths are completely untouched — zero regression. However, there are two non-blocking issues: (1) connect_with_provider is missing spawn_post_connect_warmup which all other connect methods call, and (2) the $resolve/$reject fallback in from_provider will produce RpcError::Deserialization instead of being silently treated as no-op when the underlying provider is a CodexProvider.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/mobile_client/mod.rs",
+        "line": 612,
+        "severity": "non_blocking",
+        "description": "connect_with_provider is missing spawn_post_connect_warmup(server_id.clone(), Arc::clone(&session)) after inserting the session. All other connect methods (connect_local line 540, connect_remote line 568, connect_remote_over_ssh line 838) call this. Missing it means provider-backed sessions won't get thread list prefetching or other post-connect warmup tasks."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/session/connection.rs",
+        "line": 1155,
+        "severity": "non_blocking",
+        "description": "SessionCommand::Resolve and SessionCommand::Reject handlers use send_request(\"$resolve\"/$reject\", ...) as a generic passthrough. When the underlying provider is CodexProvider, the $resolve method fails to deserialize as ClientRequest, producing RpcError::Deserialization. The fallback handler only catches RpcError::Transport(_) — it does not catch RpcError::Deserialization. This means resolve/reject through a provider-backed session will return an error instead of being a no-op. The issue is mitigated because (a) CodexProvider has dedicated resolve_server_request/reject_server_request methods using ProviderCommand variants, and (b) the current from_provider session goes through Box<dyn ProviderTransport> which can't access those methods. For now, server request resolution through the provider path would fail with a deserialization error rather than silently succeeding. This will need to be addressed before providers need to handle approval flows."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/session/connection.rs",
+        "line": 1564,
+        "severity": "non_blocking",
+        "description": "provider_event_to_server_event maps almost all ProviderEvent variants to ServerEvent::LegacyNotification, which is the correct backward-compatible approach. However, ApprovalRequested and UserInputRequested events are currently mapped to LegacyNotification rather than ServerEvent::Request — meaning the existing approval resolution pipeline (which expects typed ServerRequest) won't work through the provider path. The doc comment says 'they are emitted as ServerEvent::Request with reconstructed upstream request types when possible' but the implementation falls through to the catch-all _ arm. This is non-blocking because provider-backed sessions aren't yet used for approval flows, but will need to be addressed when they are."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/session/connection.rs",
+        "line": 1062,
+        "severity": "non_blocking",
+        "description": "The event task spawned in from_provider acquires the provider lock to call event_receiver(), then releases it. The event_receiver() returns a broadcast::Receiver that borrows the provider's internal Sender. If the provider is dropped or its event channel is closed, this receiver continues to work independently since broadcast::Receiver is 'static. This is correct but worth noting — the lock is held only briefly during subscription."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The architecture.md library file lists provider module paths like src/provider/codex/, src/provider/acp/, etc. but the actual implementation uses a flat file structure (src/provider/codex.rs, not src/provider/codex/mod.rs). The architecture.md should be updated to match the actual file structure to avoid confusion for future workers.",
+      "evidence": "architecture.md lists 'src/provider/codex/' as a directory module, but the actual file is src/provider/codex.rs (flat module). Same for other provider modules listed."
+    },
+    {
+      "area": "conventions",
+      "observation": "The provider event-to-server-event mapping in connection.rs uses a catch-all _ arm for ProviderEvent variants, routing them to ServerEvent::LegacyNotification. The AGENTS.md doesn't document this as the expected pattern for new providers. Future workers implementing new providers should know that ProviderEvent variants are automatically routed as legacy notifications without needing special handling in connection.rs.",
+      "evidence": "connection.rs:1564 — provider_event_to_server_event uses a _ catch-all arm. The mission AGENTS.md mentions 'ProviderEvent → UiEvent pipeline' but doesn't mention the intermediate ServerEvent::LegacyNotification step."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS with non-blocking issues. CodexProvider correctly wraps AppServerClient behind the ProviderTransport trait with a worker task multiplexing commands and events. ServerSession::from_provider creates provider-backed sessions that integrate with the existing event reader pipeline via ServerEvent::LegacyNotification. MobileClient::connect_with_provider provides provider-aware routing with proper session reuse and unsupported agent type rejection. All 468 tests pass (447 existing + 21 new). The existing Codex flow (connect_local, connect_remote, connect_remote_over_ssh) is completely untouched.\n\nNon-blocking issues: (1) connect_with_provider missing spawn_post_connect_warmup, (2) $resolve/$reject fallback produces Deserialization error instead of no-op for CodexProvider-backed sessions, (3) ApprovalRequested/UserInputRequested mapped as LegacyNotification rather than ServerEvent::Request. None of these affect current functionality since provider-backed sessions aren't yet used for approval flows or warmup-dependent features."
+}

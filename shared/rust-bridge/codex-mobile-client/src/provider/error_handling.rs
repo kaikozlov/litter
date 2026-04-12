@@ -17,7 +17,6 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 use serde_json::Value as JsonValue;
 use tokio::sync::{broadcast, Mutex};
@@ -84,6 +83,12 @@ pub struct ErrorMockProvider {
     state: Arc<MockProviderState>,
 }
 
+impl Default for ErrorMockProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ErrorMockProvider {
     pub fn new() -> Self {
         Self {
@@ -92,7 +97,8 @@ impl ErrorMockProvider {
     }
 
     /// Get a handle to the shared state (for testing even when behind Box<dyn>).
-    pub fn state(&self) -> Arc<MockProviderState> {
+    #[allow(dead_code)]
+    pub(crate) fn state(&self) -> Arc<MockProviderState> {
         Arc::clone(&self.state)
     }
 
@@ -303,6 +309,7 @@ mod tests {
     use super::*;
     use crate::provider::{ProviderConfig, ProviderEvent, ProviderTransport};
     use crate::transport::{RpcError, TransportError};
+    use std::time::Duration;
 
     // ═══════════════════════════════════════════════════════════════════
     // VAL-PROV-012: Mid-stream disconnect yields Disconnected event

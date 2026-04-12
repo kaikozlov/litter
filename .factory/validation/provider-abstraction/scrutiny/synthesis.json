@@ -1,0 +1,97 @@
+{
+  "milestone": "provider-abstraction",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib",
+      "exitCode": 0,
+      "observation": "499 tests passed, 0 failed, 3 ignored. Tests ran with --lib flag to avoid pre-existing cdylib/V8 linking issue on Linux host."
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml",
+      "exitCode": 0,
+      "observation": "Clean compilation with no errors."
+    },
+    "lint": {
+      "passed": false,
+      "command": "cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- -D warnings",
+      "exitCode": 101,
+      "observation": "30 clippy errors found. Verified these are ALL pre-existing (exist on pre-provider-abstraction commits). Errors include: collapsible_if, redundant_closure, await_holding_lock, too_many_arguments, type_complexity, useless_conversion, clone_on_copy, new_without_default, single_match, needless_borrow, redundant_slicing, needless_borrows_for_generic_args. None introduced by the provider-abstraction milestone."
+    }
+  },
+  "reviewsSummary": {
+    "total": 4,
+    "passed": 4,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "nonBlockingIssues": [
+    {
+      "featureId": "codex-provider-refactor",
+      "severity": "non_blocking",
+      "description": "connect_with_provider is missing spawn_post_connect_warmup. All other connect methods call it. Provider-backed sessions won't get thread list prefetching.",
+      "suggestedFix": "Add spawn_post_connect_warmup call after session insertion in connect_with_provider."
+    },
+    {
+      "featureId": "codex-provider-refactor",
+      "severity": "non_blocking",
+      "description": "ApprovalRequested and UserInputRequested events mapped as LegacyNotification rather than ServerEvent::Request. The approval resolution pipeline won't work through provider path yet.",
+      "suggestedFix": "Map these to ServerEvent::Request with reconstructed request types when provider-backed sessions need approval flows."
+    },
+    {
+      "featureId": "codex-provider-refactor",
+      "severity": "non_blocking",
+      "description": "$resolve/$reject fallback in from_provider produces RpcError::Deserialization instead of being a no-op for CodexProvider-backed sessions.",
+      "suggestedFix": "Add RpcError::Deserialization to the fallback error catch, or route resolve/reject through ProviderCommand instead of generic send_request."
+    },
+    {
+      "featureId": "provider-error-handling",
+      "severity": "non_blocking",
+      "description": "Reconnect retry loop logic (REMOTE_RECONNECT_MAX_ATTEMPTS=5) not yet adapted for provider trait. Currently reconnect_remote_client operates on AppServerClient directly.",
+      "suggestedFix": "Extend reconnect logic to work through ProviderTransport trait for non-Codex providers in future milestones."
+    },
+    {
+      "featureId": "provider-error-handling",
+      "severity": "non_blocking",
+      "description": "Config change rejection logic (model/reasoning_effort during streaming) lives only in ErrorMockProvider, not in real CodexProvider.",
+      "suggestedFix": "Add streaming_active check to CodexProvider.send_request when implementing config changes in future milestones."
+    },
+    {
+      "featureId": "provider-event-mapping",
+      "severity": "non_blocking",
+      "description": "~23 upstream ServerNotification variants map to ProviderEvent::Unknown via wildcard. No compile-time exhaustiveness guarantee when upstream changes.",
+      "suggestedFix": "Acceptable for initial implementation. Track unmapped variants in library docs. Add typed mappings as needed."
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Updated .factory/library/provider-transport.md with upstream event mapping coverage details, broadcast channel behavior note, and updated future work section.",
+      "sourceFeature": "scrutiny-validator-provider-abstraction"
+    },
+    {
+      "target": "library",
+      "description": "Fixed .factory/library/architecture.md module paths to reflect actual flat file structure (codex.rs not codex/), added mapping.rs and error_handling.rs entries.",
+      "sourceFeature": "scrutiny-validator-provider-abstraction"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add note: ProviderTransport trait methods use async_trait for object safety. Workers should not add generic type parameters or impl Trait returns to trait methods as this breaks object safety.",
+      "evidence": "provider-transport-trait feature correctly uses async_trait pattern. Future workers implementing new providers should follow this pattern.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "architecture.md should document provider event-to-server-event LegacyNotification mapping pattern.",
+      "reason": "Already adequately documented in provider-transport.md library file which is the appropriate place for this implementation detail."
+    }
+  ],
+  "previousRound": null
+}

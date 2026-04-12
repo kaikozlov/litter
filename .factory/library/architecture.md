@@ -29,10 +29,12 @@ Agent Protocol → ProviderTransport → ProviderEvent → UiEvent → AppStoreR
 
 ### Key Modules
 - `src/provider/` — Provider trait, ProviderEvent enum, agent type definitions
-- `src/provider/codex/` — Codex provider (wraps existing AppServerClient)
-- `src/provider/acp/` — Universal ACP client (uses agent-client-protocol-schema crate)
-- `src/provider/pi/` — Pi native RPC client
-- `src/provider/droid/` — Droid native Factory API client
+- `src/provider/codex.rs` — Codex provider (wraps existing AppServerClient)
+- `src/provider/mapping.rs` — ServerNotification/ServerRequest → ProviderEvent → UiEvent mapping
+- `src/provider/error_handling.rs` — Error handling tests with ErrorMockProvider
+- `src/provider/acp/` — (Future) Universal ACP client
+- `src/provider/pi/` — (Future) Pi native RPC client
+- `src/provider/droid/` — (Future) Droid native Factory API client
 - `src/transport/` — Transport error types, connection state (unchanged)
 - `src/session/` — ServerSession refactored to use ProviderTransport
 - `src/store/` — AppStoreReducer (unchanged — receives UiEvent regardless of provider)

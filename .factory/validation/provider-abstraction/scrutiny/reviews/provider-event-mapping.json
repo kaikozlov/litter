@@ -1,0 +1,57 @@
+{
+  "featureId": "provider-event-mapping",
+  "reviewedAt": "2026-04-11T22:30:00Z",
+  "commitId": "d89687e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation provides a comprehensive, well-structured event mapping pipeline covering ServerNotification/ServerRequest → ProviderEvent → UiEvent with 34 ProviderEvent variants, exhaustive serde round-trip tests, and proper unknown event handling. The code is high quality with good documentation, helper functions, and 27 well-organized tests. There are a few minor observations (noted below) but none are blocking.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/mapping.rs",
+        "line": 144,
+        "severity": "non_blocking",
+        "description": "ServerNotification mapping does not have explicit arms for ~20 upstream variants (HookStarted, HookCompleted, ItemGuardianApprovalReviewStarted, ItemGuardianApprovalReviewCompleted, RawResponseItemCompleted, CommandExecOutputDelta, TerminalInteraction, McpServerOauthLoginCompleted, McpServerStatusUpdated, AccountUpdated, AppListUpdated, FsChanged, ReasoningSummaryPartAdded, ContextCompacted, DeprecationNotice, ConfigWarning, FuzzyFileSearchSessionUpdated, FuzzyFileSearchSessionCompleted, WindowsWorldWritableWarning, WindowsSandboxSetupCompleted, ThreadUnarchived, ThreadClosed). These all fall through to the wildcard `other =>` arm and map to ProviderEvent::Unknown. This is acceptable for an initial implementation (they get warning logs), but could lead to lost data if any of these become important for mobile. The existing EventProcessor in events.rs also handles many of these via its wildcard, so parity is maintained. Not blocking — these can be individually typed as needed in follow-up work."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/mapping.rs",
+        "line": 407,
+        "severity": "non_blocking",
+        "description": "ThreadStarted maps to UiEvent::ConnectionStateChanged with health='thread_started' rather than UiEvent::ThreadStarted. The existing EventProcessor emits UiEvent::ThreadStarted (with the full notification). This is a semantic difference — the provider pipeline's ThreadStarted only has thread_id (ProviderEvent), so it can't populate the full ThreadStartedNotification. This is acceptable as a provider-specific simplification but should be documented. The ThreadStatusChanged and ModelRerouted events similarly use RawNotification instead of their typed UiEvent counterparts for the same reason."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/mapping.rs",
+        "line": 660,
+        "severity": "non_blocking",
+        "description": "The `provider_event_mapping_completeness` test explicitly tests 24 ServerNotification→ProviderEvent paths but the upstream enum has ~47 variants. The test asserts `cases.len() >= 24`, not full exhaustiveness. The wildcard arm handles the rest. This is acceptable because: (a) the test documents exactly which variants have typed mappings, (b) the `every_provider_event_variant_maps_or_returns_none` test covers all 34 ProviderEvent→UiEvent paths, (c) unknown upstream variants are explicitly tested via `unhandled_notification_maps_to_unknown` and `unhandled_realtime_notifications_map_to_unknown`. However, if the upstream ServerNotification enum changes, no compile-time guarantee forces updating the match. This is a standard trade-off when mapping external enums with a wildcard catch-all."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/mapping.rs",
+        "line": 262,
+        "severity": "non_blocking",
+        "description": "The `_server_id` parameter in `server_request_to_provider_event` is unused. Some request types (CommandExecutionRequestApproval, FileChangeRequestApproval, etc.) don't propagate the server_id into ProviderEvent fields, unlike notification mapping which consistently uses it. This is fine functionally but the unused parameter suggests the API could be simplified or server_id could be added to more ProviderEvent variants for consistency."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/mapping.rs",
+        "line": 519,
+        "severity": "non_blocking",
+        "description": "The `provider_event_to_ui_event` function has `#[allow(dead_code)]` and is `pub(crate)`. This is appropriate since the provider→UiEvent pipeline is not yet wired into the actual runtime flow (the CodexProvider still uses the existing EventProcessor). The dead code allowance should be removed once the provider pipeline is fully integrated."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The upstream ServerNotification enum in shared/third_party/codex/codex-rs/app-server-protocol/src/protocol/common.rs has ~47 variants (defined via server_notification_definitions! macro). The mapping module's wildcard arm handles ~23 of these as Unknown. This ratio (24 explicitly mapped, ~23 fallback) and the list of unmapped variants should be tracked in .factory/library/provider-transport.md so future workers know which upstream events are intentionally unmapped vs. accidentally missed.",
+      "evidence": "mapping.rs line 260 (`other =>` arm) catches ThreadRealtimeTranscriptUpdated, ThreadRealtimeOutputAudioDelta, ThreadRealtimeError, SkillsChanged, HookStarted, HookCompleted, ItemGuardianApprovalReviewStarted/Completed, RawResponseItemCompleted, CommandExecOutputDelta, TerminalInteraction, McpServerOauthLoginCompleted, McpServerStatusUpdated, AccountUpdated, AppListUpdated, FsChanged, ReasoningSummaryPartAdded, ContextCompacted, DeprecationNotice, ConfigWarning, FuzzyFileSearch*, Windows*, ThreadUnarchived, ThreadClosed — all map to Unknown"
+    },
+    {
+      "area": "knowledge",
+      "observation": "The ServerNotification enum is generated via a declarative macro (server_notification_definitions!) in common.rs, not a regular enum definition. Workers searching for 'enum ServerNotification' won't find it. This is important context for future workers who need to add or verify mappings.",
+      "evidence": "shared/third_party/codex/codex-rs/app-server-protocol/src/protocol/common.rs:886 — uses server_notification_definitions! macro to define the enum"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS — The provider-event-mapping feature delivers a complete, well-tested event mapping pipeline. All 34 ProviderEvent variants have serde round-trip verification, the ServerNotification→ProviderEvent mapping covers 24+ key upstream variants with a proper wildcard fallback for the remaining ~23, and the ProviderEvent→UiEvent mapping handles all 34 variants (returning Some or None as appropriate). Unknown events correctly map to ProviderEvent::Unknown with warning logs (VAL-PROV-014 satisfied). UniFFI safety is verified via exhaustive serde round-trip tests for all 34 variants (VAL-PROV-006 satisfied). The pipeline yields normalized ProviderEvents (VAL-PROV-005 satisfied). Five non-blocking observations noted: several upstream variants map to Unknown via wildcard (acceptable for initial implementation), some ProviderEvent→UiEvent mappings use RawNotification instead of typed variants due to reduced ProviderEvent field counts, the test doesn't enforce compile-time exhaustiveness over the upstream enum (standard trade-off), _server_id is unused in server_request_to_provider_event, and the provider_event_to_ui_event function has dead_code allowance pending full runtime integration."
+}

@@ -69,9 +69,25 @@ The mapping module provides the complete event pipeline:
 - UniFFI binding regeneration requires building the cdylib, which needs a Mac host or proper cross-compilation setup
 - The provider module is public (`pub mod provider`) so it can be consumed by other modules
 
+## Upstream Event Mapping Coverage
+
+The upstream `ServerNotification` enum (defined via `server_notification_definitions!` macro in `shared/third_party/codex/codex-rs/app-server-protocol/src/protocol/common.rs`) has ~47 variants. Of these:
+
+- **24 explicitly mapped** to typed `ProviderEvent` variants (see mapping.rs)
+- **~23 handled via wildcard** `other =>` arm → `ProviderEvent::Unknown` with warning log
+
+Unmapped known variants include: HookStarted, HookCompleted, ItemGuardianApprovalReviewStarted/Completed, RawResponseItemCompleted, CommandExecOutputDelta, TerminalInteraction, McpServerOauthLoginCompleted, McpServerStatusUpdated, AccountUpdated, AppListUpdated, FsChanged, ReasoningSummaryPartAdded, ContextCompacted, DeprecationNotice, ConfigWarning, FuzzyFileSearchSessionUpdated/Completed, WindowsWorldWritableWarning, WindowsSandboxSetupCompleted, ThreadUnarchived, ThreadClosed.
+
+These can be individually typed as needed in follow-up work. The wildcard approach ensures forward compatibility when upstream adds new variants.
+
+## Broadcast Channel Behavior
+
+`tokio::sync::broadcast::Sender` silently drops events sent before any subscriber exists. This is expected tokio broadcast behavior and is tested explicitly. When implementing providers, ensure the event reader subscribes before any events could be emitted.
+
 ## Future Work
-- `provider-error-handling` feature: Mid-stream disconnect, reconnection through trait, handshake failure
 - Implementations: ACP, Pi, Droid providers in submodules under `src/provider/`
+- Adapt reconnect retry loop logic for the provider trait (currently reconnect_remote_client operates on AppServerClient)
+- Add config change rejection logic to real CodexProvider (currently only in ErrorMockProvider)
 
 ## CodexProvider (provider/codex.rs)
 
