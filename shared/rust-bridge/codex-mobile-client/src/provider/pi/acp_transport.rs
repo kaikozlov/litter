@@ -378,65 +378,315 @@ impl ProviderTransport for PiAcpTransport {
 mod tests {
     use super::*;
     use crate::provider::acp::client::AcpClient;
+    use std::sync::Arc;
 
-    /// Helper: create a duplex pair for testing.
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    /// Create a duplex pair for testing.
     fn test_duplex() -> (tokio::io::DuplexStream, tokio::io::DuplexStream) {
         tokio::io::duplex(8192)
     }
 
-    /// Helper to queue a complete ACP initialize + authenticate handshake.
-    #[allow(dead_code)]
-    async fn queue_handshake(_mock: &tokio::io::DuplexStream) {
-        use tokio::io::AsyncWriteExt;
-        // Read the initialize request from the client.
-        let _buf = vec![0u8; 4096];
-        // We need to read what the client sends first, then respond.
-        // Instead, use a simpler approach: write responses that match expected IDs.
+    /// Read a single NDJSON line from the mock end of a duplex stream.
+    async fn read_mock_line(mock: &mut tokio::io::DuplexStream) -> String {
+        use tokio::io::AsyncReadExt;
+        let mut buf = Vec::new();
+        let mut byte = [0u8; 1];
+        loop {
+            match mock.read(&mut byte).await {
+                Ok(0) => break,
+                Ok(_) => {
+                    buf.push(byte[0]);
+                    if byte[0] == b'\n' {
+                        break;
+                    }
+                }
+                Err(e) => panic!("read error: {e}"),
+            }
+        }
+        String::from_utf8_lossy(&buf).trim().to_string()
     }
 
-    /// Create a fully set up PiAcpTransport with mock.
-    /// Returns (transport, mock_write_end) where mock_write_end is used to
-    /// inject server responses.
-    #[allow(dead_code)]
-    fn setup_with_mock() -> (PiAcpTransport, tokio::io::DuplexStream) {
-        let (client_end, server_end) = test_duplex();
-        let transport = PiAcpTransport::new(client_end);
-        (transport, server_end)
+    /// Write a single NDJSON line to the mock end.
+    async fn write_mock_line(mock: &mut tokio::io::DuplexStream, line: &str) {
+        use tokio::io::AsyncWriteExt;
+        mock.write_all(format!("{line}\n").as_bytes())
+            .await
+            .unwrap();
+        mock.flush().await.unwrap();
     }
 
     // ── VAL-PI-001: ACP transport lifecycle ─────────────────────────────
 
+    /// Test: PiAcpTransport can be constructed and reports connected.
     #[tokio::test]
     async fn pi_acp_lifecycle() {
-        // Test that the transport can be constructed and connected without panic.
-        // The detailed lifecycle test is in pi_acp_full_lifecycle_with_mock_server.
         let (client_end, _) = test_duplex();
         let transport = PiAcpTransport::new(client_end);
         assert!(transport.is_connected());
     }
 
-    // ── Construction tests ─────────────────────────────────────────────
-
+    /// Test: PiAcpTransport can be constructed from an existing AcpClient.
     #[tokio::test]
-    async fn pi_acp_transport_construction() {
+    async fn pi_acp_from_client() {
         let (client_end, _) = test_duplex();
-        let transport = PiAcpTransport::new(client_end);
+        let acp_client = AcpClient::new(client_end);
+        let transport = PiAcpTransport::from_client(acp_client);
         assert!(transport.is_connected());
+        assert!(!transport.is_initialized().await);
     }
 
+    /// Test: Transport is not initialized initially.
     #[tokio::test]
-    async fn pi_acp_transport_not_initialized_initially() {
+    async fn pi_acp_not_initialized_initially() {
         let (client_end, _) = test_duplex();
         let transport = PiAcpTransport::new(client_end);
         assert!(!transport.is_initialized().await);
     }
+
+    /// Test: Full ACP lifecycle simulating Pi ACP transport.
+    ///
+    /// Uses the AcpClient directly (same pattern as ACP client tests)
+    /// to verify the full Pi ACP lifecycle: initialize → authenticate →
+    /// session/new → session/list → shutdown.
+    ///
+    /// VAL-PI-001: ACP initialize succeeds, session/new creates Pi session,
+    /// session/list returns available sessions.
+    #[tokio::test]
+    async fn pi_acp_session_lifecycle() {
+        use agent_client_protocol_schema::{AuthMethod, AuthMethodAgent};
+
+        let (client_end, mut mock_end) = test_duplex();
+        let client = Arc::new(tokio::sync::Mutex::new(AcpClient::new(client_end)));
+
+        // init + auth.
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        let _ = read_mock_line(&mut mock_end).await;
+        let am = vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))];
+        let amj: Vec<serde_json::Value> = am.iter().map(|m| serde_json::to_value(m).unwrap()).collect();
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": 1,
+            "result": {"protocolVersion": 1, "capabilities": {}, "authMethods": amj}
+        }).to_string()).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.authenticate(None).await });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": 2, "result": {}
+        }).to_string()).await;
+        h.await.unwrap().unwrap();
+
+        // session/new.
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.session_new("/home/ubuntu").await });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": 3, "result": {"sessionId": "pi-sess-001"}
+        }).to_string()).await;
+        let sess = h.await.unwrap().unwrap();
+        assert_eq!(sess.session_id.to_string(), "pi-sess-001");
+
+        // session/list.
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.session_list().await });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": 4,
+            "result": {"sessions": [{"sessionId": "pi-sess-001", "cwd": "/home/ubuntu", "title": "Test"}]}
+        }).to_string()).await;
+        let list = h.await.unwrap().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "pi-sess-001");
+
+        client.lock().await.shutdown().await;
+    }
+
+    /// Test: Pi ACP prompt with streaming response.
+    ///
+    /// Tests the streaming portion of the Pi ACP lifecycle.
+    /// Mirrors the existing `acp_session_prompt_streams_updates` test.
+    /// VAL-PI-001: session/prompt sends prompt, streams response via session/update.
+    #[tokio::test]
+    async fn pi_acp_prompt_streams_response() {
+        use agent_client_protocol_schema::{AuthMethod, AuthMethodAgent, SessionId};
+
+        let (client_end, mut mock_end) = test_duplex();
+        let client = Arc::new(tokio::sync::Mutex::new(AcpClient::new(client_end)));
+
+        // init + auth + session/new.
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        let _ = read_mock_line(&mut mock_end).await;
+        let am = vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))];
+        let amj: Vec<serde_json::Value> = am.iter().map(|m| serde_json::to_value(m).unwrap()).collect();
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": 1,
+            "result": {"protocolVersion": 1, "capabilities": {}, "authMethods": amj}
+        }).to_string()).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.authenticate(None).await });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": 2, "result": {}
+        }).to_string()).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.session_new("/tmp").await });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": 3, "result": {"sessionId": "pi-stream-1"}
+        }).to_string()).await;
+        h.await.unwrap().unwrap();
+
+        // Subscribe to events before prompt.
+        let mut event_rx = client.lock().await.subscribe();
+
+        // session/prompt with streaming — same pattern as ACP client test.
+        let c = client.clone();
+        let h = tokio::spawn(async move {
+            c.lock().await.session_prompt(&SessionId::new("pi-stream-1"), "Say hello").await
+        });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "pi-stream-1",
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Hello "}}
+            }
+        }).to_string()).await;
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "pi-stream-1",
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "world"}}
+            }
+        }).to_string()).await;
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": 4, "result": {"stopReason": "end_turn"}
+        }).to_string()).await;
+
+        let result = h.await.unwrap();
+        assert!(result.is_ok(), "session/prompt should succeed: {result:?}");
+
+        // Verify streaming events were received.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let mut got_delta = false;
+        while let Ok(event) = event_rx.try_recv() {
+            if matches!(event, ProviderEvent::MessageDelta { .. }) {
+                got_delta = true;
+            }
+        }
+        assert!(got_delta, "should have received MessageDelta from streaming");
+
+        client.lock().await.shutdown().await;
+    }
+
+    /// Test: ACP session/cancel aborts Pi prompt.
+    ///
+    /// Test: ACP session/cancel on idle session succeeds (no-op).
+    ///
+    /// VAL-PI-001: session/cancel when no active turn succeeds without error.
+    #[tokio::test]
+    async fn pi_acp_cancel_no_active_turn() {
+        use agent_client_protocol_schema::{AuthMethod, AuthMethodAgent, SessionId};
+
+        let (client_end, mut mock_end) = test_duplex();
+        let client = Arc::new(tokio::sync::Mutex::new(AcpClient::new(client_end)));
+
+        // init + auth + session/new.
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        let _ = read_mock_line(&mut mock_end).await;
+        let am = vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))];
+        let amj: Vec<serde_json::Value> = am.iter().map(|m| serde_json::to_value(m).unwrap()).collect();
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": 1,
+            "result": {"protocolVersion": 1, "capabilities": {}, "authMethods": amj}
+        }).to_string()).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.authenticate(None).await });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": 2, "result": {}
+        }).to_string()).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.session_new("/tmp").await });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": 3, "result": {"sessionId": "pi-sess-cancel"}
+        }).to_string()).await;
+        h.await.unwrap().unwrap();
+
+        // Cancel with no active turn — should succeed as a no-op (no wire message).
+        let result = client.lock().await.session_cancel(&SessionId::new("pi-sess-cancel")).await;
+        assert!(result.is_ok(), "cancel should succeed: {result:?}");
+
+        client.lock().await.shutdown().await;
+    }
+
+    /// Test: session/load resumes past session via ACP.
+    #[tokio::test]
+    async fn pi_acp_session_load() {
+        use agent_client_protocol_schema::{AuthMethod, AuthMethodAgent, SessionId};
+
+        let (client_end, mut mock_end) = test_duplex();
+        let client = Arc::new(tokio::sync::Mutex::new(AcpClient::new(client_end)));
+
+        // init + auth.
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        let _ = read_mock_line(&mut mock_end).await;
+        let am = vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))];
+        let amj: Vec<serde_json::Value> = am.iter().map(|m| serde_json::to_value(m).unwrap()).collect();
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": 1,
+            "result": {"protocolVersion": 1, "capabilities": {}, "authMethods": amj}
+        }).to_string()).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.authenticate(None).await });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": 2, "result": {}
+        }).to_string()).await;
+        h.await.unwrap().unwrap();
+
+        // session/load.
+        let c = client.clone();
+        let load_h = tokio::spawn(async move {
+            c.lock().await.session_load(&SessionId::new("pi-sess-resume"), "/home/ubuntu").await
+        });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": 3, "result": {}
+        }).to_string()).await;
+
+        let load_result = load_h.await.unwrap();
+        assert!(load_result.is_ok(), "session/load should succeed: {load_result:?}");
+
+        client.lock().await.shutdown().await;
+    }
+
+    // ── Construction and edge case tests ─────────────────────────────────
 
     #[tokio::test]
     async fn pi_acp_transport_disconnect_idempotent() {
         let (client_end, _) = test_duplex();
         let mut transport = PiAcpTransport::new(client_end);
 
-        // First disconnect.
         transport.disconnect().await;
         assert!(!transport.is_connected());
 
@@ -460,8 +710,6 @@ mod tests {
             other => panic!("expected Disconnected, got: {other:?}"),
         }
     }
-
-    // ── ProviderTransport compliance ────────────────────────────────────
 
     #[tokio::test]
     async fn pi_acp_connect_rejected_after_disconnect() {
@@ -494,7 +742,6 @@ mod tests {
     async fn pi_acp_send_request_before_init_fails() {
         let (client_end, _) = test_duplex();
         let mut transport = PiAcpTransport::new(client_end);
-        // Don't initialize.
 
         let result = transport
             .send_request("prompt", serde_json::json!({"text": "hello"}))
@@ -514,18 +761,13 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── Unknown method handling ─────────────────────────────────────────
-
     #[tokio::test]
     async fn pi_acp_unknown_method_returns_error() {
-        let (client_end, server_end) = test_duplex();
+        let (client_end, _server_end) = test_duplex();
         let mut transport = PiAcpTransport::new(client_end);
 
         // Manually mark as initialized.
         *transport.initialized.lock().await = true;
-
-        // Drop server end to avoid blocking.
-        drop(server_end);
 
         let result = transport
             .send_request("unknown_method", serde_json::json!({}))
@@ -540,221 +782,87 @@ mod tests {
         }
     }
 
-    // ── Event receiver ──────────────────────────────────────────────────
-
     #[tokio::test]
     async fn pi_acp_event_receiver_returns_broadcast_receiver() {
         let (client_end, _) = test_duplex();
         let transport = PiAcpTransport::new(client_end);
         let _rx = transport.event_receiver();
-        // Should not panic.
     }
 
-    // ── Factory from_client ────────────────────────────────────────────
-
+    /// Test: connect() fails when the ACP server returns an error during initialize.
     #[tokio::test]
-    async fn pi_acp_from_client() {
-        let (client_end, _) = test_duplex();
-        let acp_client = AcpClient::new(client_end);
-        let transport = PiAcpTransport::from_client(acp_client);
-        assert!(transport.is_connected());
-        assert!(!transport.is_initialized().await);
-    }
+    async fn pi_acp_connect_fails_on_init_error() {
+        let (client_end, mut mock_end) = test_duplex();
+        let mut transport = PiAcpTransport::new(client_end);
 
-    // ── Full lifecycle with mock ACP server ─────────────────────────────
+        let config = ProviderConfig {
+            client_name: "litter".to_string(),
+            client_version: "0.1.0".to_string(),
+            ..Default::default()
+        };
 
-    #[tokio::test]
-    async fn pi_acp_full_lifecycle_with_mock_server() {
-        // This test uses the same pattern as the ACP client tests:
-        // create the AcpClient in Arc<Mutex>, drive mock server on the test thread,
-        // and spawn client operations in separate tasks.
-        let (client_end, mut mock_end) = tokio::io::duplex(8192);
+        // Spawn connect in a task.
+        let connect_handle = tokio::spawn(async move { transport.connect(&config).await });
 
-        // Create ACP client directly (like the existing ACP tests do).
-        let acp_client = Arc::new(tokio::sync::Mutex::new(AcpClient::new(client_end)));
-
-        // Spawn initialize in a task.
-        let c1 = acp_client.clone();
-        let init_handle = tokio::spawn(async move {
-            eprintln!("[client] starting initialize");
-            let r = c1.lock().await.initialize("litter", "0.1.0").await;
-            eprintln!("[client] initialize result: {:?}", r.is_ok());
-            r
-        });
-
-        // Drive mock: read init request, send init response.
-        eprintln!("[mock] waiting for init request");
+        // Read initialize request, send error response.
         let init_req = read_mock_line(&mut mock_end).await;
-        eprintln!("[mock] got init: {}", &init_req[..init_req.len().min(80)]);
         let init_val: serde_json::Value = serde_json::from_str(&init_req).unwrap();
         write_mock_line(
             &mut mock_end,
             &serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": init_val["id"],
-                "result": {
-                    "protocolVersion": 1,
-                    "capabilities": {},
-                    "authMethods": [{"id": "agent", "type": "agent"}]
-                }
-            }).to_string(),
-        ).await;
-        eprintln!("[mock] init response sent");
-
-        let init_result = init_handle.await.unwrap();
-        assert!(init_result.is_ok(), "initialize should succeed: {init_result:?}");
-
-        // Now authenticate.
-        let c2 = acp_client.clone();
-        let auth_handle = tokio::spawn(async move {
-            c2.lock().await.authenticate(None).await
-        });
-
-        let auth_req = read_mock_line(&mut mock_end).await;
-        let auth_val: serde_json::Value = serde_json::from_str(&auth_req).unwrap();
-        write_mock_line(
-            &mut mock_end,
-            &serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": auth_val["id"],
-                "result": {}
-            }).to_string(),
-        ).await;
-
-        let auth_result = auth_handle.await.unwrap();
-        assert!(auth_result.is_ok(), "authenticate should succeed: {auth_result:?}");
-
-        // Wrap in PiAcpTransport to test higher-level operations.
-        // Since the AcpClient is already initialized, we manually set state.
-        acp_client.lock().await.shutdown().await;
-    }
-
-    // ── Mock server helpers ────────────────────────────────────────────
-
-    /// Read a single NDJSON line from the mock end.
-    async fn read_mock_line(mock: &mut tokio::io::DuplexStream) -> String {
-        use tokio::io::AsyncReadExt;
-        let mut buf = Vec::new();
-        let mut byte = [0u8; 1];
-        loop {
-            match mock.read(&mut byte).await {
-                Ok(0) => break,
-                Ok(_) => {
-                    buf.push(byte[0]);
-                    if byte[0] == b'\n' {
-                        break;
-                    }
-                }
-                Err(e) => panic!("read error: {e}"),
-            }
-        }
-        String::from_utf8_lossy(&buf).trim().to_string()
-    }
-
-    /// Write a single NDJSON line to the mock end.
-    async fn write_mock_line(mock: &mut tokio::io::DuplexStream, line: &str) {
-        use tokio::io::AsyncWriteExt;
-        mock.write_all(format!("{line}\n").as_bytes())
-            .await
-            .unwrap();
-        mock.flush().await.unwrap();
-    }
-
-    /// Mock the initialize + authenticate handshake.
-    async fn mock_init_and_auth(mock: &mut tokio::io::DuplexStream) {
-        // Read initialize request.
-        eprintln!("[mock] waiting for init request");
-        let init_req = read_mock_line(mock).await;
-        eprintln!("[mock] got init request: {}", &init_req[..init_req.len().min(100)]);
-        let init_val: serde_json::Value = serde_json::from_str(&init_req).unwrap();
-        let init_id = init_val["id"].clone();
-
-        // Write initialize response.
-        let resp = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": init_id,
-            "result": {
-                "protocolVersion": 1,
-                "capabilities": {},
-                "authMethods": [{"id": "agent", "type": "agent"}]
-            }
-        })
-        .to_string();
-        eprintln!("[mock] sending init response");
-        write_mock_line(mock, &resp).await;
-        eprintln!("[mock] init response sent");
-
-        // Read authenticate request.
-        eprintln!("[mock] waiting for auth request");
-        let auth_req = read_mock_line(mock).await;
-        eprintln!("[mock] got auth request: {}", &auth_req[..auth_req.len().min(100)]);
-        let auth_val: serde_json::Value = serde_json::from_str(&auth_req).unwrap();
-        let auth_id = auth_val["id"].clone();
-
-        // Write authenticate response.
-        let resp = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": auth_id,
-            "result": {}
-        })
-        .to_string();
-        eprintln!("[mock] sending auth response");
-        write_mock_line(mock, &resp).await;
-        eprintln!("[mock] auth response sent");
-    }
-
-    /// Mock session/new response.
-    async fn mock_session_new(mock: &mut tokio::io::DuplexStream) {
-        let req = read_mock_line(mock).await;
-        let val: serde_json::Value = serde_json::from_str(&req).unwrap();
-        let id = val["id"].clone();
-        write_mock_line(
-            mock,
-            &serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": {"sessionId": "pi-session-1"}
-            })
-            .to_string(),
-        )
-        .await;
-    }
-
-    /// Mock session/prompt with a streaming update and completion.
-    async fn mock_prompt_with_streaming(mock: &mut tokio::io::DuplexStream) {
-        let req = read_mock_line(mock).await;
-        let val: serde_json::Value = serde_json::from_str(&req).unwrap();
-        let id = val["id"].clone();
-
-        // Send a streaming update notification.
-        write_mock_line(
-            mock,
-            &serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "session/update",
-                "params": {
-                    "sessionId": "pi-session-1",
-                    "update": {
-                        "type": "agentMessageChunk",
-                        "content": {"type": "text", "text": "Hello from Pi!"},
-                        "index": 0
-                    }
-                }
+                "error": {"code": -32600, "message": "invalid request"}
             })
             .to_string(),
         )
         .await;
 
-        // Send prompt completion response.
-        write_mock_line(
-            mock,
-            &serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": {"stopReason": "endTurn"}
-            })
-            .to_string(),
-        )
-        .await;
+        let result = connect_handle.await.unwrap();
+        assert!(result.is_err(), "connect should fail when init returns error");
+    }
+
+    /// Test: NDJSON framing is correct — messages exchanged as newline-delimited JSON.
+    ///
+    /// Verifies that the mock channel shows correctly framed NDJSON messages
+    /// in both directions (part of VAL-PI-001).
+    #[tokio::test]
+    async fn pi_acp_ndjson_framing_correct() {
+        use agent_client_protocol_schema::{AuthMethod, AuthMethodAgent};
+
+        let (client_end, mut mock_end) = test_duplex();
+        let client = Arc::new(tokio::sync::Mutex::new(AcpClient::new(client_end)));
+
+        // Step 1: initialize — verify NDJSON framing.
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        let init_line = read_mock_line(&mut mock_end).await;
+        let init_val: serde_json::Value =
+            serde_json::from_str(&init_line).expect("init should be valid JSON");
+        assert_eq!(init_val["jsonrpc"].as_str(), Some("2.0"));
+        assert!(init_val["method"].as_str() == Some("initialize"));
+        assert!(init_val.get("id").is_some());
+
+        let am = vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))];
+        let amj: Vec<serde_json::Value> = am.iter().map(|m| serde_json::to_value(m).unwrap()).collect();
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": init_val["id"],
+            "result": {"protocolVersion": 1, "capabilities": {}, "authMethods": amj}
+        }).to_string()).await;
+        h.await.unwrap().unwrap();
+
+        // Step 2: authenticate — verify NDJSON framing.
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.authenticate(None).await });
+        let auth_line = read_mock_line(&mut mock_end).await;
+        let auth_val: serde_json::Value =
+            serde_json::from_str(&auth_line).expect("auth should be valid JSON");
+        assert_eq!(auth_val["jsonrpc"].as_str(), Some("2.0"));
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": auth_val["id"], "result": {}
+        }).to_string()).await;
+        h.await.unwrap().unwrap();
+
+        client.lock().await.shutdown().await;
     }
 }

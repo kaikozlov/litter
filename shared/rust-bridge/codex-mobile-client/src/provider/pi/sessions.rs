@@ -111,14 +111,14 @@ async fn list_session_files(ssh_client: &SshClient) -> Result<Vec<PiSessionEntry
         .stdout
         .lines()
         .filter(|line| !line.trim().is_empty())
-        .filter_map(|line| {
+        .map(|line| {
             let path = line.trim().to_string();
             let filename = path
                 .rsplit('/')
                 .next()
                 .unwrap_or(&path)
                 .to_string();
-            Some(PiSessionEntry { filename, path })
+            PiSessionEntry { filename, path }
         })
         .collect();
 
@@ -407,10 +407,10 @@ unknown garbage"#;
         let entries: Vec<PiSessionEntry> = output
             .lines()
             .filter(|line| !line.trim().is_empty())
-            .filter_map(|line| {
+            .map(|line| {
                 let path = line.trim().to_string();
                 let filename = path.rsplit('/').next().unwrap_or(&path).to_string();
-                Some(PiSessionEntry { filename, path })
+                PiSessionEntry { filename, path }
             })
             .collect();
 
@@ -426,10 +426,10 @@ unknown garbage"#;
         let entries: Vec<PiSessionEntry> = output
             .lines()
             .filter(|line| !line.trim().is_empty())
-            .filter_map(|line| {
+            .map(|line| {
                 let path = line.trim().to_string();
                 let filename = path.rsplit('/').next().unwrap_or(&path).to_string();
-                Some(PiSessionEntry { filename, path })
+                PiSessionEntry { filename, path }
             })
             .collect();
 
