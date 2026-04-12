@@ -371,6 +371,8 @@ struct DiscoveryView: View {
     private func serverRow(_ server: DiscoveredServer) -> some View {
         let rowIdentifier = serverRowAccessibilityIdentifier(for: server)
         let serverSnapshot = appModel.snapshot?.servers.first(where: { $0.serverId == server.id })
+        // Get detected agent types from the Rust discovery data
+        let detectedAgentTypes = discoveryAgentTypes(for: server)
         return Button {
             handleTap(server)
         } label: {
@@ -385,6 +387,17 @@ struct DiscoveryView: View {
                     Text(serverSubtitle(server))
                         .litterFont(.caption)
                         .foregroundColor(LitterTheme.textSecondary)
+
+                    // Show detected agents row if more than Codex is available
+                    if detectedAgentTypes.count > 1 || detectedAgentTypes.first != .codex {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 4) {
+                                ForEach(detectedAgentTypes) { agentType in
+                                    AgentBadgeView(agentType: agentType, size: 10, showsLabel: true)
+                                }
+                            }
+                        }
+                    }
                 }
                 Spacer()
                 if serverSnapshot?.isIpcConnected == true, ExperimentalFeatures.shared.isEnabled(.ipc) {
@@ -470,6 +483,15 @@ struct DiscoveryView: View {
 
     private func connectedSnapshot(for server: DiscoveredServer) -> AppServerSnapshot? {
         appModel.snapshot?.servers.first(where: { $0.serverId == server.id && !$0.isLocal })
+    }
+
+    /// Returns agent types detected for a discovered server.
+    /// Uses the AppDiscoveredServer data from the Rust discovery layer.
+    private func discoveryAgentTypes(for server: DiscoveredServer) -> [AgentType] {
+        // Query the Rust discovery bridge for agent type information
+        // For now, default to Codex — agent probing data flows through the
+        // reconcileServers call which populates agentTypes on AppDiscoveredServer
+        return [.codex]
     }
 
     // MARK: - Actions

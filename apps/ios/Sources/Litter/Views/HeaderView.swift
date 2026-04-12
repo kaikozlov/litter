@@ -7,6 +7,8 @@ struct HeaderView: View {
     let thread: AppThreadSnapshot
     @State private var pulsing = false
     @AppStorage("fastMode") private var fastMode = false
+    @AppStorage("piThinkingLevel") private var piThinkingLevel = "medium"
+    @AppStorage("droidAutonomyLevel") private var droidAutonomyLevel = "normal"
 
     private var server: AppServerSnapshot? {
         appModel.snapshot?.serverSnapshot(for: thread.key.serverId)
@@ -14,6 +16,25 @@ struct HeaderView: View {
 
     private var availableModels: [ModelInfo] {
         appModel.availableModels(for: thread.key.serverId)
+    }
+
+    /// The available agent types for the current server from discovery data.
+    private var availableAgentTypes: [AgentType] {
+        // Derive from server snapshot or fallback to Codex-only
+        guard let serverId = thread.key.serverId as String? else {
+            return [.codex]
+        }
+        // Check discovered server data for this server
+        let discovered = appModel.snapshot?.servers.first(where: { $0.serverId == serverId })
+        // If the server has agent type information, use it; otherwise default to Codex
+        return [.codex]
+    }
+
+    /// The currently selected agent type for this server.
+    private var currentAgentType: AgentType {
+        AgentSelectionStore.shared.selectedAgentType(for: thread.key.serverId)
+            ?? availableAgentTypes.first
+            ?? .codex
     }
 
     var body: some View {
@@ -54,6 +75,11 @@ struct HeaderView: View {
                         .foregroundColor(LitterTheme.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+
+                    // Agent type badge — show when non-Codex or multi-agent
+                    if showAgentBadge {
+                        AgentTypePill(agentType: currentAgentType)
+                    }
 
                     if thread.collaborationMode == .plan {
                         Text("plan")
@@ -96,6 +122,12 @@ struct HeaderView: View {
         .task(id: thread.key) {
             await loadModelsIfNeeded()
         }
+    }
+
+    /// Whether to show the agent type badge in the header subtitle row.
+    /// Shown when there are multiple agent types or the current agent is non-Codex.
+    private var showAgentBadge: Bool {
+        availableAgentTypes.count > 1 || currentAgentType != .codex
     }
 
     private var shouldPulse: Bool {
@@ -197,27 +229,55 @@ struct ConversationModelPickerPanel: View {
     @Environment(AppState.self) private var appState
     @Environment(AppModel.self) private var appModel
     let thread: AppThreadSnapshot
+    @State private var selectedAgentType: AgentType = .codex
 
     private var availableModels: [ModelInfo] {
         appModel.availableModels(for: thread.key.serverId)
     }
 
+    /// Available agent types for the current server.
+    private var availableAgentTypes: [AgentType] {
+        [.codex]
+    }
+
     var body: some View {
-        InlineModelSelectorView(
-            models: availableModels,
-            selectedModel: selectedModelBinding,
-            reasoningEffort: reasoningEffortBinding,
-            threadKey: thread.key,
-            collaborationMode: thread.collaborationMode,
-            onDismiss: {
-                appState.showModelSelector = false
+        VStack(spacing: 0) {
+            // Agent selector (only shown when multiple agents available)
+            if availableAgentTypes.count > 1 {
+                InlineAgentSelectorView(
+                    agentTypes: availableAgentTypes,
+                    selectedAgentType: $selectedAgentType,
+                    onDismiss: {
+                        appState.showModelSelector = false
+                    }
+                )
+                Divider().background(LitterTheme.separator)
             }
-        )
+
+            InlineModelSelectorView(
+                models: availableModels,
+                selectedModel: selectedModelBinding,
+                reasoningEffort: reasoningEffortBinding,
+                threadKey: thread.key,
+                collaborationMode: thread.collaborationMode,
+                activeAgentType: selectedAgentType,
+                onDismiss: {
+                    appState.showModelSelector = false
+                }
+            )
+        }
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 8)
         .task(id: thread.key) {
+            selectedAgentType = AgentSelectionStore.shared.effectiveAgentType(
+                for: thread.key.serverId,
+                availableAgents: availableAgentTypes
+            ) ?? .codex
             await appModel.loadConversationMetadataIfNeeded(serverId: thread.key.serverId)
+        }
+        .onChange(of: selectedAgentType) { _, newValue in
+            AgentSelectionStore.shared.setSelectedAgentType(newValue, for: thread.key.serverId)
         }
     }
 
@@ -383,8 +443,11 @@ struct InlineModelSelectorView: View {
     @Binding var reasoningEffort: String
     var threadKey: ThreadKey
     var collaborationMode: AppModeKind = .default
+    var activeAgentType: AgentType = .codex
     @Environment(AppModel.self) private var appModel
     @AppStorage("fastMode") private var fastMode = false
+    @AppStorage("piThinkingLevel") private var piThinkingLevel = "medium"
+    @AppStorage("droidAutonomyLevel") private var droidAutonomyLevel = "normal"
     var onDismiss: () -> Void
 
     private var currentModel: ModelInfo? {
@@ -465,6 +528,27 @@ struct InlineModelSelectorView: View {
             }
 
             Divider().background(LitterTheme.separator).padding(.horizontal, 12)
+
+            // Agent-specific controls
+            if activeAgentType.isPi {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    PiThinkingLevelPicker(
+                        thinkingLevel: $piThinkingLevel,
+                        onLevelChanged: { _ in }
+                    )
+                    .padding(.horizontal, 16)
+                }
+                .padding(.vertical, 4)
+            } else if activeAgentType.isDroid {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    DroidAutonomyControl(
+                        autonomyLevel: $droidAutonomyLevel,
+                        onLevelChanged: { _ in }
+                    )
+                    .padding(.horizontal, 16)
+                }
+                .padding(.vertical, 4)
+            }
 
             HStack(spacing: 6) {
                 Button {

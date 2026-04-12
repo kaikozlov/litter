@@ -27,6 +27,7 @@ final class AppState {
     var reasoningEffort = ""
     var showModelSelector = false
     var showSettings = false
+    var showAgentPicker = false
     var pendingThreadNavigation: ThreadKey?
     private var threadPermissionOverrides: [String: ThreadPermissionOverride] = [:]
     var approvalPolicy: String {

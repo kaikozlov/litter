@@ -32,6 +32,7 @@ struct SettingsView: View {
                     appearanceSection
                     fontSection
                     conversationSection
+                    agentSettingsSection
                     experimentalSection
                     supportSection
                     accountSection
@@ -98,6 +99,75 @@ struct SettingsView: View {
             Text("Conversation")
                 .foregroundColor(LitterTheme.textSecondary)
         }
+    }
+
+    // MARK: - Agent Settings Section
+
+    /// Per-agent settings: permission policy and transport preference for each
+    /// agent type the user has connected to.
+    private var agentSettingsSection: some View {
+        Section {
+            // Permission policy picker
+            Menu {
+                ForEach([
+                    AgentPermissionPolicy.autoApproveAll,
+                    .autoRejectHighRisk,
+                    .promptAlways,
+                ], id: \.displayName) { policy in
+                    Button {
+                        AgentPermissionStore.shared.setPermissionPolicy(
+                            policy, for: "default"
+                        )
+                    } label: {
+                        HStack {
+                            Label(policy.displayName, systemImage: policy.icon)
+                            if currentPermissionPolicy == policy {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: currentPermissionPolicy.icon)
+                        .foregroundColor(LitterTheme.accent)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Permission Policy")
+                            .litterFont(.subheadline)
+                            .foregroundColor(LitterTheme.textPrimary)
+                        Text(currentPermissionPolicy.description)
+                            .litterFont(.caption)
+                            .foregroundColor(LitterTheme.textSecondary)
+                    }
+                }
+            }
+            .listRowBackground(LitterTheme.surface.opacity(0.6))
+
+            // Agent type badges summary
+            HStack(spacing: 12) {
+                ForEach([
+                    AgentType.codex,
+                    .piNative,
+                    .droidNative,
+                ]) { agentType in
+                    VStack(spacing: 4) {
+                        AgentBadgeView(agentType: agentType, size: 16, showsLabel: true)
+                        Text(AgentPermissionStore.shared.permissionPolicy(for: agentType.persistentKey).shortName)
+                            .litterFont(.caption2)
+                            .foregroundColor(LitterTheme.textSecondary)
+                    }
+                }
+            }
+            .listRowBackground(LitterTheme.surface.opacity(0.6))
+        } header: {
+            Text("Agent Settings")
+                .foregroundColor(LitterTheme.textSecondary)
+        }
+    }
+
+    private var currentPermissionPolicy: AgentPermissionPolicy {
+        AgentPermissionStore.shared.permissionPolicy(for: "default")
     }
 
     // MARK: - Font Section

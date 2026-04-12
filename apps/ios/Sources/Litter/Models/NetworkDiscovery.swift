@@ -291,7 +291,8 @@ final class NetworkDiscovery {
             preferredConnectionMode: existing?.preferredConnectionMode,
             preferredCodexPort: existing?.preferredCodexPort,
             os: rust.sshBanner != nil ? rust.os : (rust.os ?? existing?.os),
-            sshBanner: rust.sshBanner ?? existing?.sshBanner
+            sshBanner: rust.sshBanner ?? existing?.sshBanner,
+            agentTypes: rust.agentTypes
         )
     }
 
@@ -358,7 +359,8 @@ final class NetworkDiscovery {
             }(),
             reachable: server.hasCodexServer || server.sshPort != nil,
             os: server.os,
-            sshBanner: server.sshBanner
+            sshBanner: server.sshBanner,
+            agentTypes: server.agentTypes
         )
     }
 

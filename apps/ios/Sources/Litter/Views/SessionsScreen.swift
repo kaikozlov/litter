@@ -28,6 +28,7 @@ struct SessionsScreen: View {
     @State private var pendingActiveSessionScroll = false
     @State private var sessionSearchDebounceTask: Task<Void, Never>?
     @State private var hasLoadedInitialSessions = false
+    @State private var agentTypeFilter: AgentType?
     private let autoLoadSessions: Bool
     private let onOpenConversation: (ThreadKey) -> Void
     private let onInfo: (() -> Void)?
@@ -500,6 +501,30 @@ struct SessionsScreen: View {
             }
             .buttonStyle(.plain)
 
+            // Agent type filter
+            Menu {
+                Button("All agents") { agentTypeFilter = nil }
+                Divider()
+                ForEach([
+                    (AgentType.piNative, "Pi"),
+                    (AgentType.droidNative, "Droid"),
+                    (AgentType.codex, "Codex"),
+                ], id: \.0.id) { type, label in
+                    Button {
+                        agentTypeFilter = type
+                    } label: {
+                        Label(label, systemImage: type.icon)
+                    }
+                }
+            } label: {
+                filterChip(
+                    title: agentTypeFilter?.displayName ?? "All agents",
+                    isActive: agentTypeFilter != nil,
+                    icon: agentTypeFilter?.icon ?? "cpu"
+                )
+            }
+            .buttonStyle(.plain)
+
             Menu {
                 ForEach(WorkspaceSortMode.allCases) { mode in
                     Button(mode.title) { workspaceSortMode = mode }
@@ -513,10 +538,11 @@ struct SessionsScreen: View {
             }
             .buttonStyle(.plain)
 
-            if selectedServerFilterId != nil || showOnlyForks {
+            if selectedServerFilterId != nil || showOnlyForks || agentTypeFilter != nil {
                 Button("Clear") {
                     selectedServerFilterId = nil
                     showOnlyForks = false
+                    agentTypeFilter = nil
                 }
                 .litterFont(.caption)
                 .foregroundColor(LitterTheme.accent)
@@ -783,6 +809,11 @@ struct SessionsScreen: View {
                                     .padding(.vertical, 2)
                                     .background(LitterTheme.accent)
                                     .cornerRadius(4)
+                            }
+
+                            // Agent type badge — show for non-Codex agents
+                            if let agentBadge = agentBadgeType(for: thread) {
+                                AgentTypePill(agentType: agentBadge)
                             }
 
                             Spacer(minLength: 0)
@@ -1200,6 +1231,19 @@ struct SessionsScreen: View {
 
     private func relativeDate(_ date: Date) -> String {
         Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    /// Determines the agent badge type for a session.
+    /// Uses the server's detected agent types and the stored selection.
+    /// Returns nil for Codex-only servers (no badge needed).
+    private func agentBadgeType(for thread: AppSessionSummary) -> AgentType? {
+        // Check if this server has multiple agent types or a non-Codex selection
+        let selectedAgent = AgentSelectionStore.shared.selectedAgentType(for: thread.serverId)
+        if let selected = selectedAgent, selected != .codex {
+            return selected
+        }
+        // If no explicit selection, don't show a badge (default Codex)
+        return nil
     }
 }
 
