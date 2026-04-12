@@ -1,0 +1,47 @@
+{
+  "milestone": "provider-abstraction",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 18,
+    "passed": 18,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-PROV-001",
+    "VAL-PROV-002",
+    "VAL-PROV-003",
+    "VAL-PROV-004",
+    "VAL-PROV-005",
+    "VAL-PROV-006",
+    "VAL-PROV-007",
+    "VAL-PROV-008",
+    "VAL-PROV-009",
+    "VAL-PROV-010",
+    "VAL-PROV-011",
+    "VAL-PROV-012",
+    "VAL-PROV-013",
+    "VAL-PROV-014",
+    "VAL-PROV-015",
+    "VAL-PROV-016",
+    "VAL-PROV-018",
+    "VAL-PROV-019"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null,
+  "flowReports": [
+    ".factory/validation/provider-abstraction/user-testing/flows/group-a-trait-types.json",
+    ".factory/validation/provider-abstraction/user-testing/flows/group-b-connect-events.json",
+    ".factory/validation/provider-abstraction/user-testing/flows/group-c-error-parity.json"
+  ],
+  "testInfrastructure": {
+    "tool": "cargo test",
+    "manifest": "shared/rust-bridge/codex-mobile-client/Cargo.toml",
+    "flags": "--lib --no-default-features",
+    "fullSuiteResult": "499 passed; 0 failed; 3 ignored",
+    "providerSpecificTests": "88 passed; 0 failed"
+  }
+}

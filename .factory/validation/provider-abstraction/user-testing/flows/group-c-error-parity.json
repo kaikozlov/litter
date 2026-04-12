@@ -1,0 +1,174 @@
+{
+  "groupId": "group-c-error-parity",
+  "testedAt": "2026-04-11T19:15:00Z",
+  "isolation": {
+    "type": "cargo-test",
+    "workingDirectory": "/home/kai/gitrepos/litter",
+    "manifestPath": "shared/rust-bridge/codex-mobile-client/Cargo.toml",
+    "flags": "--lib --no-default-features"
+  },
+  "toolsUsed": ["cargo test"],
+  "assertions": {
+    "VAL-PROV-008": {
+      "id": "VAL-PROV-008",
+      "title": "CodexProvider behavior parity — all existing tests pass unchanged",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib --no-default-features",
+          "expected": "test result: ok. N passed; 0 failed",
+          "observed": "test result: ok. 499 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.16s"
+        }
+      ],
+      "evidence": {
+        "testOutput": "499 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out",
+        "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib --no-default-features 2>&1 | tail -5"
+      },
+      "issues": null
+    },
+    "VAL-PROV-011": {
+      "id": "VAL-PROV-011",
+      "title": "MobileClient dispatches to correct provider by AgentType",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test with filter: mobile_client_dispatches_codex mobile_client_rejects_unsupported create_provider_for_unsupported create_provider_for_droid_native agent_type_unsupported",
+          "expected": "All 5 evidence tests pass",
+          "observed": "5 passed; 0 failed — all evidence tests found and passed"
+        }
+      ],
+      "evidence": {
+        "testOutput": "5 passed; 0 failed; 0 ignored; 0 measured; 497 filtered out; finished in 0.00s",
+        "tests": [
+          "provider::codex::tests::create_provider_for_droid_native_rejected",
+          "provider::codex::tests::create_provider_for_unsupported_agent_type",
+          "mobile_client::tests::mobile_client_tests::agent_type_unsupported_rejection_message_clear",
+          "mobile_client::tests::mobile_client_tests::mobile_client_rejects_unsupported_agent_type",
+          "mobile_client::tests::mobile_client_tests::mobile_client_dispatches_codex_provider"
+        ],
+        "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib --no-default-features -- mobile_client_dispatches_codex mobile_client_rejects_unsupported create_provider_for_unsupported create_provider_for_droid_native agent_type_unsupported"
+      },
+      "issues": null
+    },
+    "VAL-PROV-012": {
+      "id": "VAL-PROV-012",
+      "title": "Provider mid-stream disconnect yields Disconnected event, not panic",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test with filter: mid_stream_disconnect disconnect_during_active",
+          "expected": "All 4 evidence tests pass",
+          "observed": "4 passed; 0 failed — all evidence tests found and passed"
+        }
+      ],
+      "evidence": {
+        "testOutput": "4 passed; 0 failed; 0 ignored; 0 measured; 498 filtered out; finished in 0.00s",
+        "tests": [
+          "provider::error_handling::tests::mid_stream_disconnect_yields_disconnected_event",
+          "provider::error_handling::tests::mid_stream_disconnect_no_panic_on_subsequent_requests",
+          "provider::error_handling::tests::mid_stream_disconnect_multiple_subscribers",
+          "provider::error_handling::tests::disconnect_during_active_streaming"
+        ],
+        "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib --no-default-features -- mid_stream_disconnect disconnect_during_active"
+      },
+      "issues": null
+    },
+    "VAL-PROV-013": {
+      "id": "VAL-PROV-013",
+      "title": "Reconnection path works through trait transport",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test with filter: reconnect",
+          "expected": "All 4 evidence tests pass",
+          "observed": "32 passed (4 provider error_handling reconnect tests); 0 failed"
+        }
+      ],
+      "evidence": {
+        "testOutput": "32 passed; 0 failed; 0 ignored; 0 measured; 470 filtered out; finished in 0.10s",
+        "tests": [
+          "provider::error_handling::tests::reconnect_through_trait_transport_succeeds",
+          "provider::error_handling::tests::reconnect_through_boxed_trait_object",
+          "provider::error_handling::tests::reconnect_failure_then_success",
+          "provider::error_handling::tests::multiple_reconnect_cycles"
+        ],
+        "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib --no-default-features -- reconnect"
+      },
+      "issues": null
+    },
+    "VAL-PROV-016": {
+      "id": "VAL-PROV-016",
+      "title": "Provider handshake failure returns clean error and provider can be re-used",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test with filter: handshake_timeout malformed_init_recovery event_stream_usable_after_handshake boxed_provider_reusable_after_handshake",
+          "expected": "All 4 evidence tests pass",
+          "observed": "4 passed; 0 failed — all evidence tests found and passed"
+        }
+      ],
+      "evidence": {
+        "testOutput": "4 passed; 0 failed; 0 ignored; 0 measured; 498 filtered out; finished in 0.00s",
+        "tests": [
+          "provider::error_handling::tests::handshake_timeout_recovery",
+          "provider::error_handling::tests::malformed_init_recovery",
+          "provider::error_handling::tests::event_stream_usable_after_handshake_failure",
+          "provider::error_handling::tests::boxed_provider_reusable_after_handshake_timeout"
+        ],
+        "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib --no-default-features -- handshake_timeout malformed_init_recovery event_stream_usable_after_handshake boxed_provider_reusable_after_handshake"
+      },
+      "issues": null
+    },
+    "VAL-PROV-018": {
+      "id": "VAL-PROV-018",
+      "title": "Cancel mid-stream preserves partial content",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test with filter: cancel",
+          "expected": "All 3 evidence tests pass",
+          "observed": "5 passed (3 provider error_handling cancel tests + 2 voice_handoff cancel tests); 0 failed"
+        }
+      ],
+      "evidence": {
+        "testOutput": "5 passed; 0 failed; 0 ignored; 0 measured; 497 filtered out; finished in 0.00s",
+        "tests": [
+          "provider::error_handling::tests::cancel_mid_stream_preserves_partial_content",
+          "provider::error_handling::tests::cancel_then_reprompt_succeeds",
+          "provider::error_handling::tests::cancel_when_not_streaming_is_noop"
+        ],
+        "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib --no-default-features -- cancel"
+      },
+      "issues": null
+    },
+    "VAL-PROV-019": {
+      "id": "VAL-PROV-019",
+      "title": "Configuration changes mid-session",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test with filter: model_change reasoning_effort_change config_change invalid_model_change",
+          "expected": "All 7 evidence tests pass",
+          "observed": "7 passed; 0 failed — all evidence tests found and passed"
+        }
+      ],
+      "evidence": {
+        "testOutput": "7 passed; 0 failed; 0 ignored; 0 measured; 495 filtered out; finished in 0.00s",
+        "tests": [
+          "provider::error_handling::tests::model_change_while_idle_succeeds",
+          "provider::error_handling::tests::model_change_while_streaming_returns_error",
+          "provider::error_handling::tests::reasoning_effort_change_while_idle_succeeds",
+          "provider::error_handling::tests::reasoning_effort_change_while_streaming_returns_error",
+          "provider::error_handling::tests::config_change_after_stream_completes_succeeds",
+          "provider::error_handling::tests::config_change_method_rejects_during_streaming",
+          "provider::error_handling::tests::invalid_model_change_no_side_effect"
+        ],
+        "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib --no-default-features -- model_change reasoning_effort_change config_change invalid_model_change"
+      },
+      "issues": null
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 7 assertions: all 7 passed. Full test suite (VAL-PROV-008): 499 passed, 0 failed. All 32 targeted evidence tests across the remaining 6 assertions passed with 0 failures."
+}

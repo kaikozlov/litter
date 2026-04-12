@@ -1,0 +1,89 @@
+{
+  "groupId": "group-b-connect-events",
+  "testedAt": "2026-04-11T00:00:00Z",
+  "isolation": {
+    "type": "cargo-test",
+    "workingDirectory": "/home/kai/gitrepos/litter",
+    "manifestPath": "shared/rust-bridge/codex-mobile-client/Cargo.toml",
+    "features": "--no-default-features"
+  },
+  "toolsUsed": ["cargo test"],
+  "assertions": {
+    "VAL-PROV-002": {
+      "status": "pass",
+      "title": "ProviderTransport::connect establishes connection and returns connected state",
+      "evidence": "2 tests passed: provider::codex::tests::mock_provider_connect_disconnect, mobile_client::tests::mobile_client_tests::mobile_client_connect_with_provider_succeeds",
+      "details": "Both tests passed. mock_provider_connect_disconnect verified connect/disconnect lifecycle on CodexProvider. mobile_client_connect_with_provider_succeeds verified MobileClient connects via provider-backed path with server ID 'provider-test'. Command: cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib --no-default-features -- mock_provider_connect mobile_client_connect_with_provider_succeeds → 2 passed, 0 failed",
+      "steps": [
+        { "action": "Run cargo test with filters: mock_provider_connect mobile_client_connect_with_provider_succeeds", "expected": "Both tests pass", "observed": "2 tests passed, 0 failed" },
+        { "action": "Verify mock_provider_connect_disconnect test result", "expected": "ok", "observed": "ok" },
+        { "action": "Verify mobile_client_connect_with_provider_succeeds test result", "expected": "ok", "observed": "ok — logged 'MobileClient: connected provider-backed server provider-test'" }
+      ]
+    },
+    "VAL-PROV-003": {
+      "status": "pass",
+      "title": "ProviderTransport::connect failure returns TransportError, no panic",
+      "evidence": "3 tests passed: connect_failure_returns_error_no_panic_reusable, connect_failure_on_never_connected_provider, reconnect_failure_then_success",
+      "details": "All connect failure tests passed. connect_failure_returns_error_no_panic_reusable verified invalid URL returns Err without panic. connect_failure_on_never_connected_provider verified operations on never-connected provider return proper error. reconnect_failure_then_success verified reconnect failure path. Command: cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib --no-default-features -- connect_failure → 3 passed, 0 failed",
+      "steps": [
+        { "action": "Run cargo test with filter: connect_failure", "expected": "All connect failure tests pass", "observed": "3 tests passed, 0 failed" },
+        { "action": "Verify connect_failure_returns_error_no_panic_reusable", "expected": "ok", "observed": "ok" },
+        { "action": "Verify connect_failure_on_never_connected_provider", "expected": "ok", "observed": "ok" },
+        { "action": "Verify reconnect_failure_then_success", "expected": "ok", "observed": "ok" }
+      ]
+    },
+    "VAL-PROV-004": {
+      "status": "pass",
+      "title": "ProviderTransport::disconnect cleanly tears down resources",
+      "evidence": "4 tests passed: disconnect_is_idempotent, post_disconnect_request_returns_disconnected_error, post_disconnect_notification_returns_disconnected_error, post_disconnect_list_sessions_returns_disconnected_error",
+      "details": "All disconnect tests passed. disconnect_is_idempotent verified double-disconnect causes no panic. Three post_disconnect_* tests verified that request, notification, and list_sessions all return Disconnected error after teardown. Command: cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib --no-default-features -- disconnect_is_idempotent post_disconnect → 4 passed, 0 failed",
+      "steps": [
+        { "action": "Run cargo test with filters: disconnect_is_idempotent post_disconnect", "expected": "All disconnect tests pass", "observed": "4 tests passed, 0 failed" },
+        { "action": "Verify disconnect_is_idempotent", "expected": "ok — no panic on double disconnect", "observed": "ok" },
+        { "action": "Verify post_disconnect_request_returns_disconnected_error", "expected": "ok — returns Disconnected error", "observed": "ok" },
+        { "action": "Verify post_disconnect_notification_returns_disconnected_error", "expected": "ok — returns Disconnected error", "observed": "ok" },
+        { "action": "Verify post_disconnect_list_sessions_returns_disconnected_error", "expected": "ok — returns Disconnected error", "observed": "ok" }
+      ]
+    },
+    "VAL-PROV-005": {
+      "status": "pass",
+      "title": "ProviderTransport::stream_events yields normalized ProviderEvents",
+      "evidence": "8 tests passed: provider_event_mapping_completeness, every_provider_event_variant_maps_or_returns_none, provider_event_message_delta_to_ui_event, provider_event_reasoning_delta_to_ui_event, provider_event_command_output_delta_to_ui_event, provider_event_turn_started_to_ui_event, provider_event_turn_completed_to_ui_event, provider_event_disconnected_to_ui_event",
+      "details": "All mapping tests passed. provider_event_mapping_completeness exhaustively verified every AppServerEvent variant maps to a ProviderEvent. every_provider_event_variant_maps_or_returns_none verified all ProviderEvent variants are handled. Individual mapping tests verified correct translation for message delta, reasoning delta, command output delta, turn started, turn completed, and disconnected events. Command: cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib --no-default-features -- provider_event_mapping_completeness every_provider_event_variant_maps_or_returns_none provider_event_message_delta provider_event_reasoning_delta provider_event_command_output provider_event_turn_started provider_event_turn_completed provider_event_disconnected → 8 passed, 0 failed",
+      "steps": [
+        { "action": "Run cargo test with mapping test filters", "expected": "All mapping tests pass", "observed": "8 tests passed, 0 failed" },
+        { "action": "Verify provider_event_mapping_completeness", "expected": "ok — exhaustive coverage", "observed": "ok" },
+        { "action": "Verify every_provider_event_variant_maps_or_returns_none", "expected": "ok — all variants handled", "observed": "ok" },
+        { "action": "Verify individual mapping tests (message, reasoning, command, turn, disconnected)", "expected": "All ok", "observed": "6 individual mapping tests all ok" }
+      ]
+    },
+    "VAL-PROV-009": {
+      "status": "pass",
+      "title": "ServerSession holds Box<dyn ProviderTransport> without behavior change",
+      "evidence": "5 tests passed: from_provider_creates_connected_session, from_provider_request_through_session, from_provider_notify_succeeds, from_provider_events_forwarded, from_provider_disconnect_transitions_health",
+      "details": "All ServerSession trait transport tests passed. from_provider_creates_connected_session verified session creation through trait-based transport. from_provider_request_through_session verified RPC requests work through the trait boundary. from_provider_notify_succeeds verified notifications. from_provider_events_forwarded verified event streaming. from_provider_disconnect_transitions_health verified health state transitions on disconnect. Command: cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib --no-default-features -- from_provider → 5 passed, 0 failed",
+      "steps": [
+        { "action": "Run cargo test with filter: from_provider", "expected": "All ServerSession trait transport tests pass", "observed": "5 tests passed, 0 failed" },
+        { "action": "Verify from_provider_creates_connected_session", "expected": "ok", "observed": "ok" },
+        { "action": "Verify from_provider_request_through_session", "expected": "ok", "observed": "ok" },
+        { "action": "Verify from_provider_notify_succeeds", "expected": "ok", "observed": "ok" },
+        { "action": "Verify from_provider_events_forwarded", "expected": "ok", "observed": "ok" },
+        { "action": "Verify from_provider_disconnect_transitions_health", "expected": "ok", "observed": "ok" }
+      ]
+    },
+    "VAL-PROV-015": {
+      "status": "pass",
+      "title": "Provider list_sessions delegates to CodexProvider correctly",
+      "evidence": "2 tests passed: post_disconnect_list_sessions_returns_disconnected_error, session_info_record_construction",
+      "details": "Both tests passed. post_disconnect_list_sessions_returns_disconnected_error verified list_sessions returns Disconnected error after teardown. session_info_record_construction verified correct construction of SessionInfo records used in list_sessions results. Command: cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib --no-default-features -- list_sessions session_info → 2 passed, 0 failed",
+      "steps": [
+        { "action": "Run cargo test with filters: list_sessions session_info", "expected": "Both tests pass", "observed": "2 tests passed, 0 failed" },
+        { "action": "Verify post_disconnect_list_sessions_returns_disconnected_error", "expected": "ok", "observed": "ok" },
+        { "action": "Verify session_info_record_construction", "expected": "ok", "observed": "ok" }
+      ]
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 6 assertions (VAL-PROV-002, VAL-PROV-003, VAL-PROV-004, VAL-PROV-005, VAL-PROV-009, VAL-PROV-015) with a total of 24 tests. All 24 tests passed, 0 failed. No frictions or blockers encountered."
+}
