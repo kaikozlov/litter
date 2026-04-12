@@ -311,3 +311,52 @@ Wraps existing `AppServerClient` behind `ProviderTransport`. Creates an internal
 ### Known Testing Gotchas
 - Combined lifecycle test (init → auth → session/new → prompt → list in single test) hangs on Linux with `Arc<Mutex<AcpClient>>` mock pattern due to tokio scheduling. Split into focused individual tests.
 - `cargo test` (default) fails on Linux due to V8 TLS relocations with cdylib crate type — use `cargo test --lib` instead
+
+## Droid ACP Transport (Stream-JSON)
+
+### Architecture
+- `DroidAcpTransport` implements `ProviderTransport` over Droid's `--output-format stream-json` protocol
+- Connects via SSH → spawns `droid exec --output-format stream-json --input-format stream-json` → streaming JSON over stdin/stdout
+- NOT the same as the standard ACP JSON-RPC protocol — uses Droid's own streaming JSON format
+
+### Module Structure
+- `provider/droid/acp_transport.rs` — `DroidAcpTransport` implementing `ProviderTransport`
+- `provider/droid/stream_json.rs` — Droid stream-json protocol types (`StreamMessage` enum)
+
+### Stream-JSON Protocol
+Droid's `--output-format stream-json` emits newline-delimited JSON messages:
+- `{"type":"system","subtype":"init","session_id":"...","model":"...","tools":[...]}` — Session init
+- `{"type":"message","role":"user/assistant","text":"..."}` — Messages
+- `{"type":"tool_call","toolName":"...","parameters":{...}}` — Tool invocations
+- `{"type":"tool_result","value":"...","isError":false}` — Tool results
+- `{"type":"completion","finalText":"...","usage":{...}}` — Session completion
+
+Input: `{"type":"user_message","text":"..."}\n` via stdin
+
+### Event Mapping
+| Droid StreamMessage | ProviderEvent |
+|---|---|
+| `system/init` | `StreamingStarted` |
+| `message` (role=assistant) | `ItemStarted` → `MessageDelta` → `ItemCompleted` |
+| `tool_call` | `ToolCallStarted` + `CommandOutputDelta` |
+| `tool_result` | `CommandOutputDelta` + `ToolCallUpdate` |
+| `completion` | `StreamingCompleted` |
+
+### Permission Auto-Handling
+- Maps Droid autonomy levels to `AgentPermissionPolicy`:
+  - `Suggest` → `PromptAlways`
+  - `Normal` → `PromptAlways`
+  - `Full` → `AutoApproveAll`
+
+### MCP Config
+- `generate_mcp_config()` generates a session-scoped `.factory/mcp.json` string
+- `build_spawn_command()` constructs the `droid exec` command with appropriate flags
+
+### Test Coverage
+- 24 unit tests in `acp_transport::tests` (all pass)
+- 10 protocol tests in `stream_json::tests` (all pass)
+- 3 E2E tests against gvps (marked `#[ignore]`, all pass):
+  - `e2e_droid_acp_stream_json_init` — connect, init, streaming response
+  - `e2e_droid_acp_stream_json_tool_use` — tool call with file read
+  - `e2e_droid_acp_full_pipeline` — full ProviderEvent pipeline verification
+- Full suite: 800 passed; 0 failed; 6 ignored
