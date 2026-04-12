@@ -221,3 +221,57 @@ Wraps existing `AppServerClient` behind `ProviderTransport`. Creates an internal
 ### Test Coverage
 - 80+ ACP-specific tests across framing (28), lifecycle (20), streaming/handlers (32)
 - Full suite: 581 passed; 0 failed; 3 ignored
+
+## Pi Native Transport (provider/pi/)
+
+### Module Structure
+- `protocol.rs` — Pi RPC protocol types: `PiCommand` (8 variants: prompt, abort, get_state, set_model, get_available_models, set_thinking_level, set_steering_mode, compact), `PiEvent` (15 variants), `PiThinkingLevel` (6 levels: off/minimal/low/medium/high/xhigh), JSONL serialization/deserialization
+- `transport.rs` — `PiNativeTransport` implementing `ProviderTransport`, manages bidirectional stream lifecycle, JSONL framing, Pi event → ProviderEvent mapping, and command response correlation
+- `mock.rs` — `MockPiChannel` implementing `AsyncRead + AsyncWrite` for in-memory testing with `Notify`-based async wake signaling
+
+### PiNativeTransport Architecture
+- Created with `PiNativeTransport::new(stream)` where `stream: AsyncRead + AsyncWrite`
+- Spawns a single IO loop task that reads JSONL lines and writes outgoing commands
+- Uses `broadcast::Sender<ProviderEvent>` for event distribution
+- Tracks pending commands by type for response correlation (e.g., `get_state`, `get_available_models`)
+- Command timeout: 30 seconds
+
+### Pi Event Mapping
+| Pi Event | ProviderEvent |
+|---|---|
+| `agent_start` | `StreamingStarted` |
+| `agent_end` | `StreamingCompleted` |
+| `turn_start` / `turn_end` | `TurnStarted` / `TurnCompleted` |
+| `message_start` / `message_end` | `ItemStarted` / `ItemCompleted` |
+| `message_update` (text_delta) | `MessageDelta` |
+| `message_update` (thinking_delta) | `ReasoningDelta` |
+| `toolcall_start` | `ToolCallStarted` |
+| `toolcall_delta` / `toolcall_end` | `ToolCallUpdate` |
+| `tool_execution_start` | `ToolCallStarted` |
+| `tool_execution_update` (stdout) | `CommandOutputDelta` |
+| `tool_execution_update` (stderr) | `CommandOutputDelta` (prefixed `[stderr]`) |
+| `tool_execution_end` | `ToolCallUpdate` (with exit code) |
+| `response` (correlated) | Resolves pending command |
+| `error` | `ProviderEvent::Error` |
+
+### Pi RPC Commands (via ProviderTransport::send_request)
+- `prompt` — sends prompt, streams events via broadcast
+- `abort` — cancels active prompt
+- `set_thinking_level` — maps to 6 levels (off/minimal/low/medium/high/xhigh)
+- `set_model` — changes model for next prompt
+- `get_available_models` — returns model list
+- `get_state` — queries current session state
+- `set_steering_mode` — sets steering mode
+- `compact` — compacts session context
+
+### Error Handling
+- **Pi process crash**: Stream EOF → `ProviderEvent::Disconnected` emitted, transport marks disconnected
+- **Malformed JSONL**: Log warning, skip line, continue processing
+- **Unknown event type**: Serde fails → logged as warning, processing continues
+- **Pi binary not found**: Empty stream → immediate EOF → `ProviderEvent::Disconnected`
+- **Post-disconnect requests**: Return `Err(TransportError::Disconnected)`
+- **Disconnect idempotent**: Multiple disconnect calls are no-ops
+
+### Test Coverage
+- 54 Pi-specific tests: protocol (28), transport (21), mock (5)
+- Full suite: 635 passed; 0 failed; 3 ignored

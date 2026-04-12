@@ -57,7 +57,7 @@ impl fmt::Display for AgentType {
 /// Determines how the client responds to `request_permission` requests from
 /// the agent. Different agents on the same server can have different policies.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, uniffi::Enum,
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, uniffi::Enum,
 )]
 #[serde(rename_all = "camelCase")]
 pub enum AgentPermissionPolicy {
@@ -70,13 +70,8 @@ pub enum AgentPermissionPolicy {
     /// Always prompt the user for every permission request.
     /// The request surfaces as a `ProviderEvent::ApprovalRequested` and
     /// the client waits for the user's response.
+    #[default]
     PromptAlways,
-}
-
-impl Default for AgentPermissionPolicy {
-    fn default() -> Self {
-        Self::PromptAlways
-    }
 }
 
 impl fmt::Display for AgentPermissionPolicy {
@@ -439,6 +434,7 @@ pub mod acp;
 pub mod codex;
 pub mod error_handling;
 pub mod mapping;
+pub mod pi;
 
 // ── Factory functions ──────────────────────────────────────────────────────
 
