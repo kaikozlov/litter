@@ -437,7 +437,7 @@ fn try_decode_agent_response(raw: &str) -> Option<(RequestId, AgentResponse)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol_schema::{CancelNotification, ProtocolVersion, SessionId};
+    use agent_client_protocol_schema::{CancelNotification, ProtocolVersion};
     /// Helper: create a minimal session/update notification JSON line.
     fn make_session_update_line(session_id: &str) -> String {
         let update_json = serde_json::json!({

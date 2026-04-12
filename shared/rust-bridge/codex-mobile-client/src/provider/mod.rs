@@ -50,6 +50,45 @@ impl fmt::Display for AgentType {
     }
 }
 
+// ── AgentPermissionPolicy ──────────────────────────────────────────────────
+
+/// Per-agent permission policy for handling agent requests.
+///
+/// Determines how the client responds to `request_permission` requests from
+/// the agent. Different agents on the same server can have different policies.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, uniffi::Enum,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentPermissionPolicy {
+    /// Automatically approve all permission requests from the agent.
+    /// Use for fully trusted agents only.
+    AutoApproveAll,
+    /// Automatically reject high-risk operations, approve low-risk ones.
+    /// The risk assessment is based on the tool call kind and parameters.
+    AutoRejectHighRisk,
+    /// Always prompt the user for every permission request.
+    /// The request surfaces as a `ProviderEvent::ApprovalRequested` and
+    /// the client waits for the user's response.
+    PromptAlways,
+}
+
+impl Default for AgentPermissionPolicy {
+    fn default() -> Self {
+        Self::PromptAlways
+    }
+}
+
+impl fmt::Display for AgentPermissionPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AutoApproveAll => write!(f, "Auto Approve All"),
+            Self::AutoRejectHighRisk => write!(f, "Auto Reject High Risk"),
+            Self::PromptAlways => write!(f, "Prompt Always"),
+        }
+    }
+}
+
 // ── AgentInfo ──────────────────────────────────────────────────────────────
 
 /// Describes a detected agent on a server.
@@ -750,6 +789,46 @@ mod tests {
                 assert_eq!(payload, r#"{"foo":"bar"}"#);
             }
             _ => panic!("expected Unknown variant"),
+        }
+    }
+
+    // ── AgentPermissionPolicy ──────────────────────────────────────────
+
+    #[test]
+    fn agent_permission_policy_all_variants() {
+        let variants = [
+            AgentPermissionPolicy::AutoApproveAll,
+            AgentPermissionPolicy::AutoRejectHighRisk,
+            AgentPermissionPolicy::PromptAlways,
+        ];
+        assert_eq!(variants.len(), 3, "expected 3 AgentPermissionPolicy variants");
+
+        // Verify Display.
+        assert_eq!(format!("{}", AgentPermissionPolicy::AutoApproveAll), "Auto Approve All");
+        assert_eq!(format!("{}", AgentPermissionPolicy::AutoRejectHighRisk), "Auto Reject High Risk");
+        assert_eq!(format!("{}", AgentPermissionPolicy::PromptAlways), "Prompt Always");
+
+        // Verify Copy, Clone, PartialEq.
+        let a = variants[0];
+        let b = a;
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn agent_permission_policy_default_is_prompt_always() {
+        assert_eq!(AgentPermissionPolicy::default(), AgentPermissionPolicy::PromptAlways);
+    }
+
+    #[test]
+    fn agent_permission_policy_serde_roundtrip() {
+        for variant in [
+            AgentPermissionPolicy::AutoApproveAll,
+            AgentPermissionPolicy::AutoRejectHighRisk,
+            AgentPermissionPolicy::PromptAlways,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: AgentPermissionPolicy = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized, "round-trip failed for {variant:?}");
         }
     }
 
