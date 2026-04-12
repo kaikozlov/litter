@@ -2,7 +2,7 @@ commands:
   install: cargo build
   typecheck: cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml
   build: cargo build --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml
-  test: cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml
+  test: cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib
   lint: cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml -- -D warnings
   bindings: ./shared/rust-bridge/generate-bindings.sh
 

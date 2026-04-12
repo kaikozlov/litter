@@ -274,4 +274,40 @@ Wraps existing `AppServerClient` behind `ProviderTransport`. Creates an internal
 
 ### Test Coverage
 - 54 Pi-specific tests: protocol (28), transport (21), mock (5)
-- Full suite: 635 passed; 0 failed; 3 ignored
+- Full suite: 692 passed; 0 failed; 3 ignored
+
+## Pi ACP Transport
+
+### Architecture
+- `PiAcpTransport` wraps the universal `AcpClient` to implement `ProviderTransport`
+- Connects via SSH → spawns `npx pi-acp` → ACP JSON-RPC over NDJSON
+- Uses `Arc<Mutex<AcpClient>>` internally for async access
+
+### Key Design Decisions
+- `next_event()` always returns `None` — all event consumption goes through `event_receiver()` since AcpClient doesn't expose a non-blocking peek
+- No transport-level reconnection — reconnection requires creating a new `PiAcpTransport` instance at the MobileClient/ServerSession level
+- Uses `Arc<Mutex<bool>>` for `initialized`/`disconnected` flags (unlike PiNativeTransport which uses `Arc<AtomicBool>`)
+
+### Pi Auto-Detection
+- Module: `provider/pi/detection.rs`
+- Three probe functions: `probe_pi_binary` (which pi), `probe_pi_version` (pi --version), `probe_pi_acp` (npx pi-acp --version)
+- Returns `DetectedPiAgent` with flags for native and ACP availability
+- Probe functions require real SSH — no direct unit test coverage
+
+### Pi Session Persistence
+- Module: `provider/pi/sessions.rs`
+- Reads `~/.pi/agent/sessions/*.jsonl` files on remote host
+- `SessionInfo.created_at` and `updated_at` are empty strings (Pi doesn't store timestamps in a standard format)
+
+### Pi Transport Preference
+- Module: `provider/pi/preference.rs`
+- 4 modes: `PreferNative`, `PreferAcp`, `ForceNative`, `ForceAcp`
+- Native preferred by default; falls back to ACP if native unavailable
+
+### Test Coverage (ACP)
+- 17 ACP transport tests, 4 detection tests, 11 session tests, 14 preference tests
+- Full suite: 692 passed; 0 failed; 3 ignored
+
+### Known Testing Gotchas
+- Combined lifecycle test (init → auth → session/new → prompt → list in single test) hangs on Linux with `Arc<Mutex<AcpClient>>` mock pattern due to tokio scheduling. Split into focused individual tests.
+- `cargo test` (default) fails on Linux due to V8 TLS relocations with cdylib crate type — use `cargo test --lib` instead

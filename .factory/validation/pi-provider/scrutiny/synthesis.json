@@ -1,0 +1,75 @@
+{
+  "milestone": "pi-provider",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib", "exitCode": 0, "note": "692 passed; 0 failed; 3 ignored. Default cargo test fails on Linux due to V8 TLS relocations with cdylib crate type --lib is required" },
+    "typecheck": { "passed": true, "command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml", "exitCode": 0 },
+    "lint": { "passed": true, "command": "cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml -- -D warnings", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "nonBlockingIssues": [
+    {
+      "featureId": "pi-native-transport",
+      "severity": "non_blocking",
+      "description": "MessageStart handler emits empty-string MessageDelta for assistant-role messages, adding noise to the event stream. Consider using ItemStarted alone as the message-start signal."
+    },
+    {
+      "featureId": "pi-native-transport",
+      "severity": "non_blocking",
+      "description": "subscribe()/event_receiver() use blocking_lock() fallback which is a latent deadlock risk in async context. Current usage is safe but fragile."
+    },
+    {
+      "featureId": "pi-native-transport",
+      "severity": "non_blocking",
+      "description": "Toolcall delta/end events lose call_id correlation (use empty string). Downstream consumers relying on call_id for correlation would break."
+    },
+    {
+      "featureId": "pi-acp-transport",
+      "severity": "non_blocking",
+      "description": "is_connected() uses Mutex try_lock instead of AtomicBool, inconsistent with PiNativeTransport. False positives possible during disconnect."
+    },
+    {
+      "featureId": "pi-acp-transport",
+      "severity": "non_blocking",
+      "description": "Session timestamps (created_at, updated_at) are always empty strings because Pi doesn't store timestamps in a standard format."
+    },
+    {
+      "featureId": "pi-acp-transport",
+      "severity": "non_blocking",
+      "description": "Detection probe functions (probe_pi_binary, probe_pi_version, probe_pi_acp) have zero direct unit test coverage — only tested via data structure tests."
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Updated provider-transport.md with Pi ACP transport architecture, detection, session persistence, transport preference, test coverage, and known testing gotchas (combined lifecycle test hang, cargo test --lib requirement on Linux)",
+      "sourceFeature": "pi-acp-transport"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add note about using `cargo test --lib` instead of plain `cargo test` for the codex-mobile-client crate on Linux, since the cdylib crate type causes V8 TLS relocation linker errors.",
+      "evidence": "Both pi-native-transport and pi-acp-transport workers discovered this independently and worked around it. The services.yaml test command also needs updating.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "AgentPermissionPolicy was changed from manual Default impl to derive Default with #[default] attribute — convention change",
+      "reason": "Minor style improvement, not systemic, not worth a guidance update"
+    },
+    {
+      "observation": "Worker may not have followed TDD (write tests first) as prescribed by skill procedure",
+      "reason": "Ambiguous — transcript skeleton is heavily truncated, handoff reports followedProcedure: true. Not actionable without clearer evidence."
+    }
+  ],
+  "previousRound": null
+}
