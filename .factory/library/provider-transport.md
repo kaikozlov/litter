@@ -426,3 +426,31 @@ Droid sends `droid_working_state_changed(idle)` *before* the `complete` notifica
 - `blocking_lock()` used as fallback in subscribe/event_receiver
 - Transient retry test doesn't fully validate same-request retry semantics
 - `$HOME` shell expansion in detection probe may fail on non-standard shells
+
+## Cross-Provider Integration Tests (provider/cross_provider.rs)
+
+### Test Coverage (22 tests)
+- **Codex regression**: connect-through-prompt + approval flow through provider trait (VAL-CROSS-001, VAL-CROSS-002)
+- **Multi-provider concurrent sessions**: three providers streaming simultaneously with isolated event attribution (VAL-CROSS-006, VAL-CROSS-016)
+- **Session history aggregation**: sessions from all providers collected with unique IDs (VAL-CROSS-010)
+- **Store/reducer parity**: identical ProviderEvent produces identical hydrated output regardless of source (VAL-CROSS-012)
+- **Unicode content parity**: emoji, CJK, RTL preserved identically across Codex/Pi/Droid providers (VAL-CROSS-017)
+- **Transport fallback**: native → ACP and ACP → native fallback flows (VAL-CROSS-013)
+- **Large response handling**: 1000+ command output deltas + 500+ Pi text chunks (VAL-PROV-017)
+- **App background simulation**: state preserved across background/foreground cycle (VAL-CROSS-019)
+- **Network change simulation**: disconnect → reconnect → resume streaming (VAL-CROSS-020)
+- **SSH keepalive**: idle connection still functional after delay (VAL-PROV-020)
+- **Multi-agent SSH channel isolation**: Pi and Droid channels fully independent (VAL-CROSS-018)
+- **Disconnect isolation**: one provider crash doesn't affect others (VAL-CROSS-008)
+- **Session ID collision**: ThreadKey distinguishes by server_id (VAL-CROSS-021)
+- **ProviderTransport object safety**: all transport types work as `Box<dyn ProviderTransport>`
+
+### Test Infrastructure
+- `SequencedMockProvider`: lightweight mock with broadcast event channel (4096 capacity)
+- `emit_streaming_sequence()`: helper for standard message streaming
+- `emit_command_sequence()`: helper for tool call lifecycle
+- `emit_approval_sequence()`: helper for approval request/resolution
+- `collect_events()`: async helper with 200ms timeout for event collection
+
+### Test Count
+- Full suite: 822 passed; 0 failed; 6 ignored (800 pre-existing + 22 new cross-provider)
