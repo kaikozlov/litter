@@ -23,6 +23,7 @@
 
 pub mod acp_transport;
 pub mod detection;
+pub mod e2e;
 pub mod mock;
 pub mod preference;
 pub mod protocol;
