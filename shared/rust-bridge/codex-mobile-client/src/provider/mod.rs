@@ -432,6 +432,7 @@ pub trait ProviderTransport: Send + Sync + 'static {
 
 pub mod acp;
 pub mod codex;
+pub mod droid;
 pub mod error_handling;
 pub mod mapping;
 pub mod pi;
