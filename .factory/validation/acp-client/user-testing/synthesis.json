@@ -1,0 +1,59 @@
+{
+  "milestone": "acp-client",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 24,
+    "passed": 24,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-ACP-001",
+    "VAL-ACP-002",
+    "VAL-ACP-003",
+    "VAL-ACP-004",
+    "VAL-ACP-005",
+    "VAL-ACP-006",
+    "VAL-ACP-007",
+    "VAL-ACP-008",
+    "VAL-ACP-009",
+    "VAL-ACP-010",
+    "VAL-ACP-011",
+    "VAL-ACP-012",
+    "VAL-ACP-013",
+    "VAL-ACP-014",
+    "VAL-ACP-015",
+    "VAL-ACP-016",
+    "VAL-ACP-017",
+    "VAL-ACP-018",
+    "VAL-ACP-019",
+    "VAL-ACP-020",
+    "VAL-ACP-021",
+    "VAL-ACP-022",
+    "VAL-ACP-023",
+    "VAL-ACP-024"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null,
+  "flowReports": [
+    ".factory/validation/acp-client/user-testing/flows/framing-group.json",
+    ".factory/validation/acp-client/user-testing/flows/lifecycle-group.json",
+    ".factory/validation/acp-client/user-testing/flows/streaming-group.json"
+  ],
+  "details": {
+    "testCommand": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- acp",
+    "totalTestsRun": 79,
+    "totalTestsPassed": 79,
+    "totalTestsFailed": 0,
+    "testModules": {
+      "provider::acp::client": 35,
+      "provider::acp::framing": 16,
+      "provider::acp::handlers": 15,
+      "provider::acp::mock": 9,
+      "provider::acp::mapping": 4
+    }
+  }
+}

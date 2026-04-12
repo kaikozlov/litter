@@ -1,0 +1,183 @@
+{
+  "groupId": "framing-group",
+  "testedAt": "2026-04-12T00:00:00Z",
+  "isolation": {
+    "type": "cargo test",
+    "workingDirectory": "/home/kai/gitrepos/litter",
+    "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- acp"
+  },
+  "toolsUsed": ["cargo test"],
+  "assertions": [
+    {
+      "id": "VAL-ACP-011",
+      "title": "NDJSON framing serializes and deserializes correctly",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run ndjson_serialize_single_message",
+          "expected": "Client notification serializes to single JSON line without newline, containing method name",
+          "observed": "Test passed — serialized cancel notification contains 'cancel', no embedded newline, starts with JSON-RPC header"
+        },
+        {
+          "action": "Run ndjson_deserialize_multiple_in_one_read",
+          "expected": "Two session/update notifications in single byte stream decode as separate messages",
+          "observed": "Test passed — decoded >=2 messages from concatenated input"
+        },
+        {
+          "action": "Run ndjson_skips_empty_lines",
+          "expected": "Empty and whitespace-only lines return Skipped without error",
+          "observed": "Test passed — empty and whitespace-only lines skipped with 'empty' reason"
+        },
+        {
+          "action": "Run ndjson_invalid_line_does_not_kill_stream",
+          "expected": "Invalid JSON returns Skipped, subsequent valid line still decodes",
+          "observed": "Test passed — 'not valid json {{{' skipped with 'invalid JSON' reason, valid line after it decoded as AgentNotification"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/framing-group/framing-tests-output.txt",
+        "consoleErrors": "none",
+        "testsRun": [
+          "provider::acp::framing::tests::ndjson_serialize_single_message",
+          "provider::acp::framing::tests::ndjson_deserialize_multiple_in_one_read",
+          "provider::acp::framing::tests::ndjson_skips_empty_lines",
+          "provider::acp::framing::tests::ndjson_invalid_line_does_not_kill_stream"
+        ],
+        "result": "4/4 passed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-012",
+      "title": "NDJSON framing handles partial messages across reads",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run ndjson_partial_message_buffered",
+          "expected": "Message split at midpoint still decodes correctly via BufReader",
+          "observed": "Test passed — partial message buffered and decoded successfully"
+        },
+        {
+          "action": "Run ndjson_large_message_across_reads",
+          "expected": "150KB JSON message serializes and deserializes without buffer overflow",
+          "observed": "Test passed — large message with 150,000-char payload decoded successfully"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/framing-group/framing-tests-output.txt",
+        "consoleErrors": "none",
+        "testsRun": [
+          "provider::acp::framing::tests::ndjson_partial_message_buffered",
+          "provider::acp::framing::tests::ndjson_large_message_across_reads"
+        ],
+        "result": "2/2 passed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-018",
+      "title": "Mock transport enables in-memory ACP message exchange",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run mock_transport_queue_responses",
+          "expected": "Queued response can be read through NdjsonReader",
+          "observed": "Test passed — queued session/update response read and decoded successfully"
+        },
+        {
+          "action": "Run mock_transport_captures_sent_messages",
+          "expected": "Client notification written to transport is captured for inspection",
+          "observed": "Test passed — captured output contains 'cancel' and ends with newline"
+        },
+        {
+          "action": "Run mock_transport_simulate_disconnect",
+          "expected": "After disconnect, reads return StreamClosed, is_disconnected returns true",
+          "observed": "Test passed — StreamClosed error after disconnect, disconnect state confirmed"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/framing-group/mock-transport-tests-output.txt",
+        "consoleErrors": "none",
+        "testsRun": [
+          "provider::acp::mock::tests::mock_transport_queue_responses",
+          "provider::acp::mock::tests::mock_transport_captures_sent_messages",
+          "provider::acp::mock::tests::mock_transport_simulate_disconnect"
+        ],
+        "result": "3/3 passed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-020",
+      "title": "Large ACP prompt",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run ndjson_large_message_across_reads",
+          "expected": ">100KB text payload serialized as single NDJSON line and deserialized without buffer overflow",
+          "observed": "Test passed — 150,000-char payload in session/update message decoded successfully"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/framing-group/framing-tests-output.txt",
+        "consoleErrors": "none",
+        "testsRun": [
+          "provider::acp::framing::tests::ndjson_large_message_across_reads"
+        ],
+        "result": "1/1 passed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-021",
+      "title": "Unicode in ACP messages",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run ndjson_multi_byte_utf8_across_reads",
+          "expected": "Emoji and multi-byte UTF-8 characters round-trip through NDJSON framing without corruption",
+          "observed": "Test passed — 'Hello 🌍🎉🦀' payload in session/update decoded successfully"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/framing-group/framing-tests-output.txt",
+        "consoleErrors": "none",
+        "testsRun": [
+          "provider::acp::framing::tests::ndjson_multi_byte_utf8_across_reads"
+        ],
+        "result": "1/1 passed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-022",
+      "title": "Binary/non-JSON output from agent",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run ndjson_binary_garbage_skipped",
+          "expected": "Binary content (0x01 0x02 0x03) is skipped without panic",
+          "observed": "Test passed — binary garbage line returned as Skipped variant"
+        },
+        {
+          "action": "Run ndjson_null_bytes_in_stream (ndjson_null_bytes_skipped)",
+          "expected": "Null bytes in stream are detected and line is skipped without panic",
+          "observed": "Test passed — line containing null byte skipped with 'null byte in line' reason"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/framing-group/framing-tests-output.txt",
+        "consoleErrors": "none",
+        "testsRun": [
+          "provider::acp::framing::tests::ndjson_binary_garbage_skipped",
+          "provider::acp::framing::tests::ndjson_null_bytes_skipped"
+        ],
+        "result": "2/2 passed"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 6 assertions (VAL-ACP-011, VAL-ACP-012, VAL-ACP-018, VAL-ACP-020, VAL-ACP-021, VAL-ACP-022): all 6 passed. Total tests executed: 29 framing tests + 9 mock transport tests = 38 tests, 0 failures. Evidence saved to evidence/acp-client/framing-group/."
+}

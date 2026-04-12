@@ -1,0 +1,245 @@
+{
+  "groupId": "streaming-group",
+  "testedAt": "2026-04-12T00:00:00Z",
+  "isolation": {
+    "type": "cargo-test",
+    "workingDirectory": "/home/kai/gitrepos/litter",
+    "testCommand": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- acp"
+  },
+  "toolsUsed": ["cargo test"],
+  "assertions": [
+    {
+      "id": "VAL-ACP-004",
+      "title": "SessionUpdate AgentMessageChunk maps to ProviderEvent message delta",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test acp_streaming_agent_message_chunk_maps_to_message_delta",
+          "expected": "Test passes — single AgentMessageChunk maps to ProviderEvent::MessageDelta with correct session_id, item_id, and delta",
+          "observed": "Test passed: provider::acp::client::tests::acp_streaming_agent_message_chunk_maps_to_message_delta ... ok"
+        },
+        {
+          "action": "Run cargo test acp_streaming_multiple_chunks_accumulate",
+          "expected": "Test passes — multiple sequential chunks accumulate without data loss",
+          "observed": "Test passed: provider::acp::client::tests::acp_streaming_multiple_chunks_accumulate ... ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/streaming-group/full-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-005",
+      "title": "SessionUpdate AgentThoughtChunk maps to ProviderEvent reasoning delta",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test acp_streaming_agent_thought_chunk_maps_to_reasoning_delta",
+          "expected": "Test passes — AgentThoughtChunk maps to ProviderEvent::ReasoningDelta",
+          "observed": "Test passed: provider::acp::client::tests::acp_streaming_agent_thought_chunk_maps_to_reasoning_delta ... ok"
+        },
+        {
+          "action": "Run cargo test acp_streaming_multiline_thought_preserved",
+          "expected": "Test passes — multiline thought content preserved verbatim",
+          "observed": "Test passed: provider::acp::client::tests::acp_streaming_multiline_thought_preserved ... ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/streaming-group/full-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-006",
+      "title": "SessionUpdate ToolCall and ToolCallUpdate map to ProviderEvent tool events",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test acp_streaming_tool_call_lifecycle",
+          "expected": "Test passes — ToolCall start/update/complete lifecycle maps to ProviderEvent variants",
+          "observed": "Test passed: provider::acp::client::tests::acp_streaming_tool_call_lifecycle ... ok"
+        },
+        {
+          "action": "Run cargo test acp_streaming_tool_call_threads_call_id",
+          "expected": "Test passes — call ID threaded correctly across all related events",
+          "observed": "Test passed: provider::acp::client::tests::acp_streaming_tool_call_threads_call_id ... ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/streaming-group/full-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-007",
+      "title": "SessionUpdate Plan maps to ProviderEvent plan events",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test acp_streaming_plan_maps_to_plan_updated",
+          "expected": "Test passes — Plan with steps maps to ProviderEvent::PlanUpdated",
+          "observed": "Test passed: provider::acp::client::tests::acp_streaming_plan_maps_to_plan_updated ... ok"
+        },
+        {
+          "action": "Run cargo test acp_streaming_empty_plan_maps_to_plan_updated",
+          "expected": "Test passes — empty plan maps to empty step list, not error",
+          "observed": "Test passed: provider::acp::client::tests::acp_streaming_empty_plan_maps_to_plan_updated ... ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/streaming-group/full-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-008",
+      "title": "Client-side fs/read_text_file responds with content or unsupported",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test acp_fs_read_text_file_unsupported_without_delegate",
+          "expected": "Test passes — returns unsupported error (code -32601) without delegate",
+          "observed": "Test passed: provider::acp::handlers::tests::acp_fs_read_text_file_unsupported_without_delegate ... ok"
+        },
+        {
+          "action": "Run cargo test acp_fs_read_text_file_returns_content_with_delegate",
+          "expected": "Test passes — returns file content when delegate configured",
+          "observed": "Test passed: provider::acp::handlers::tests::acp_fs_read_text_file_returns_content_with_delegate ... ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/streaming-group/full-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-009",
+      "title": "Client-side fs/write_text_file responds with unsupported",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test acp_fs_write_text_file_responds_unsupported",
+          "expected": "Test passes — responds with unsupported error (code -32601)",
+          "observed": "Test passed: provider::acp::handlers::tests::acp_fs_write_text_file_responds_unsupported ... ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/streaming-group/full-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-010",
+      "title": "request_permission respects configurable per-agent policy",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test acp_permission_auto_approve",
+          "expected": "Test passes — auto-approve immediately resolves with approve",
+          "observed": "Test passed: provider::acp::handlers::tests::acp_permission_auto_approve ... ok"
+        },
+        {
+          "action": "Run cargo test acp_permission_auto_reject",
+          "expected": "Test passes — auto-reject immediately resolves with reject",
+          "observed": "Test passed: provider::acp::handlers::tests::acp_permission_auto_reject ... ok"
+        },
+        {
+          "action": "Run cargo test acp_permission_prompt_emits_event",
+          "expected": "Test passes — prompt surfaces ApprovalRequested event",
+          "observed": "Test passed: provider::acp::handlers::tests::acp_permission_prompt_emits_event ... ok"
+        },
+        {
+          "action": "Run cargo test acp_per_agent_policy_independence",
+          "expected": "Test passes — different agents on same server have independent policies",
+          "observed": "Test passed: provider::acp::handlers::tests::acp_per_agent_policy_independence ... ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/streaming-group/full-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-015",
+      "title": "Transport disconnect is surfaced as ProviderEvent",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test acp_transport_disconnect_emits_event",
+          "expected": "Test passes — disconnect yields ProviderEvent::ConnectionStateChanged without panic",
+          "observed": "Test passed: provider::acp::client::tests::acp_transport_disconnect_emits_event ... ok"
+        },
+        {
+          "action": "Run cargo test acp_streaming_pending_request_gets_transport_error",
+          "expected": "Test passes — pending requests receive transport error on disconnect",
+          "observed": "Test passed: provider::acp::client::tests::acp_streaming_pending_request_gets_transport_error ... ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/streaming-group/full-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-016",
+      "title": "Invalid or malformed messages produce errors without crashing",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test acp_streaming_malformed_response_returns_error",
+          "expected": "Test passes — malformed JSON-RPC response returns deserialization error",
+          "observed": "Test passed: provider::acp::client::tests::acp_streaming_malformed_response_returns_error ... ok"
+        },
+        {
+          "action": "Run cargo test acp_streaming_unknown_notification_method_ignored",
+          "expected": "Test passes — unknown notification method ignored gracefully",
+          "observed": "Test passed: provider::acp::client::tests::acp_streaming_unknown_notification_method_ignored ... ok"
+        },
+        {
+          "action": "Run cargo test acp_streaming_client_continues_after_bad_message",
+          "expected": "Test passes — client processes valid messages after a bad one",
+          "observed": "Test passed: provider::acp::client::tests::acp_streaming_client_continues_after_bad_message ... ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/streaming-group/full-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-017",
+      "title": "Concurrent requests receive correctly correlated responses",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test acp_streaming_concurrent_requests_correlated_by_id",
+          "expected": "Test passes — concurrent requests correlated back to correct caller by request ID",
+          "observed": "Test passed: provider::acp::client::tests::acp_streaming_concurrent_requests_correlated_by_id ... ok"
+        },
+        {
+          "action": "Run cargo test acp_streaming_notifications_dont_block_requests",
+          "expected": "Test passes — streaming notifications delivered without blocking request/response flows",
+          "observed": "Test passed: provider::acp::client::tests::acp_streaming_notifications_dont_block_requests ... ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/streaming-group/full-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 10 assertions (21 tests total): all 10 passed. All ACP streaming, handler, transport disconnect, error handling, and concurrency tests passed without errors."
+}

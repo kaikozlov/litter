@@ -1,0 +1,138 @@
+{
+  "groupId": "lifecycle-group",
+  "testedAt": "2026-04-12T00:00:00Z",
+  "isolation": {
+    "type": "cargo-test",
+    "workingDirectory": "/home/kai/gitrepos/litter",
+    "testCommand": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- acp",
+    "externalServices": "none"
+  },
+  "toolsUsed": ["cargo test"],
+  "assertions": [
+    {
+      "id": "VAL-ACP-001",
+      "title": "ACP initialize handshake completes with valid protocol version and capabilities",
+      "status": "pass",
+      "steps": [
+        { "action": "Run acp_initialize_handshake_success", "expected": "Test passes — initialize handshake succeeds with matching protocol version", "observed": "ok" },
+        { "action": "Run acp_initialize_rejects_incompatible_version", "expected": "Test passes — incompatible version returns error, client does not proceed", "observed": "ok" }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/lifecycle-group/acp-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "tests": ["acp_initialize_handshake_success", "acp_initialize_rejects_incompatible_version"],
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-002",
+      "title": "ACP authenticate completes the handshake lifecycle",
+      "status": "pass",
+      "steps": [
+        { "action": "Run acp_authenticate_after_initialize", "expected": "Test passes — authenticate succeeds after initialize", "observed": "ok" },
+        { "action": "Run acp_session_new_rejected_before_authenticate", "expected": "Test passes — session/new returns protocol error before authenticate", "observed": "ok" }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/lifecycle-group/acp-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "tests": ["acp_authenticate_after_initialize", "acp_session_new_rejected_before_authenticate"],
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-003",
+      "title": "Session lifecycle — new, prompt, and cancel flow correctly",
+      "status": "pass",
+      "steps": [
+        { "action": "Run acp_session_new_returns_id", "expected": "Test passes — session/new returns a session ID", "observed": "ok" },
+        { "action": "Run acp_session_prompt_streams_updates", "expected": "Test passes — session/prompt streams updates", "observed": "ok" },
+        { "action": "Run acp_session_cancel_mid_stream", "expected": "Test passes — session/cancel terminates active turn mid-stream", "observed": "ok" },
+        { "action": "Run acp_session_cancel_no_active_turn", "expected": "Test passes — session/cancel on no active turn returns no-op success", "observed": "ok" }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/lifecycle-group/acp-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "tests": ["acp_session_new_returns_id", "acp_session_prompt_streams_updates", "acp_session_cancel_mid_stream", "acp_session_cancel_no_active_turn"],
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-013",
+      "title": "session/list returns available sessions",
+      "status": "pass",
+      "steps": [
+        { "action": "Run acp_session_list_returns_sessions", "expected": "Test passes — session/list returns array of session summaries", "observed": "ok" },
+        { "action": "Run acp_session_list_empty_array", "expected": "Test passes — session/list with no sessions returns empty array", "observed": "ok" }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/lifecycle-group/acp-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "tests": ["acp_session_list_returns_sessions", "acp_session_list_empty_array"],
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-014",
+      "title": "session/load replays history into ProviderEvents",
+      "status": "pass",
+      "steps": [
+        { "action": "Run acp_session_load_replays_history", "expected": "Test passes — session/load replays conversation history", "observed": "ok" },
+        { "action": "Run acp_session_load_unknown_returns_error", "expected": "Test passes — session/load with unknown ID returns clear error", "observed": "ok" }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/lifecycle-group/acp-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "tests": ["acp_session_load_replays_history", "acp_session_load_unknown_returns_error"],
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-019",
+      "title": "Cancel during ACP streaming",
+      "status": "pass",
+      "steps": [
+        { "action": "Run acp_cancel_mid_stream", "expected": "Test passes — cancel mid-stream terminates turn and flushes partial content", "observed": "ok" },
+        { "action": "Run acp_prompt_after_cancel", "expected": "Test passes — session is immediately ready for another prompt after cancel", "observed": "ok" }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/lifecycle-group/acp-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "tests": ["acp_cancel_mid_stream", "acp_prompt_after_cancel"],
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-023",
+      "title": "ACP protocol version mismatch",
+      "status": "pass",
+      "steps": [
+        { "action": "Run acp_version_mismatch", "expected": "Test passes — higher server version returns ProtocolVersionMismatch error", "observed": "ok" },
+        { "action": "Run acp_backward_compatible_version", "expected": "Test passes — lower but compatible version proceeds", "observed": "ok" }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/lifecycle-group/acp-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "tests": ["acp_version_mismatch", "acp_backward_compatible_version"],
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-024",
+      "title": "ACP authentication failure",
+      "status": "pass",
+      "steps": [
+        { "action": "Run acp_auth_failure_permanent", "expected": "Test passes — permanent auth failure returns AuthenticationFailed, no retry", "observed": "ok" },
+        { "action": "Run acp_auth_retry_transient", "expected": "Test passes — transient auth failure retries once then returns error", "observed": "ok" }
+      ],
+      "evidence": {
+        "testOutput": "acp-client/lifecycle-group/acp-test-output.txt",
+        "consoleErrors": "none"
+      },
+      "tests": ["acp_auth_failure_permanent", "acp_auth_retry_transient"],
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 8 assertions (18 individual tests): all passed. 79 total ACP tests passed with 0 failures. No blockers or frictions encountered."
+}
