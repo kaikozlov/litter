@@ -72,3 +72,4 @@ shared/third_party/codex/
 .wrangler/
 artifacts/
 tools/app-store-screenshots/
+shared/rust-bridge/target-test/
