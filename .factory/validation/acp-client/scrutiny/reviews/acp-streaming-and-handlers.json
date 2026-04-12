@@ -1,0 +1,56 @@
+{
+  "featureId": "acp-streaming-and-handlers",
+  "reviewedAt": "2026-04-12T04:15:00Z",
+  "commitId": "97c525f",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Well-structured implementation of ACP streaming event mapping (SessionUpdate → ProviderEvent), client-side request handlers (fs/*, request_permission, terminal/*), and AgentPermissionPolicy UniFFI enum. The code is clean, follows project conventions, has comprehensive test coverage (32 tests across 3 files), and handles edge cases gracefully. A few non-blocking observations noted below.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/client.rs",
+        "line": 926,
+        "severity": "non_blocking",
+        "description": "AgentRequest handling in process_raw_line is not yet wired up to the handlers module — the match arm only logs 'received agent request (not yet handled)'. This means the handlers are implemented and tested but not integrated into the I/O loop yet. The feature description says 'Implement ACP Client-side request handlers' which is fulfilled (handlers exist and work), but actual runtime invocation will need a follow-up integration step. This is acceptable since the handlers module is new and fully tested in isolation."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/handlers.rs",
+        "line": 152,
+        "severity": "non_blocking",
+        "description": "The wildcard `_` catch-all in handle_agent_request routes unrecognized AgentRequest variants to handle_terminal_unsupported, which returns -32601 with 'method not found: {method}'. This is functionally correct but the function name 'handle_terminal_unsupported' is slightly misleading when used for non-terminal unknowns. A rename to 'handle_method_not_found' would improve clarity, but this is cosmetic."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/handlers.rs",
+        "line": 240,
+        "severity": "non_blocking",
+        "description": "AutoApproveAll fallback when no 'allow' option exists sends optionId='auto_reject' — a synthesized ID not from the request's options list. If the agent strictly validates option IDs against its offered list, this could cause a protocol error. Similarly for AutoRejectHighRisk fallback. Low risk since fallbacks trigger only when the agent sends malformed options (no allow/reject in their own permission request), but worth noting."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/client.rs",
+        "line": 1040,
+        "severity": "non_blocking",
+        "description": "The raw_output field handling was changed from .map(|o| o.to_string()) to .and_then(|o| o.as_str()).unwrap_or(\"\").to_string(). This is a correctness improvement (raw_output might not be a string), but if raw_output is ever a non-string JSON value (e.g., object or number), it will silently return empty string. Acceptable behavior but worth a tracing::debug log for the case when as_str() returns None."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "Binding regeneration (./shared/rust-bridge/generate-bindings.sh) fails on Linux due to V8 cdylib linking (R_X86_64_TPOFF32 relocations). This is a known limitation — macOS works fine. This should be documented in .factory/library/environment.md so future workers on Linux don't spend time debugging it.",
+      "evidence": "Worker handoff notes: 'Binding regeneration requires macOS build host due to V8 cdylib linking limitation on Linux.' The feature correctly annotates AgentPermissionPolicy with #[derive(uniffi::Enum)] so it will generate correct bindings when run on macOS."
+    },
+    {
+      "area": "conventions",
+      "observation": "The feature correctly follows the convention of placing AgentPermissionPolicy in src/provider/mod.rs (shared provider types) rather than in the ACP-specific module. This matches AGENTS.md guidance about keeping UniFFI types at the provider level.",
+      "evidence": "src/provider/mod.rs line ~55: AgentPermissionPolicy is defined alongside other shared provider types like AgentType and AgentInfo."
+    },
+    {
+      "area": "skills",
+      "observation": "The rust-backend-worker skill step 4 (Verify) includes 'cargo clippy -- -D warnings' but the worker reported 33 pre-existing clippy errors that are not from this feature. The skill should note that clippy -D warnings may fail due to pre-existing issues and suggest running clippy only on changed files or noting known pre-existing warnings.",
+      "evidence": "Worker handoff discoveredIssues: 'Pre-existing clippy warnings (33 errors) in the codebase — collapsible_if, nonminimal_bool, etc.' The worker did not run clippy as part of verification, presumably because it would fail on pre-existing issues."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS — This feature implements all required functionality: 5 streaming event type mappings (AgentMessageChunk → MessageDelta, AgentThoughtChunk → ReasoningDelta, ToolCall → ToolCallStarted, ToolCallUpdate → ToolCallUpdate, Plan → PlanUpdated), client-side request handlers (fs/read_text_file, fs/write_text_file via FsDelegate trait, request_permission with 3 policy variants, terminal/* → MethodNotFound), AgentPermissionPolicy UniFFI enum (AutoApproveAll, AutoRejectHighRisk, PromptAlways with Default=PromptAlways), and graceful error handling (disconnect → Disconnected event, malformed JSON → skip+warn+continue, unknown notifications → ProviderEvent::Unknown). 32 new tests cover all 10 fulfilled assertions with 581 total tests passing. The handlers are not yet wired into the I/O loop (agent requests are logged but not dispatched to handlers), which is an integration step for a follow-up. Code quality is high: well-documented modules, consistent error handling patterns, proper use of ACP schema types, and edge case coverage in tests."
+}

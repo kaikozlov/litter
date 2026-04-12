@@ -1,0 +1,62 @@
+{
+  "featureId": "acp-ndjson-transport",
+  "reviewedAt": "2026-04-12T12:00:00Z",
+  "commitId": "50724d1",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The NDJSON framing codec and mock transport implementation is well-structured, thoroughly tested, and correctly handles all specified edge cases. The code follows Rust idioms, uses proper async I/O patterns (BufReader + AsyncRead), and has comprehensive test coverage (28 tests) covering serialization roundtrips, deserialization edge cases (empty lines, invalid JSON, null bytes, binary garbage, partial reads, large messages, multi-byte UTF-8), and the full mock transport lifecycle. The design cleanly separates synchronous decode_line() (usable without async) from the async NdjsonReader, which is a good API choice. A few minor observations noted below but none are blocking.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/framing.rs",
+        "line": 350,
+        "severity": "non_blocking",
+        "description": "The 'cancelled' agent notification handler returns None (skips the notification), commenting that the typed schema doesn't have a direct CancelNotification variant in AgentNotification. This means cancelled notifications from the agent are silently dropped. While this is documented and the decode_line caller returns Skipped for it, downstream features may need to handle this. Non-blocking because the framing layer correctly skips it and logs a warning, and the subsequent acp-streaming-and-handlers feature can add proper handling."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/framing.rs",
+        "line": 395,
+        "severity": "non_blocking",
+        "description": "try_decode_agent_response returns None for error responses (JSON-RPC error objects), meaning agent error responses cannot be decoded as typed AgentResponse. The comment acknowledges this limitation. Non-blocking because error responses are still detected (has_error branch), and the caller gets Skipped with a descriptive reason — but a production client will need to handle error responses explicitly rather than relying on decode_line alone. The subsequent client lifecycle feature likely handles this at a higher layer."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/mock.rs",
+        "line": 145,
+        "severity": "non_blocking",
+        "description": "MockTransport's AsyncRead::poll_read uses try_lock() on the tokio::Mutex and returns Pending + wake_by_ref() if lock contention occurs. This is functional but may cause unnecessary wakeups under contended scenarios. In practice, for a test mock, this is fine. Non-blocking because this is test-only infrastructure and the alternative (using std::sync::Mutex) was correctly avoided since the struct also uses .await methods."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/mock.rs",
+        "line": 169,
+        "severity": "non_blocking",
+        "description": "MockTransport AsyncWrite::poll_write returns Ok(0) when try_lock fails (contention), which is technically correct but the caller may not retry immediately since it appears as a successful zero-byte write. The BufWriter layer above should handle retries correctly, so this is not a practical issue for the framing codec."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/framing.rs",
+        "line": 261,
+        "severity": "non_blocking",
+        "description": "The framing test for partial message buffering (ndjson_partial_message_buffered) uses a Cursor with the full data concatenated, so it doesn't truly test partial reads across separate read syscalls. The test passes because BufReader handles line boundaries correctly, but a more rigorous test would use the mock transport to deliver data in chunks. Non-blocking because the Cursor-based test does validate the buffering logic, and the large message test provides additional coverage for multi-read scenarios."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The agent-client-protocol-schema crate (v0.11) has specific method names for dispatch: 'session/update' for SessionNotification, 'fs/read_text_file', 'fs/write_text_file', 'request_permission', 'terminal/create', 'terminal/output', 'terminal/release', 'terminal/kill', 'terminal/wait_for_exit' for agent requests. The AgentNotification enum does not include a CancelNotification variant — cancelled notifications must be handled separately. Error responses (JSON-RPC error objects) cannot be decoded as typed AgentResponse through the standard path.",
+      "evidence": "framing.rs try_decode_agent_notification (line 336) and try_decode_agent_request (line 361) hard-code method name dispatch. The 'cancelled' case returns None with an explanatory comment."
+    },
+    {
+      "area": "conventions",
+      "observation": "The feature established the pattern of synchronous decode_line() for line-level decoding plus async NdjsonReader for stream-level buffering. This is a good pattern that separates concerns cleanly — downstream features should follow this approach for any new message types.",
+      "evidence": "framing.rs decode_line() is a standalone fn that takes &str, while NdjsonReader wraps AsyncRead + BufReader for partial message handling."
+    },
+    {
+      "area": "services",
+      "observation": "No services observation needed — this feature used only cargo test/check/clippy, which are already documented in AGENTS.md build commands.",
+      "evidence": "All verification commands in handoff use cargo test, cargo check, cargo clippy."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS. The ACP NDJSON framing codec (framing.rs, 835 lines) and mock transport (mock.rs, 379 lines) are well-implemented with 28 comprehensive tests covering all specified edge cases. The design correctly separates synchronous line decoding from async stream buffering, uses the agent-client-protocol-schema crate for typed message dispatch, and handles all edge cases from the feature description: empty lines, invalid JSON, partial reads, large messages, null bytes, binary garbage, and multi-byte UTF-8. The mock transport provides proper bidirectional in-memory I/O with response queuing, write capture, and disconnect simulation. Minor non-blocking observations include: (1) 'cancelled' agent notifications are silently skipped, (2) JSON-RPC error responses cannot be decoded as typed AgentResponse through decode_line, (3) the partial-message test doesn't exercise true multi-read boundaries. All assertions (VAL-ACP-011, VAL-ACP-012, VAL-ACP-018, VAL-ACP-020, VAL-ACP-021, VAL-ACP-022) are covered by the test suite. The worker followed the rust-backend-worker skill procedure correctly."
+}

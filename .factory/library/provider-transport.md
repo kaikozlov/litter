@@ -168,3 +168,56 @@ Wraps existing `AppServerClient` behind `ProviderTransport`. Creates an internal
 - **Cancel mid-stream**: Streaming state cleared, next prompt succeeds (VAL-PROV-016)
 - **Config change idle**: Model and reasoning_effort changes succeed (VAL-PROV-019)
 - **Config change streaming**: Returns error, stream not disrupted, previous config preserved (VAL-PROV-019)
+
+## ACP Client Transport (provider/acp/)
+
+### NDJSON Framing (provider/acp/framing.rs)
+- `decode_line(line: &str)` — synchronous line-level decoding, returns `Option<DecodedLine>` (ClientMessage, AgentNotification, AgentRequest, Skipped)
+- `NdjsonReader<R: AsyncRead>` — async buffered reader that splits incoming byte stream on newline boundaries
+- `serialize_client_message()` / `deserialize_client_message()` — helpers for all client-to-agent message types
+- Handles: empty lines (skip), invalid JSON (skip + warn), partial messages (buffered), large messages (>100KB), null bytes, binary garbage, multi-byte UTF-8 split across reads
+
+### Mock Transport (provider/acp/mock.rs)
+- `MockTransport` implements `AsyncRead + AsyncWrite` for in-memory bidirectional I/O
+- Response queuing: `queue_response(data)` for sequential reads
+- Write capture: `sent_data()` returns all bytes written by client
+- Disconnect simulation: `simulate_disconnect()` closes the read side
+- Reset: `reset()` clears captured data for reuse across test cases
+
+### ACP Client Lifecycle (provider/acp/client.rs)
+- `AcpClient` — main client struct managing the full ACP protocol lifecycle
+- States: `Uninitialized` → `Initialized` → `Authenticated` → (session operations)
+- `initialize()` — version negotiation, capabilities exchange
+- `authenticate()` — credential exchange with transient retry (1 retry) and permanent failure (no retry)
+- `session_new()` — creates new session with cwd and options
+- `session_prompt()` — sends prompt, streams response via event channel, resolves when complete
+- `session_cancel()` — terminates active prompt; no-op when idle
+- `session_list()` — returns available sessions (empty array if none)
+- `session_load()` — loads existing session by ID, error if not found
+- `subscribe()` — returns `broadcast::Receiver<ProviderEvent>` for event streaming
+- Internal: single-task `io_loop` combining read and write, avoiding transport split-ownership
+- **Gotcha**: `AgentResponse` uses `#[serde(untagged)]`, causing deserialization ambiguity. The client tracks pending method names (`HashMap<u64, String>`) and uses method-aware deserialization in `process_raw_line()` to work around this.
+
+### Streaming Event Mapping (provider/acp/mapping.rs)
+- `AgentMessageChunk` → `ProviderEvent::MessageDelta`
+- `AgentThoughtChunk` → `ProviderEvent::ReasoningDelta`
+- `ToolCall` → `ProviderEvent::ToolCallStarted`
+- `ToolCallUpdate` → `ProviderEvent::ToolCallUpdate`
+- `Plan` → `ProviderEvent::PlanUpdated`
+
+### Client-Side Request Handlers (provider/acp/handlers.rs)
+- `fs/read_text_file` — reads file via injectable `FsDelegate` trait; returns "unsupported" (-32601) if no delegate configured
+- `fs/write_text_file` — writes file via `FsDelegate`; returns "unsupported" by default
+- `request_permission` — applies `AgentPermissionPolicy`: AutoApproveAll (auto-resolve), AutoRejectHighRisk (auto-reject), PromptAlways (emit `ProviderEvent::ApprovalRequested`)
+- `terminal/*` — returns MethodNotFound (-32601) for all terminal operations (mobile-unsupported)
+- Handlers are implemented and tested but **not yet wired** into the ACP client I/O loop (agent requests are logged but not dispatched)
+
+### AgentPermissionPolicy (UniFFI enum)
+- `AutoApproveAll` — automatically approve all permission requests
+- `AutoRejectHighRisk` — automatically reject high-risk operations
+- `PromptAlways` (Default) — surface request to platform layer via ProviderEvent
+- Derives: `Debug, Clone, PartialEq, Eq, uniffi::Enum, serde::Serialize, serde::Deserialize`
+
+### Test Coverage
+- 80+ ACP-specific tests across framing (28), lifecycle (20), streaming/handlers (32)
+- Full suite: 581 passed; 0 failed; 3 ignored

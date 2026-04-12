@@ -1,0 +1,111 @@
+{
+  "milestone": "acp-client",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib",
+      "exitCode": 0,
+      "details": "581 passed; 0 failed; 3 ignored; 0 measured; finished in 0.16s"
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- -D warnings",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 3,
+    "passed": 3,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "nonBlockingIssues": [
+    {
+      "featureId": "acp-ndjson-transport",
+      "severity": "non_blocking",
+      "description": "The 'cancelled' agent notification handler returns None (silently dropped). The framing layer correctly skips and logs a warning, but downstream features may need explicit handling."
+    },
+    {
+      "featureId": "acp-ndjson-transport",
+      "severity": "non_blocking",
+      "description": "try_decode_agent_response returns None for JSON-RPC error responses. Error responses are detected but not decoded as typed AgentResponse. The client lifecycle feature handles this at a higher layer."
+    },
+    {
+      "featureId": "acp-ndjson-transport",
+      "severity": "non_blocking",
+      "description": "MockTransport AsyncWrite::poll_write returns Ok(0) on lock contention, which appears as a successful zero-byte write. BufWriter above handles retries, so not a practical issue."
+    },
+    {
+      "featureId": "acp-client-lifecycle",
+      "severity": "non_blocking",
+      "description": "initialize() returns NotInitialized when state != Uninitialized (confusing error message when already initialized). Should return AlreadyInitialized or InvalidState."
+    },
+    {
+      "featureId": "acp-client-lifecycle",
+      "severity": "non_blocking",
+      "description": "session_list() does not enforce Authenticated state — a client in Initialized (pre-auth) state could call it. The agent would likely reject it but the client should enforce the auth requirement."
+    },
+    {
+      "featureId": "acp-client-lifecycle",
+      "severity": "non_blocking",
+      "description": "authenticate() does not enforce state == Initialized ordering. If called in Authenticated or Disconnected state, it proceeds with the request rather than rejecting."
+    },
+    {
+      "featureId": "acp-client-lifecycle",
+      "severity": "non_blocking",
+      "description": "subscribe() uses blocking_lock() as fallback, which can deadlock if called from within a tokio task that holds the mutex. Low risk since subscribe() is called from the main API surface."
+    },
+    {
+      "featureId": "acp-streaming-and-handlers",
+      "severity": "non_blocking",
+      "description": "AgentRequest handling in process_raw_line is not yet wired to the handlers module — agent requests are logged but not dispatched. Handlers are implemented and tested in isolation but runtime integration needs a follow-up step."
+    },
+    {
+      "featureId": "acp-streaming-and-handlers",
+      "severity": "non_blocking",
+      "description": "AutoApproveAll fallback when no 'allow' option exists sends a synthesized optionId='auto_reject' not from the request's options list. Could cause protocol error if agent strictly validates option IDs."
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "file": ".factory/library/provider-transport.md",
+      "description": "Added ACP client transport documentation: NDJSON framing, mock transport, client lifecycle, streaming event mapping, client-side handlers, and AgentPermissionPolicy details",
+      "sourceFeature": "acp-ndjson-transport, acp-client-lifecycle, acp-streaming-and-handlers"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add note: The agent-client-protocol-schema crate uses #[serde(untagged)] on AgentResponse, causing deserialization ambiguity (AuthenticateResponse matches any JSON object). Workers implementing ACP request/response handling must use method-aware deserialization (track pending method names and deserialize accordingly) rather than relying on direct AgentResponse deserialization.",
+      "evidence": "acp-client-lifecycle feature discovered this and implemented a workaround in process_raw_line (client.rs lines 753-820). Without this knowledge, future workers will hit the same issue.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Binding regeneration fails on Linux due to V8 cdylib linking",
+      "reason": "already-documented",
+      "note": "Already documented in .factory/library/environment.md under 'Build Dependencies'"
+    },
+    {
+      "observation": "Pre-existing clippy warnings (33 errors) should be noted in the rust-backend-worker skill",
+      "reason": "ambiguous",
+      "note": "Clippy with -D warnings passed cleanly for this milestone. The pre-existing warnings were from a prior state. No action needed."
+    },
+    {
+      "observation": "MockTransport lock contention patterns",
+      "reason": "duplicate",
+      "note": "Already captured in the review report as a non-blocking issue"
+    }
+  ],
+  "previousRound": null
+}

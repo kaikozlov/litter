@@ -1,0 +1,59 @@
+{
+  "featureId": "acp-client-lifecycle",
+  "reviewedAt": "2026-04-12T04:30:00Z",
+  "commitId": "795a096",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Solid, well-structured implementation of the full ACP client lifecycle in ~1765 lines. The method-aware deserialization workaround for AgentResponse's #[serde(untagged)] ambiguity is pragmatic and well-documented. 20 unit tests cover all lifecycle operations, error paths, and edge cases with good use of tokio::io::duplex for concurrent test patterns. The io_loop combining read and write in a single task is clean and avoids split-ownership issues. A few non-blocking observations noted below.",
+
+
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/client.rs",
+        "line": 196,
+        "severity": "non_blocking",
+        "description": "initialize() returns NotInitialized when state != Uninitialized, which is confusing — it says 'not initialized' when already initialized. Should return a different error variant (e.g., AlreadyInitialized or InvalidState) to distinguish from the pre-init state."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/client.rs",
+        "line": 543,
+        "severity": "non_blocking",
+        "description": "session_list() only checks state != Uninitialized but does not require Authenticated state. A client in Initialized (pre-auth) state could call session_list, which would send the request to the agent. This may be rejected by a well-behaved agent, but the client should probably enforce the auth requirement."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/client.rs",
+        "line": 253,
+        "severity": "non_blocking",
+        "description": "authenticate() does not check if state == LifecycleState::Initialized — it only rejects Uninitialized. If called in Authenticated or Disconnected state, it proceeds with the request. Should probably enforce the expected lifecycle ordering."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/client.rs",
+        "line": 456,
+        "severity": "non_blocking",
+        "description": "subscribe() uses blocking_lock() as a fallback, which can deadlock if called from within a tokio task that also holds the mutex. This is a latent risk, though it works in practice because subscribe() is called from the main API surface, not from within the io_loop."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/client.rs",
+        "line": 753,
+        "severity": "non_blocking",
+        "description": "process_raw_line() does method-aware deserialization by matching method strings like 'initialize', 'authenticate', etc. When agent-client-protocol-schema adds new methods, they'll silently fall through to the generic AgentResponse deserialization, which hits the same #[serde(untagged)] ambiguity. This is acceptable for now but should be documented as a known limitation."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "AgentResponse's #[serde(untagged)] attribute causes deserialization ambiguity — AuthenticateResponse matches any JSON object since all its fields are optional. The worker discovered this and implemented a method-aware workaround (tracking pending_methods HashMap). This is a non-obvious gotcha that future workers implementing ACP request/response handling will hit.",
+      "evidence": "client.rs lines 753-820: process_raw_line manually deserializes each response variant based on the tracked method name. Handoff notes: 'AgentResponse #[serde(untagged)] deserialization ambiguity: AuthenticateResponse matches any JSON object since all its fields are optional.'"
+    },
+    {
+      "area": "conventions",
+      "observation": "The client.rs uses Arc<Mutex<AcpClientInner>> wrapped in another Arc<tokio::sync::Mutex<AcpClient>> in tests (setup_client creates Arc<tokio::sync::Mutex<AcpClient>>). This double-layering of mutexes is somewhat unusual. The inner Arc<Mutex> is for the io_loop, while the outer is for test concurrency. Not a bug but worth noting the pattern.",
+      "evidence": "client.rs test setup at line ~1530: fn setup_client() -> (Arc<tokio::sync::Mutex<AcpClient>>, tokio::io::DuplexStream)"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "The ACP client lifecycle implementation is comprehensive and well-tested. All 8 assertions (VAL-ACP-001/002/003/013/014/019/023/024) are covered by 20 passing tests. The method-aware response deserialization is a clever workaround for the upstream AgentResponse #[serde(untagged)] issue. Non-blocking issues: error message for calling initialize twice is confusing (returns NotInitialized), session_list doesn't enforce Authenticated state, and the lifecycle state guards on authenticate() are too permissive. These are minor correctness refinements that don't block the feature."
+}
