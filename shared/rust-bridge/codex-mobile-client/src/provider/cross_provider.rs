@@ -41,7 +41,7 @@ use crate::transport::{RpcError, TransportError};
 const COLLECT_TIMEOUT_MS: u64 = 200;
 
 /// Collect events from a broadcast receiver within a timeout.
-async fn collect_events(rx: &mut broadcast::Receiver<ProviderEvent>) -> Vec<ProviderEvent> {
+pub(crate) async fn collect_events(rx: &mut broadcast::Receiver<ProviderEvent>) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
     let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(COLLECT_TIMEOUT_MS);
     loop {
@@ -54,14 +54,14 @@ async fn collect_events(rx: &mut broadcast::Receiver<ProviderEvent>) -> Vec<Prov
 }
 
 /// Create a mock provider that emits a predefined sequence of events.
-struct SequencedMockProvider {
+pub(crate) struct SequencedMockProvider {
     events: broadcast::Sender<ProviderEvent>,
     connected: bool,
     session_id: String,
 }
 
 impl SequencedMockProvider {
-    fn new(session_id: &str) -> Self {
+    pub(crate) fn new(session_id: &str) -> Self {
         let (tx, _) = broadcast::channel(4096);
         Self {
             events: tx,
@@ -70,7 +70,7 @@ impl SequencedMockProvider {
         }
     }
 
-    fn emit(&self, event: ProviderEvent) {
+    pub(crate) fn emit(&self, event: ProviderEvent) {
         let _ = self.events.send(event);
     }
 }

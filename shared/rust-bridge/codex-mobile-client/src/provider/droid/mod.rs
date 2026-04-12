@@ -21,9 +21,12 @@
 //!   JSON-RPC 2.0 serialization/deserialization, and framing helpers.
 //! - `mock` — Mock SSH channel for testing (in-memory JSON-RPC exchange).
 //! - `detection` — Droid auto-detection over SSH (probe for `droid` binary).
+//! - `e2e` — E2E integration tests (VAL-CROSS-004/005/009/011/014).
 
 pub mod acp_transport;
 pub mod detection;
+#[cfg(test)]
+mod e2e;
 pub mod mock;
 pub mod protocol;
 pub mod stream_json;
