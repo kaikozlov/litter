@@ -1,0 +1,8 @@
+running 5 tests
+test provider::pi::mock::tests::mock_channel_reset ... ok
+test provider::pi::mock::tests::mock_channel_disconnect ... ok
+test provider::pi::mock::tests::mock_channel_queue_and_read ... ok
+test provider::pi::mock::tests::mock_channel_capture_write ... ok
+test provider::pi::mock::tests::mock_channel_pi_not_found ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 690 filtered out; finished in 0.01s

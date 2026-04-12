@@ -1,0 +1,2 @@
+{"id":1,"type":"response","command":"prompt","success":false,"error":"Cannot read properties of undefined (reading 'startsWith')"}
+{"id":1,"type":"response","command":"prompt","success":true}

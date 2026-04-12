@@ -1,0 +1,7 @@
+running 4 tests
+test provider::pi::sessions::tests::parse_metadata_empty_session ... ok
+test provider::pi::sessions::tests::parse_metadata_complete_session ... ok
+test provider::pi::sessions::tests::parse_metadata_malformed_lines_skipped ... ok
+test provider::pi::sessions::tests::parse_metadata_multiple_prompts ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 691 filtered out; finished in 0.00s

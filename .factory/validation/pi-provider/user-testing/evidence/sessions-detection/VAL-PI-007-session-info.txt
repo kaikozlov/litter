@@ -1,0 +1,6 @@
+running 3 tests
+test provider::tests::session_info_record_construction ... ok
+test provider::pi::sessions::tests::session_info_from_metadata ... ok
+test provider::pi::sessions::tests::session_info_from_metadata_no_prompt ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 692 filtered out; finished in 0.00s

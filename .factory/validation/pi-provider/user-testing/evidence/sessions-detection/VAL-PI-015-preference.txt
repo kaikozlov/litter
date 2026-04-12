@@ -1,0 +1,17 @@
+running 14 tests
+test provider::pi::preference::tests::select_default_preference_is_prefer_native ... ok
+test provider::pi::preference::tests::select_force_acp_available ... ok
+test provider::pi::detection::tests::transport_preference_native_over_acp ... ok
+test provider::pi::preference::tests::select_force_native_available ... ok
+test provider::pi::preference::tests::select_no_transport_available ... ok
+test provider::pi::preference::tests::select_force_acp_unavailable ... ok
+test provider::pi::preference::tests::select_prefer_acp_fallback_to_native ... ok
+test provider::pi::preference::tests::select_prefer_acp_both_available ... ok
+test provider::pi::preference::tests::select_force_native_unavailable ... ok
+test provider::pi::preference::tests::select_prefer_native_both_available ... ok
+test provider::pi::preference::tests::select_prefer_native_fallback_to_acp ... ok
+test provider::pi::preference::tests::transport_selection_recomputes_on_availability_change ... ok
+test provider::pi::preference::tests::transport_preference_display ... ok
+test reconnect::tests::resolved_mode_none_when_no_preference ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 681 filtered out; finished in 0.00s

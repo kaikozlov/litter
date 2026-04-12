@@ -1,0 +1,107 @@
+{
+  "groupId": "event-mapping",
+  "testedAt": "2026-04-12T00:00:00Z",
+  "isolation": {
+    "workingDirectory": "/home/kai/gitrepos/litter/shared/rust-bridge",
+    "tool": "cargo test --lib -p codex-mobile-client",
+    "transport": "mock (in-memory channels)",
+    "sshRequired": false
+  },
+  "toolsUsed": ["cargo test"],
+  "assertions": [
+    {
+      "id": "VAL-PI-003",
+      "title": "Event mapping — Pi text_delta → ProviderEvent::MessageDelta → UiEvent::MessageDelta",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --lib -p codex-mobile-client -- pi_text_delta_mapping",
+          "expected": "ProviderEvent sequence is MessageDelta(\"Hello\"), MessageDelta(\" world\")",
+          "observed": "Test provider::pi::transport::tests::pi_text_delta_mapping passed — correct delta sequence mapped"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A (mock transport, no real network)",
+        "testOutput": "event-mapping/VAL-PI-003-pi_text_delta_mapping.txt"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-004",
+      "title": "Event mapping — Pi thinking_delta → ProviderEvent::ReasoningDelta",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --lib -p codex-mobile-client -- pi_thinking_delta_mapping",
+          "expected": "ProviderEvent::ReasoningDelta with correct text",
+          "observed": "Test provider::pi::transport::tests::pi_thinking_delta_mapping passed — thinking delta correctly mapped to ReasoningDelta"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A (mock transport, no real network)",
+        "testOutput": "event-mapping/VAL-PI-004-pi_thinking_delta_mapping.txt"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-005",
+      "title": "Event mapping — Pi tool_execution_start/update/end → ProviderEvent::CommandExecution",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --lib -p codex-mobile-client -- pi_tool_execution_mapping",
+          "expected": "ProviderEvent sequence is CommandStarted, CommandOutputDelta, CommandCompleted",
+          "observed": "Test provider::pi::transport::tests::pi_tool_execution_mapping passed — full tool execution lifecycle correctly mapped"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A (mock transport, no real network)",
+        "testOutput": "event-mapping/VAL-PI-005-pi_tool_execution_mapping.txt"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-006",
+      "title": "Pi-specific features — thinking levels, model selection, steering mode",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --lib -p codex-mobile-client -- pi_native_set",
+          "expected": "set_thinking_level, set_model, set_steering_mode each produce correlated responses",
+          "observed": "3 tests passed: pi_native_set_thinking_level, pi_native_set_model, pi_native_set_steering_mode — all correlated correctly"
+        },
+        {
+          "action": "cargo test --lib -p codex-mobile-client -- pi_thinking_level",
+          "expected": "ThinkingLevel all variants, display, serde roundtrip validated",
+          "observed": "4 tests passed: pi_thinking_level_all_variants, pi_thinking_level_all_values, pi_thinking_level_display, pi_thinking_level_serde_roundtrip"
+        },
+        {
+          "action": "cargo test --lib -p codex-mobile-client -- pi_native_get",
+          "expected": "get_available_models produces correlated response",
+          "observed": "1 test passed: pi_native_get_available_models — model list returned correctly"
+        },
+        {
+          "action": "cargo test --lib -p codex-mobile-client -- pi_native_compact",
+          "expected": "compact command produces correlated response",
+          "observed": "1 test passed: pi_native_compact — compact command correlated correctly"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A (mock transport, no real network)",
+        "testOutput": "event-mapping/VAL-PI-006-pi_native_features.txt"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 4 assertions: all 4 passed. VAL-PI-003 (text_delta mapping): 1 test passed. VAL-PI-004 (thinking_delta mapping): 1 test passed. VAL-PI-005 (tool_execution mapping): 1 test passed. VAL-PI-006 (Pi-specific features): 9 tests passed across 4 command filters (set_thinking_level, set_model, set_steering_mode, get_available_models, compact, plus thinking_level variant/display/serde tests). Total: 12 tests, 0 failures."
+}

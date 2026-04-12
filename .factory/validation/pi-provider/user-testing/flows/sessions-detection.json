@@ -1,0 +1,112 @@
+{
+  "groupId": "sessions-detection",
+  "testedAt": "2026-04-12T00:00:00Z",
+  "isolation": {
+    "workingDirectory": "/home/kai/gitrepos/litter/shared/rust-bridge",
+    "testCommand": "cargo test --lib -p codex-mobile-client",
+    "transport": "mock (no SSH connections)"
+  },
+  "toolsUsed": ["cargo test"],
+  "assertions": [
+    {
+      "id": "VAL-PI-007",
+      "title": "Session persistence — list and load Pi sessions from ~/.pi/agent/sessions/",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test -- session_entry",
+          "expected": "2 tests pass: session_entry_parsing_from_ls_output, session_entry_empty_ls_output",
+          "observed": "2 tests passed; session entries correctly parsed from ls output including filename extraction and path handling; empty output yields empty list"
+        },
+        {
+          "action": "cargo test -- session_info",
+          "expected": "3 tests pass: session_info_from_metadata, session_info_from_metadata_no_prompt, session_info_record_construction",
+          "observed": "3 tests passed; SessionInfo correctly constructed from PiSessionMetadata with first prompt as title; falls back to session ID when no prompt"
+        },
+        {
+          "action": "cargo test -- parse_metadata",
+          "expected": "4 tests pass: parse_metadata_complete_session, parse_metadata_empty_session, parse_metadata_malformed_lines_skipped, parse_metadata_multiple_prompts",
+          "observed": "4 tests passed; complete session parsed with session_id, first_prompt, message_count, line_count; empty session returns fallback ID; malformed lines skipped gracefully; multiple prompts correctly captures first prompt only"
+        },
+        {
+          "action": "cargo test -- pi_provider_transport_list_sessions",
+          "expected": "1 test pass: pi_provider_transport_list_sessions",
+          "observed": "1 test passed; Pi provider transport correctly delegates list_sessions through the provider trait"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A (mock transport, no network)",
+        "testOutput": [
+          "pi-provider/sessions-detection/VAL-PI-007-session-entry.txt",
+          "pi-provider/sessions-detection/VAL-PI-007-session-info.txt",
+          "pi-provider/sessions-detection/VAL-PI-007-parse-metadata.txt",
+          "pi-provider/sessions-detection/VAL-PI-007-list-sessions.txt"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-008",
+      "title": "Auto-detection — probe SSH host for pi binary and pi-acp availability",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test -- pi_detection",
+          "expected": "4 tests pass: scenario_a_native_only, scenario_b_both, scenario_c_neither, partial_native_binary_no_version",
+          "observed": "4 tests passed; Scenario A (native only) correctly detects PiNative only; Scenario B (both) detects both Native and ACP; Scenario C (neither) detects nothing with empty transports; partial detection (binary found but no version) correctly reports no transport"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A (mock transport, no network)",
+        "testOutput": [
+          "pi-provider/sessions-detection/VAL-PI-008-detection.txt"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-015",
+      "title": "Pi provider selection and transport preference — per-server configuration",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test -- preference",
+          "expected": "14 tests pass covering all preference modes, fallback, forced modes, and display",
+          "observed": "14 tests passed; PreferNative selects native when available, falls back to ACP; PreferAcp selects ACP when available, falls back to native; ForceNative errors when native unavailable; ForceAcp errors when ACP unavailable; default preference is PreferNative; display formatting correct for all variants; recomputation on availability change works correctly"
+        },
+        {
+          "action": "cargo test -- mock_channel",
+          "expected": "5 tests pass covering mock transport operations",
+          "observed": "5 tests passed; mock channel supports queue/read, capture/write, reset, disconnect simulation, and pi-not-found scenario"
+        },
+        {
+          "action": "cargo test -- pi_preference",
+          "expected": "Tests matching pi_preference filter",
+          "observed": "0 tests matched this specific filter; all preference tests are covered under the broader 'preference' filter (14 tests above)"
+        },
+        {
+          "action": "cargo test -- pi_mock",
+          "expected": "Tests matching pi_mock filter",
+          "observed": "0 tests matched this specific filter; mock tests are covered under the 'mock_channel' filter (5 tests above)"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A (mock transport, no network)",
+        "testOutput": [
+          "pi-provider/sessions-detection/VAL-PI-015-preference.txt",
+          "pi-provider/sessions-detection/VAL-PI-015-mock-channel.txt"
+        ]
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 3 assertions: all 3 passed. VAL-PI-007 (10 tests across 4 runs): session persistence correctly parses ls output, metadata, and delegates through provider transport. VAL-PI-008 (4 tests): auto-detection correctly identifies all four probe scenarios (native-only, both, neither, partial). VAL-PI-015 (19 tests across 3 runs): transport preference selection covers all 4 preference modes with correct fallback behavior, forced mode errors, default preference, and mock channel infrastructure. Total: 33 tests, 0 failures."
+}

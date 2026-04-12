@@ -1,0 +1,132 @@
+{
+  "groupId": "protocol-transport",
+  "testedAt": "2026-04-12T00:00:00Z",
+  "isolation": {
+    "workingDirectory": "/home/kai/gitrepos/litter/shared/rust-bridge",
+    "tool": "cargo test --lib -p codex-mobile-client",
+    "transport": "mock (in-memory channels, no real SSH)"
+  },
+  "toolsUsed": ["cargo test"],
+  "assertions": [
+    {
+      "id": "VAL-PI-001",
+      "title": "ACP transport — spawn `pi-acp` over SSH and complete ACP lifecycle",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --lib -p codex-mobile-client -- pi_acp_lifecycle",
+          "expected": "Full ACP lifecycle completes without protocol errors, NDJSON messages correctly framed",
+          "observed": "test provider::pi::acp_transport::tests::pi_acp_lifecycle ... ok — 1 passed, 0 failed"
+        }
+      ],
+      "evidence": {
+        "testOutput": "protocol-transport/cargo-test-output.txt",
+        "testName": "provider::pi::acp_transport::tests::pi_acp_lifecycle",
+        "duration": "0.00s",
+        "result": "ok"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-002",
+      "title": "Native transport — spawn `pi --mode rpc` and verify JSONL command/response correlation",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --lib -p codex-mobile-client -- pi_native_jsonl_framing",
+          "expected": "Sends prompt, receives correlated streaming events, correct JSONL framing",
+          "observed": "test provider::pi::transport::tests::pi_native_jsonl_framing ... ok — 1 passed, 0 failed"
+        }
+      ],
+      "evidence": {
+        "testOutput": "protocol-transport/cargo-test-output.txt",
+        "testName": "provider::pi::transport::tests::pi_native_jsonl_framing",
+        "duration": "0.00s",
+        "result": "ok"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-009",
+      "title": "Error handling — Pi process crash mid-session",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --lib -p codex-mobile-client -- pi_process_crash",
+          "expected": "ProviderEvent emitted, no panic, no deadlock, previously received items preserved",
+          "observed": "test provider::pi::transport::tests::pi_process_crash ... ok — 1 passed, 0 failed"
+        }
+      ],
+      "evidence": {
+        "testOutput": "protocol-transport/cargo-test-output.txt",
+        "testName": "provider::pi::transport::tests::pi_process_crash",
+        "duration": "0.10s",
+        "result": "ok"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-010",
+      "title": "Error handling — SSH disconnect mid-session with reconnect",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --lib -p codex-mobile-client -- pi_ssh_disconnect",
+          "expected": "TransportDisconnected emitted, reconnect attempt, no panic",
+          "observed": "test provider::pi::transport::tests::pi_ssh_disconnect_emits_event ... ok — 1 passed, 0 failed"
+        }
+      ],
+      "evidence": {
+        "testOutput": "protocol-transport/cargo-test-output.txt",
+        "testName": "provider::pi::transport::tests::pi_ssh_disconnect_emits_event",
+        "duration": "0.10s",
+        "result": "ok"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-011",
+      "title": "Error handling — malformed JSONL from Pi process",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --lib -p codex-mobile-client -- pi_malformed",
+          "expected": "Logs warnings, processes valid events, no panic — both malformed JSON and unknown event type handled",
+          "observed": "test provider::pi::transport::tests::pi_malformed_jsonl ... ok, test provider::pi::transport::tests::pi_malformed_jsonl_unknown_event_type ... ok — 2 passed, 0 failed"
+        }
+      ],
+      "evidence": {
+        "testOutput": "protocol-transport/cargo-test-output.txt",
+        "testNames": [
+          "provider::pi::transport::tests::pi_malformed_jsonl",
+          "provider::pi::transport::tests::pi_malformed_jsonl_unknown_event_type"
+        ],
+        "duration": "0.10s",
+        "result": "ok"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-012",
+      "title": "Full Pi event lifecycle mapping — agent_start through agent_end",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --lib -p codex-mobile-client -- pi_full_lifecycle_mapping",
+          "expected": "Hydrated conversation contains user message, reasoning, assistant message, command execution — correct ordering and content",
+          "observed": "test provider::pi::transport::tests::pi_full_lifecycle_mapping ... ok — 1 passed, 0 failed"
+        }
+      ],
+      "evidence": {
+        "testOutput": "protocol-transport/cargo-test-output.txt",
+        "testName": "provider::pi::transport::tests::pi_full_lifecycle_mapping",
+        "duration": "0.10s",
+        "result": "ok"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 6 assertions (7 individual tests): all passed. VAL-PI-001 (ACP lifecycle), VAL-PI-002 (native JSONL framing), VAL-PI-009 (process crash), VAL-PI-010 (SSH disconnect), VAL-PI-011 (malformed JSONL — 2 tests), VAL-PI-012 (full lifecycle mapping) all completed successfully with no failures, panics, or protocol errors."
+}

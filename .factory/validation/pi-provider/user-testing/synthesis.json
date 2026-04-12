@@ -1,0 +1,46 @@
+{
+  "milestone": "pi-provider",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 16,
+    "passed": 16,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-PI-001",
+    "VAL-PI-002",
+    "VAL-PI-003",
+    "VAL-PI-004",
+    "VAL-PI-005",
+    "VAL-PI-006",
+    "VAL-PI-007",
+    "VAL-PI-008",
+    "VAL-PI-009",
+    "VAL-PI-010",
+    "VAL-PI-011",
+    "VAL-PI-012",
+    "VAL-PI-013",
+    "VAL-PI-014",
+    "VAL-PI-015",
+    "VAL-PI-016"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added Flow Validator Guidance sections for Rust Tests (cargo test) and E2E SSH Tests surfaces with isolation rules, boundaries, and test naming conventions",
+      "source": "setup"
+    }
+  ],
+  "previousRound": null,
+  "flowReports": [
+    ".factory/validation/pi-provider/user-testing/flows/protocol-transport.json",
+    ".factory/validation/pi-provider/user-testing/flows/event-mapping.json",
+    ".factory/validation/pi-provider/user-testing/flows/sessions-detection.json",
+    ".factory/validation/pi-provider/user-testing/flows/e2e-ssh.json"
+  ],
+  "notes": "All 16 Pi provider assertions passed. 4 flow validator subagents were spawned: 3 for unit tests (protocol-transport, event-mapping, sessions-detection) running in parallel, and 1 for E2E SSH tests running sequentially. Total unit tests: ~52 across all groups. E2E tests validated against real Pi instance on gvps (v0.66.1) using both native RPC and ACP transports."
+}

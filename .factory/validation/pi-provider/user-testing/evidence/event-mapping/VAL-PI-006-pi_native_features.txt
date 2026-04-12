@@ -1,0 +1,28 @@
+--- pi_native_set filter ---
+running 3 tests
+test provider::pi::transport::tests::pi_native_set_steering_mode ... ok
+test provider::pi::transport::tests::pi_native_set_thinking_level ... ok
+test provider::pi::transport::tests::pi_native_set_model ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 692 filtered out; finished in 0.00s
+
+--- pi_thinking_level filter ---
+running 4 tests
+test provider::pi::protocol::tests::pi_thinking_level_all_variants ... ok
+test provider::pi::protocol::tests::pi_thinking_level_display ... ok
+test provider::pi::protocol::tests::pi_thinking_level_serde_roundtrip ... ok
+test provider::pi::transport::tests::pi_thinking_level_all_values ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 691 filtered out; finished in 0.00s
+
+--- pi_native_get filter ---
+running 1 test
+test provider::pi::transport::tests::pi_native_get_available_models ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 694 filtered out; finished in 0.00s
+
+--- pi_native_compact filter ---
+running 1 test
+test provider::pi::transport::tests::pi_native_compact ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 694 filtered out; finished in 0.00s

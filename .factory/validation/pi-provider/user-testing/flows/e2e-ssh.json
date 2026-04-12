@@ -1,0 +1,121 @@
+{
+  "groupId": "e2e-ssh",
+  "testedAt": "2026-04-12T17:03:00Z",
+  "isolation": {
+    "sshTarget": "gvps (100.82.102.84:5132, user ubuntu)",
+    "piBinary": "~/.bun/bin/pi v0.66.1",
+    "npxPiAcp": "npx pi-acp v0.0.25",
+    "exclusiveAccess": true
+  },
+  "toolsUsed": ["ssh"],
+  "assertions": [
+    {
+      "id": "VAL-PI-013",
+      "title": "E2E — Connect to Pi on gvps via native transport, start session, receive streaming response",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "SSH to gvps and verify pi --version",
+          "expected": "Pi version 0.66.1",
+          "observed": "Pi version 0.66.1 confirmed"
+        },
+        {
+          "action": "Spawn pi --mode rpc and send get_available_models command via JSONL",
+          "expected": "Response with >=1 model",
+          "observed": "Response with 13 models: glm-4.5, glm-4.5-air, glm-4.5-flash, glm-4.5v, glm-4.6, glm-4.6v, glm-4.7, glm-4.7-flash, glm-4.7-flashx, glm-5, glm-5-turbo, glm-5.1, glm-5v-turbo"
+        },
+        {
+          "action": "Send prompt command: 'What is 2+2? Reply with just the number.'",
+          "expected": "Streaming events: agent_start, turn_start, message_start, message_update with text_delta, message_end, turn_end, agent_end",
+          "observed": "Complete lifecycle events received: agent_start (1), turn_start (1), message_start (2 - user + assistant), message_update (6 - including thinking_start, thinking_delta, thinking_end, text_start, text_delta, text_end), message_end (2), turn_end (1), agent_end (1)"
+        },
+        {
+          "action": "Verify assembled assistant message contains '4'",
+          "expected": "Response text contains '4'",
+          "observed": "text_delta event with delta '4' received. Final message text: '4'. Full assistant content includes thinking ('The user is asking a simple math question.') and text ('4')"
+        },
+        {
+          "action": "Send abort and verify graceful termination",
+          "expected": "abort returns success:true",
+          "observed": "abort response: {\"id\":3,\"type\":\"response\",\"command\":\"abort\",\"success\":true}"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "SSH to gvps:5132 → pi --mode rpc --no-session → JSONL stdin/stdout",
+        "transcriptFiles": [
+          "e2e-ssh/VAL-PI-013-prompt-format-test.txt",
+          "e2e-ssh/VAL-PI-013-fifo.txt"
+        ]
+      },
+      "issues": null,
+      "notes": "Pi native RPC protocol uses type field as command name (e.g. {\"type\":\"get_available_models\"}). Prompt command uses 'message' field (not 'text'). Streaming events include thinking_start/delta/end and text_start/delta/end sub-events within message_update, each wrapped in assistantMessageEvent. Response assembled correctly from text_delta fragments."
+    },
+    {
+      "id": "VAL-PI-014",
+      "title": "E2E — Connect to Pi on gvps via ACP transport, complete full session lifecycle",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "SSH to gvps and spawn npx pi-acp",
+          "expected": "Process starts and accepts NDJSON on stdin",
+          "observed": "npx pi-acp started and read from stdin. Exits cleanly after input closes."
+        },
+        {
+          "action": "Send initialize JSON-RPC request with protocolVersion:1",
+          "expected": "Response with agentInfo and capabilities",
+          "observed": "Response: {protocolVersion:1, agentInfo:{name:'pi-acp', title:'pi ACP adapter', version:'0.0.25'}, authMethods:[{id:'pi_terminal_login',...}], agentCapabilities:{loadSession:true, mcpCapabilities:{http:false,sse:false}, promptCapabilities:{image:true,audio:false,embeddedContext:false}, sessionCapabilities:{list:{}}}}"
+        },
+        {
+          "action": "Send session/new with cwd and mcpServers params",
+          "expected": "Response with session ID",
+          "observed": "sessionId: 'e5bc7ff5-88d4-454a-bead-320267ab3015'. Also returned models (13 available, current: zai/glm-5.1), modes (thinking levels: off through xhigh), and pi startup info."
+        },
+        {
+          "action": "Send session/prompt with sessionId and prompt array",
+          "expected": "Streaming session/update notifications, then completion",
+          "observed": "Streaming received: agent_thought_chunk × ~20 (thinking deltas), agent_message_chunk × ~60+ (text deltas listing files). Also received available_commands_update and session_info_update notifications. Completed with result: {stopReason:'end_turn'}. Assistant correctly listed directory files (Documents, Downloads, Music, Pictures, Public, scripts, snap, sol_vps_workspace, Templates, Videos)."
+        },
+        {
+          "action": "Send session/list",
+          "expected": "Response with sessions array including created session",
+          "observed": "Response includes sessions array with 4 sessions, including the newly created session (sessionId: e5bc7ff5-..., title: 'List the files in the current directory...', updatedAt: 2026-04-12T17:03:13.494Z). Also includes previous sessions."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "SSH to gvps:5132 → npx pi-acp → NDJSON JSON-RPC 2.0 over stdin/stdout",
+        "transcriptFiles": [
+          "e2e-ssh/VAL-PI-014-corrected.txt",
+          "e2e-ssh/VAL-PI-014-final.txt"
+        ]
+      },
+      "issues": null,
+      "notes": "ACP protocol details: protocolVersion must be a number (not string). session/new requires cwd (string) and mcpServers (array). session/prompt requires sessionId (string) and prompt (array of content items like [{type:'text',text:'...'}], not messages with role/content). pi-acp sends session/update notifications with sessionUpdate types: agent_message_chunk, agent_thought_chunk, available_commands_update, session_info_update. Session completion signaled by result with stopReason."
+    }
+  ],
+  "frictions": [
+    {
+      "description": "Pi native RPC protocol documentation not readily available — had to discover correct JSONL command format through trial and error. The 'type' field doubles as the command name, and the prompt uses 'message' field (not 'text' as suggested in task).",
+      "resolved": true,
+      "resolution": "Tested multiple format variants until finding correct one: {\"type\":\"command_name\",\"id\":N,...params}",
+      "affectedAssertions": ["VAL-PI-013"]
+    },
+    {
+      "description": "ACP protocol parameter shapes differ from what task description suggested. session/prompt expects a flat array of content items, not messages with role/content nesting. session/new requires cwd and mcpServers (undocumented in task). protocolVersion must be number not string.",
+      "resolved": true,
+      "resolution": "Derived correct parameter shapes from error messages returned by pi-acp, then re-tested with correct formats.",
+      "affectedAssertions": ["VAL-PI-014"]
+    },
+    {
+      "description": "FIFO-based approach needed for interactive stdin/stdout testing over SSH — simple pipe/echo approach closes stdin before streaming events can be received.",
+      "resolved": true,
+      "resolution": "Used named pipe (mkfifo) with background process to keep stdin open while capturing stdout",
+      "affectedAssertions": ["VAL-PI-013", "VAL-PI-014"]
+    }
+  ],
+  "blockers": [],
+  "summary": "Tested 2 assertions: 2 passed, 0 failed. VAL-PI-013 (Pi native RPC) confirmed: 13 models available, complete streaming lifecycle with agent_start→turn_start→message_start→message_update(text_delta/thinking_delta)→message_end→turn_end→agent_end, correct response '4'. VAL-PI-014 (Pi ACP) confirmed: initialize returns agentInfo (pi-acp v0.0.25), session/new returns sessionId + models/modes, session/prompt produces streaming agent_thought_chunk and agent_message_chunk updates, completes with stopReason:end_turn, session/list includes created session."
+}

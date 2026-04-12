@@ -1,0 +1,7 @@
+running 4 tests
+test provider::pi::detection::tests::pi_detection_scenario_c_neither ... ok
+test provider::pi::detection::tests::pi_detection_partial_native_binary_no_version ... ok
+test provider::pi::detection::tests::pi_detection_scenario_a_native_only ... ok
+test provider::pi::detection::tests::pi_detection_scenario_b_both ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 691 filtered out; finished in 0.00s

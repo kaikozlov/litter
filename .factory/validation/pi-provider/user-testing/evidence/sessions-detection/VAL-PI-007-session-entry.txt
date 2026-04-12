@@ -1,0 +1,5 @@
+running 2 tests
+test provider::pi::sessions::tests::session_entry_empty_ls_output ... ok
+test provider::pi::sessions::tests::session_entry_parsing_from_ls_output ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 693 filtered out; finished in 0.00s

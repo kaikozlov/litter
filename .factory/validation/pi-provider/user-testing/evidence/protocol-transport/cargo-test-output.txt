@@ -1,0 +1,66 @@
+=== VAL-PI-001: pi_acp_lifecycle ===
+$ cargo test --lib -p codex-mobile-client -- pi_acp_lifecycle
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.59s
+     Running unittests src/lib.rs (target/debug/deps/codex_mobile_client-499359de14118b7f)
+
+running 1 test
+test provider::pi::acp_transport::tests::pi_acp_lifecycle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 694 filtered out; finished in 0.00s
+
+=== VAL-PI-002: pi_native_jsonl_framing ===
+$ cargo test --lib -p codex-mobile-client -- pi_native_jsonl_framing
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.55s
+     Running unittests src/lib.rs (target/debug/deps/codex_mobile_client-499359de14118b7f)
+
+running 1 test
+test provider::pi::transport::tests::pi_native_jsonl_framing ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 693 filtered out; finished in 0.00s
+
+=== VAL-PI-009: pi_process_crash ===
+$ cargo test --lib -p codex-mobile-client -- pi_process_crash
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.54s
+     Running unittests src/lib.rs (target/debug/deps/codex_mobile_client-499359de14118b7f)
+
+running 1 test
+test provider::pi::transport::tests::pi_process_crash ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 694 filtered out; finished in 0.10s
+
+=== VAL-PI-010: pi_ssh_disconnect ===
+$ cargo test --lib -p codex-mobile-client -- pi_ssh_disconnect
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.53s
+     Running unittests src/lib.rs (target/debug/deps/codex_mobile_client-499359de14118b7f)
+
+running 1 test
+test provider::pi::transport::tests::pi_ssh_disconnect_emits_event ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 694 filtered out; finished in 0.10s
+
+=== VAL-PI-011: pi_malformed_jsonl ===
+$ cargo test --lib -p codex-mobile-client -- pi_malformed
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.54s
+     Running unittests src/lib.rs (target/debug/deps/codex_mobile_client-499359de14118b7f)
+
+running 2 tests
+test provider::pi::transport::tests::pi_malformed_jsonl_unknown_event_type ... ok
+test provider::pi::transport::tests::pi_malformed_jsonl ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 693 filtered out; finished in 0.10s
+
+=== VAL-PI-012: pi_full_lifecycle_mapping ===
+$ cargo test --lib -p codex-mobile-client -- pi_full_lifecycle_mapping
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.55s
+     Running unittests src/lib.rs (target/debug/deps/codex_mobile_client-499359de14118b7f)
+
+running 1 test
+test provider::pi::transport::tests::pi_full_lifecycle_mapping ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 694 filtered out; finished in 0.10s
