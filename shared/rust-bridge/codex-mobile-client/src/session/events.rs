@@ -445,7 +445,7 @@ impl EventProcessor {
             // ── Everything else: forward as raw JSON ──────────────────
             other => {
                 let method = format!("{other}");
-                let params = serde_json::to_value(&other).unwrap_or_default();
+                let params = serde_json::to_value(other).unwrap_or_default();
                 self.emit(UiEvent::RawNotification {
                     server_id: server_id.to_string(),
                     method,
@@ -462,11 +462,11 @@ impl EventProcessor {
         method: &str,
         params: &serde_json::Value,
     ) {
-        if method == "item/tool/requestUserInput" {
-            if let Some(request) = pending_user_input_request_from_raw(server_id, params) {
-                self.emit(UiEvent::UserInputRequested { request });
-                return;
-            }
+        if method == "item/tool/requestUserInput"
+            && let Some(request) = pending_user_input_request_from_raw(server_id, params)
+        {
+            self.emit(UiEvent::UserInputRequested { request });
+            return;
         }
         self.emit(UiEvent::RawNotification {
             server_id: server_id.to_string(),

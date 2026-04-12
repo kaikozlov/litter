@@ -41,6 +41,12 @@ pub struct AppClient {
     pub(crate) rt: Arc<tokio::runtime::Runtime>,
 }
 
+impl Default for AppClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[uniffi::export(async_runtime = "tokio")]
 impl AppClient {
     #[uniffi::constructor]

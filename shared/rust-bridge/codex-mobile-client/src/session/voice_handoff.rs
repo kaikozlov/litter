@@ -485,23 +485,23 @@ impl HandoffManager {
             let voice_key = entry.voice_thread_key.clone();
 
             // Check timeout.
-            if let Some(start) = entry.stream_start {
-                if start.elapsed() > Duration::from_secs(entry.stream_timeout_secs) {
-                    entry.phase = HandoffPhase::WaitingFinalize;
-                    if entry.sent_texts.is_empty() {
-                        new_actions.push(HandoffAction::ResolveHandoff {
-                            handoff_id: handoff_id.to_string(),
-                            voice_thread_key: voice_key.clone(),
-                            text: "(No response -- timed out)".to_string(),
-                        });
-                    }
-                    new_actions.push(HandoffAction::FinalizeHandoff {
+            if let Some(start) = entry.stream_start
+                && start.elapsed() > Duration::from_secs(entry.stream_timeout_secs)
+            {
+                entry.phase = HandoffPhase::WaitingFinalize;
+                if entry.sent_texts.is_empty() {
+                    new_actions.push(HandoffAction::ResolveHandoff {
                         handoff_id: handoff_id.to_string(),
-                        voice_thread_key: voice_key,
+                        voice_thread_key: voice_key.clone(),
+                        text: "(No response -- timed out)".to_string(),
                     });
-                    inner.action_queue.extend(new_actions);
-                    return;
                 }
+                new_actions.push(HandoffAction::FinalizeHandoff {
+                    handoff_id: handoff_id.to_string(),
+                    voice_thread_key: voice_key,
+                });
+                inner.action_queue.extend(new_actions);
+                return;
             }
 
             // Stream new items.
@@ -711,6 +711,7 @@ impl HandoffManager {
         DrainTranscriptResult { text, speaker }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn uniffi_handle_handoff_request(
         &self,
         handoff_id: String,

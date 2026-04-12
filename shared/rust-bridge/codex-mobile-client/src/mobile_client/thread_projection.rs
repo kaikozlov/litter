@@ -865,6 +865,7 @@ pub(super) async fn recover_ipc_stream_cache_from_app_server(
     Ok(conversation_state)
 }
 
+#[allow(dead_code)]
 pub(super) fn upstream_thread_status_from_summary_status(
     status: ThreadSummaryStatus,
 ) -> upstream::ThreadStatus {
@@ -913,9 +914,12 @@ pub(super) fn active_turn_id_from_turns(turns: &[upstream::Turn]) -> Option<Stri
         .map(|turn| turn.id.clone())
 }
 
+#[allow(dead_code)]
 pub(super) struct ThreadProjection {
     pub(super) snapshot: ThreadSnapshot,
+    #[allow(dead_code)]
     pub(super) pending_approvals: Vec<PendingApprovalWithSeed>,
+    #[allow(dead_code)]
     pub(super) pending_user_inputs: Vec<PendingUserInputRequest>,
 }
 
@@ -1244,6 +1248,7 @@ pub(super) enum PendingIpcStreamRecovery {
     },
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn queue_ipc_thread_stream_recovery(
     pending_thread_events: &mut HashMap<String, VecDeque<ThreadStreamStateChangedParams>>,
     recovering_threads: &mut HashSet<String>,

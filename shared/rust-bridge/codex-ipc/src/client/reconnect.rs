@@ -14,6 +14,10 @@ use crate::error::IpcError;
 use crate::handler::RequestHandler;
 use crate::protocol::params::TypedBroadcast;
 
+type ConnectorFn = Arc<
+    dyn Fn() -> Pin<Box<dyn Future<Output = Result<IpcClient, IpcError>> + Send>> + Send + Sync,
+>;
+
 /// Policy for reconnection attempts.
 pub struct ReconnectPolicy {
     pub initial_delay: Duration,
@@ -88,11 +92,7 @@ impl ReconnectingIpcClient {
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<IpcClient, IpcError>> + Send + 'static,
     {
-        let connector: Arc<
-            dyn Fn() -> Pin<Box<dyn Future<Output = Result<IpcClient, IpcError>> + Send>>
-                + Send
-                + Sync,
-        > = Arc::new(move || Box::pin(connector()));
+        let connector: ConnectorFn = Arc::new(move || Box::pin(connector()));
         let client = Arc::new(StdRwLock::new(initial_client));
         let handler: Arc<RwLock<Option<Arc<dyn RequestHandler>>>> = Arc::new(RwLock::new(None));
         let (broadcast_tx, _) = broadcast::channel::<TypedBroadcast>(256);
@@ -207,11 +207,7 @@ impl ReconnectingIpcClient {
         broadcast_tx: broadcast::Sender<TypedBroadcast>,
         connection_tx: watch::Sender<bool>,
         mut invalidate_rx: mpsc::UnboundedReceiver<()>,
-        connector: Arc<
-            dyn Fn() -> Pin<Box<dyn Future<Output = Result<IpcClient, IpcError>> + Send>>
-                + Send
-                + Sync,
-        >,
+        connector: ConnectorFn,
     ) {
         loop {
             let current_client = {
@@ -258,11 +254,11 @@ impl ReconnectingIpcClient {
 
             let new_client = loop {
                 attempt += 1;
-                if let Some(max) = policy.max_attempts {
-                    if attempt > max {
-                        error!("ipc reconnect: max attempts ({max}) reached, giving up");
-                        return;
-                    }
+                if let Some(max) = policy.max_attempts
+                    && attempt > max
+                {
+                    error!("ipc reconnect: max attempts ({max}) reached, giving up");
+                    return;
                 }
 
                 info!("ipc reconnecting, attempt {attempt}");

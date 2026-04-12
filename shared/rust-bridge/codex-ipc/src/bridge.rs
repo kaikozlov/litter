@@ -236,10 +236,7 @@ fn diff_turn_items(
                 HashMap::new()
             };
 
-        let is_active = next
-            .active_turn_id
-            .as_deref()
-            .map_or(false, |id| id == turn_id);
+        let is_active = next.active_turn_id.as_deref() == Some(turn_id);
 
         for next_item in &next_turn.items {
             let item_id = next_item.id();
@@ -615,39 +612,39 @@ pub(crate) fn bootstrap_events(
 ) -> Vec<BridgeEvent> {
     let mut events = Vec::new();
 
-    if let Some(active_id) = &projection.active_turn_id {
-        if let Some(turn) = find_turn(&projection.thread.turns, active_id) {
+    if let Some(active_id) = &projection.active_turn_id
+        && let Some(turn) = find_turn(&projection.thread.turns, active_id)
+    {
+        events.push(BridgeEvent {
+            thread_id: thread_id.to_string(),
+            notification: upstream::ServerNotification::TurnStarted(
+                upstream::TurnStartedNotification {
+                    thread_id: thread_id.to_string(),
+                    turn: turn.clone(),
+                },
+            ),
+        });
+        for item in &turn.items {
             events.push(BridgeEvent {
                 thread_id: thread_id.to_string(),
-                notification: upstream::ServerNotification::TurnStarted(
-                    upstream::TurnStartedNotification {
+                notification: upstream::ServerNotification::ItemStarted(
+                    upstream::ItemStartedNotification {
+                        item: item.clone(),
                         thread_id: thread_id.to_string(),
-                        turn: turn.clone(),
+                        turn_id: active_id.clone(),
                     },
                 ),
             });
-            for item in &turn.items {
-                events.push(BridgeEvent {
-                    thread_id: thread_id.to_string(),
-                    notification: upstream::ServerNotification::ItemStarted(
-                        upstream::ItemStartedNotification {
-                            item: item.clone(),
-                            thread_id: thread_id.to_string(),
-                            turn_id: active_id.clone(),
-                        },
-                    ),
-                });
-                events.push(BridgeEvent {
-                    thread_id: thread_id.to_string(),
-                    notification: upstream::ServerNotification::ItemCompleted(
-                        upstream::ItemCompletedNotification {
-                            item: item.clone(),
-                            thread_id: thread_id.to_string(),
-                            turn_id: active_id.clone(),
-                        },
-                    ),
-                });
-            }
+            events.push(BridgeEvent {
+                thread_id: thread_id.to_string(),
+                notification: upstream::ServerNotification::ItemCompleted(
+                    upstream::ItemCompletedNotification {
+                        item: item.clone(),
+                        thread_id: thread_id.to_string(),
+                        turn_id: active_id.clone(),
+                    },
+                ),
+            });
         }
     }
 
@@ -830,18 +827,18 @@ impl IpcBridge {
                 continue;
             };
             if fresh.active_turn_id.is_none() {
-                if let Some(prev_turn_id) = cache.projection.active_turn_id.take() {
-                    if let Some(turn) = find_turn(&fresh.thread.turns, &prev_turn_id) {
-                        events.push(BridgeEvent {
-                            thread_id: thread_id.clone(),
-                            notification: upstream::ServerNotification::TurnCompleted(
-                                upstream::TurnCompletedNotification {
-                                    thread_id: thread_id.clone(),
-                                    turn: turn.clone(),
-                                },
-                            ),
-                        });
-                    }
+                if let Some(prev_turn_id) = cache.projection.active_turn_id.take()
+                    && let Some(turn) = find_turn(&fresh.thread.turns, &prev_turn_id)
+                {
+                    events.push(BridgeEvent {
+                        thread_id: thread_id.clone(),
+                        notification: upstream::ServerNotification::TurnCompleted(
+                            upstream::TurnCompletedNotification {
+                                thread_id: thread_id.clone(),
+                                turn: turn.clone(),
+                            },
+                        ),
+                    });
                 }
                 cache.projection = fresh;
                 cache.last_updated = now;

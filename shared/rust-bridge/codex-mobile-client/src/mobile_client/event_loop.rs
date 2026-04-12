@@ -676,6 +676,7 @@ fn process_ipc_stream_processor_message(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_bridge_output(
     bridge: &mut IpcBridge,
     recovering_threads: &mut HashSet<String>,

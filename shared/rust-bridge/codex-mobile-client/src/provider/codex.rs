@@ -294,10 +294,7 @@ impl crate::provider::ProviderTransport for CodexProvider {
 
     fn next_event(&self) -> Option<ProviderEvent> {
         let mut rx = self.event_tx.subscribe();
-        match rx.try_recv() {
-            Ok(event) => Some(event),
-            Err(_) => None,
-        }
+        rx.try_recv().ok()
     }
 
     fn event_receiver(&self) -> broadcast::Receiver<ProviderEvent> {
@@ -407,6 +404,7 @@ mod tests {
             self.request_responses.push_back(response);
         }
 
+        #[allow(dead_code)]
         fn enqueue_notification_result(&mut self, result: Result<(), RpcError>) {
             self.notification_results.push_back(result);
         }

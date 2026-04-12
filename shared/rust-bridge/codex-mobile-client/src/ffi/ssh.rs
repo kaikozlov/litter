@@ -55,6 +55,12 @@ pub struct AppSshConnectionResult {
     pub wake_mac: Option<String>,
 }
 
+impl Default for SshBridge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[uniffi::export(async_runtime = "tokio")]
 impl SshBridge {
     #[uniffi::constructor]
@@ -67,6 +73,7 @@ impl SshBridge {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn ssh_connect_and_bootstrap(
         &self,
         host: String,
@@ -226,6 +233,7 @@ impl SshBridge {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn ssh_connect_remote_server(
         &self,
         server_id: String,
@@ -304,6 +312,7 @@ impl SshBridge {
             .map_err(|_| ClientError::Rpc("ssh connect task cancelled".to_string()))?
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn ssh_start_remote_server_connect(
         &self,
         server_id: String,
@@ -468,12 +477,11 @@ impl SshBridge {
 
     pub(crate) async fn ssh_read_wake_mac(&self, session: Arc<SshClient>) -> Option<String> {
         let rt = Arc::clone(&self.rt);
-        let result = tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             rt.block_on(async move { read_wake_mac(session).await })
         })
         .await
-        .ok()?;
-        result
+        .ok()?
     }
 }
 
@@ -489,6 +497,7 @@ async fn read_wake_mac(session: Arc<SshClient>) -> Option<String> {
     normalize_wake_mac(&result.stdout)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_guided_ssh_connect(
     mobile_client: Arc<crate::MobileClient>,
     bootstrap_flows: Arc<
@@ -813,10 +822,10 @@ fn ssh_auth(
 
 fn normalize_ssh_host(host: &str) -> String {
     let mut normalized = host.trim().trim_matches(['[', ']']).replace("%25", "%");
-    if !normalized.contains(':') {
-        if let Some((base, _scope)) = normalized.split_once('%') {
-            normalized = base.to_string();
-        }
+    if !normalized.contains(':')
+        && let Some((base, _scope)) = normalized.split_once('%')
+    {
+        normalized = base.to_string();
     }
     normalized
 }
@@ -824,8 +833,7 @@ fn normalize_ssh_host(host: &str) -> String {
 fn normalize_wake_mac(raw: &str) -> Option<String> {
     let compact = raw
         .trim()
-        .replace(':', "")
-        .replace('-', "")
+        .replace([':', '-'], "")
         .to_ascii_lowercase();
     if compact.len() != 12 || !compact.chars().all(|ch| ch.is_ascii_hexdigit()) {
         return None;

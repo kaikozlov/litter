@@ -179,10 +179,10 @@ fn resolved_preferred_codex_port(server: &SavedServerRecord) -> Option<u16> {
         return None;
     }
     let ports = available_direct_codex_ports(server);
-    if let Some(pref) = server.preferred_codex_port {
-        if ports.contains(&pref) {
-            return Some(pref);
-        }
+    if let Some(pref) = server.preferred_codex_port
+        && ports.contains(&pref)
+    {
+        return Some(pref);
     }
     None
 }
@@ -263,16 +263,16 @@ pub(crate) fn compute_reconnect_plan(
     }
 
     // 5. No explicit mode, but credential available → SSH (legacy fallback)
-    if mode.is_none() {
-        if let Some(cred) = credential {
-            return Some(ReconnectPlan::Ssh {
-                server_id: server.id.clone(),
-                display_name: server.name.clone(),
-                host: server.hostname.clone(),
-                ssh_port: resolved_ssh_port(server),
-                credential: cred.clone(),
-            });
-        }
+    if mode.is_none()
+        && let Some(cred) = credential
+    {
+        return Some(ReconnectPlan::Ssh {
+            server_id: server.id.clone(),
+            display_name: server.name.clone(),
+            host: server.hostname.clone(),
+            ssh_port: resolved_ssh_port(server),
+            credential: cred.clone(),
+        });
     }
 
     // 6. Local source → Local

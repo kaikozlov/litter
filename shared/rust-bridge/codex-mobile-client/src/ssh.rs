@@ -218,6 +218,7 @@ impl SshClient {
     ///
     /// `host_key_callback` is invoked with the SHA-256 fingerprint of the
     /// server's public key. Return `true` to accept, `false` to reject.
+    #[allow(clippy::type_complexity)]
     pub async fn connect(
         credentials: SshCredentials,
         host_key_callback: Box<dyn Fn(&str) -> BoxFuture<'static, bool> + Send + Sync>,
@@ -449,7 +450,7 @@ impl SshClient {
             .map_err(|e| SshError::ConnectionFailed(format!("exec upload: {e}")))?;
 
         channel
-            .data(&content[..])
+            .data(content)
             .await
             .map_err(|e| SshError::ConnectionFailed(format!("upload data: {e}")))?;
 
@@ -858,7 +859,7 @@ printf '%s/codex-ipc/ipc-%s.sock' "$tmp" "$uid""#;
                     profile_init = PROFILE_INIT,
                     cd_prefix = cd_prefix,
                     launch =
-                        server_launch_command(&codex_binary, &format!("ws://{listen_addr}"), shell),
+                        server_launch_command(codex_binary, &format!("ws://{listen_addr}"), shell),
                     log = shell_quote(&log_path),
                 ),
                 RemoteShell::PowerShell => {
@@ -902,40 +903,40 @@ printf '%s/codex-ipc/ipc-%s.sock' "$tmp" "$uid""#;
                 }
 
                 // If the process died, check logs for "address already in use".
-                if let Some(p) = pid {
-                    if !self.is_process_alive_shell(p, shell).await {
-                        let tail = self
-                            .fetch_process_log_tail_shell(
-                                &log_path,
-                                stderr_log_path.as_deref(),
-                                shell,
-                            )
-                            .await;
-                        if tail.to_ascii_lowercase().contains("address already in use") {
-                            info!(
-                                "ssh bootstrap process exited due to occupied port shell={} port={} pid={:?}",
-                                remote_shell_name(shell),
-                                port,
-                                pid
-                            );
-                            break; // try next port
-                        }
-                        warn!(
-                            "ssh bootstrap process exited before listen shell={} port={} pid={:?} tail={}",
+                if let Some(p) = pid
+                    && !self.is_process_alive_shell(p, shell).await
+                {
+                    let tail = self
+                        .fetch_process_log_tail_shell(
+                            &log_path,
+                            stderr_log_path.as_deref(),
+                            shell,
+                        )
+                        .await;
+                    if tail.to_ascii_lowercase().contains("address already in use") {
+                        info!(
+                            "ssh bootstrap process exited due to occupied port shell={} port={} pid={:?}",
                             remote_shell_name(shell),
                             port,
-                            pid,
-                            tail
+                            pid
                         );
-                        return Err(SshError::ExecFailed {
-                            exit_code: 1,
-                            stderr: if tail.is_empty() {
-                                "server process exited immediately".into()
-                            } else {
-                                tail
-                            },
-                        });
+                        break; // try next port
                     }
+                    warn!(
+                        "ssh bootstrap process exited before listen shell={} port={} pid={:?} tail={}",
+                        remote_shell_name(shell),
+                        port,
+                        pid,
+                        tail
+                    );
+                    return Err(SshError::ExecFailed {
+                        exit_code: 1,
+                        stderr: if tail.is_empty() {
+                            "server process exited immediately".into()
+                        } else {
+                            tail
+                        },
+                    });
                 }
 
                 tokio::time::sleep(Duration::from_millis(500)).await;
@@ -1298,13 +1299,13 @@ fi"#
                 }
             }
 
-            if let Some(p) = pid {
-                if !self.is_process_alive_shell(p, shell).await {
-                    let tail = self
-                        .fetch_process_log_tail_shell(stdout_log_path, stderr_log_path, shell)
-                        .await;
-                    return Err(if tail.is_empty() { last_error } else { tail });
-                }
+            if let Some(p) = pid
+                && !self.is_process_alive_shell(p, shell).await
+            {
+                let tail = self
+                    .fetch_process_log_tail_shell(stdout_log_path, stderr_log_path, shell)
+                    .await;
+                return Err(if tail.is_empty() { last_error } else { tail });
             }
 
             tokio::time::sleep(Duration::from_millis(250)).await;
@@ -1921,10 +1922,10 @@ fn format_process_logs(stdout: &str, stderr: &str) -> String {
 fn normalize_host(host: &str) -> String {
     let mut h = host.trim().trim_matches('[').trim_matches(']').to_string();
     h = h.replace("%25", "%");
-    if !h.contains(':') {
-        if let Some(idx) = h.find('%') {
-            h.truncate(idx);
-        }
+    if !h.contains(':')
+        && let Some(idx) = h.find('%')
+    {
+        h.truncate(idx);
     }
     h
 }

@@ -413,10 +413,10 @@ fn project_turn(
             source,
         })?;
 
-        if let upstream::ThreadItem::UserMessage { content, .. } = &item {
-            if *content == turn.params.input {
-                continue;
-            }
+        if let upstream::ThreadItem::UserMessage { content, .. } = &item
+            && *content == turn.params.input
+        {
+            continue;
         }
 
         items.push(item);
@@ -763,10 +763,10 @@ fn infer_cwd(conversation: &DesktopConversationState) -> String {
         return cwd.to_string();
     }
 
-    if let Some(path) = conversation.rollout_path.as_deref().and_then(non_empty) {
-        if let Some(parent) = Path::new(path).parent() {
-            return parent.to_string_lossy().to_string();
-        }
+    if let Some(path) = conversation.rollout_path.as_deref().and_then(non_empty)
+        && let Some(parent) = Path::new(path).parent()
+    {
+        return parent.to_string_lossy().to_string();
     }
 
     String::new()

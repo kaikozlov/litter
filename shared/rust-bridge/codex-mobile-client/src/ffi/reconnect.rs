@@ -47,8 +47,7 @@ fn resolved_local_display_name(
             saved_servers
                 .iter()
                 .find(|server| {
-                    (server.id == server_id || server.id == "local")
-                        && (server.source == "local" || server.id == "local")
+                    server.id == "local" || server.id == server_id && server.source == "local"
                 })
                 .and_then(|server| normalized_local_display_name(&server.name))
         })
@@ -63,6 +62,12 @@ pub struct ReconnectController {
     credential_provider: Arc<tokio::sync::Mutex<Option<Arc<dyn SshCredentialProvider>>>>,
     ipc_socket_path_override: Arc<std::sync::Mutex<Option<String>>>,
     reconnect_guard: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl Default for ReconnectController {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -240,7 +245,7 @@ impl ReconnectController {
                 server_id: server_id.clone(),
                 display_name: resolved_local_display_name(
                     &snapshot,
-                    saved_server.as_ref().map_or(&[], std::slice::from_ref),
+                    saved_server.as_slice(),
                     &server_id,
                 ),
                 host: "127.0.0.1".to_string(),

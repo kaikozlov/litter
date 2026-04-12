@@ -212,7 +212,7 @@ impl MobileClient {
                 .reasoning_effort
                 .map(Into::into)
                 .map(crate::reasoning_effort_string),
-            Some(response.approval_policy.clone().into()),
+            Some(response.approval_policy.into()),
             Some(response.sandbox.clone().into()),
         )
         .map_err(|e| e.to_string())?;
@@ -231,7 +231,7 @@ impl MobileClient {
             response.thread.clone(),
             None,
             None,
-            response.approval_policy.clone().map(Into::into),
+            response.approval_policy.map(Into::into),
             response.sandbox.clone().map(Into::into),
         )
         .map_err(|e| e.to_string())?;
@@ -253,7 +253,7 @@ impl MobileClient {
                 .reasoning_effort
                 .map(Into::into)
                 .map(crate::reasoning_effort_string),
-            Some(response.approval_policy.clone().into()),
+            Some(response.approval_policy.into()),
             Some(response.sandbox.clone().into()),
         )
         .map_err(|e| e.to_string())?;
@@ -275,7 +275,7 @@ impl MobileClient {
                 .reasoning_effort
                 .map(Into::into)
                 .map(crate::reasoning_effort_string),
-            Some(response.approval_policy.clone().into()),
+            Some(response.approval_policy.into()),
             Some(response.sandbox.clone().into()),
         )
         .map_err(|e| e.to_string())?;

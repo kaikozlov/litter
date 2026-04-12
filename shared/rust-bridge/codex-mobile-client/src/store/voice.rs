@@ -199,13 +199,12 @@ impl VoiceRealtimeThreadState {
 
     fn should_skip_delta(&mut self, delta: &str, speaker: AppVoiceSpeaker) -> bool {
         let now = Instant::now();
-        if let Some(previous) = &self.last_delta {
-            if previous.speaker == speaker
-                && previous.delta == delta
-                && now.duration_since(previous.timestamp) < Duration::from_millis(500)
-            {
-                return true;
-            }
+        if let Some(previous) = &self.last_delta
+            && previous.speaker == speaker
+            && previous.delta == delta
+            && now.duration_since(previous.timestamp) < Duration::from_millis(500)
+        {
+            return true;
         }
         self.last_delta = Some(LastDelta {
             speaker,
@@ -247,10 +246,10 @@ impl VoiceRealtimeThreadState {
             self.set_pending_item_id(speaker, Some(id.to_string()));
             return id.to_string();
         }
-        if !force_new {
-            if let Some(id) = self.pending_item_id(speaker) {
-                return id.clone();
-            }
+        if !force_new
+            && let Some(id) = self.pending_item_id(speaker)
+        {
+            return id.clone();
         }
         let label = match speaker {
             AppVoiceSpeaker::User => "user",

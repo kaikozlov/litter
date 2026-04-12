@@ -24,6 +24,12 @@ pub struct DiscoveryScanSubscription {
     >,
 }
 
+impl Default for DiscoveryBridge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[uniffi::export(async_runtime = "tokio")]
 impl DiscoveryBridge {
     #[uniffi::constructor]
@@ -73,6 +79,12 @@ impl DiscoveryBridge {
         .into_iter()
         .map(AppDiscoveredServer::from)
         .collect()
+    }
+}
+
+impl Default for ServerBridge {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

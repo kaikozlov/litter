@@ -12,6 +12,12 @@ pub struct PendingRequests {
     inner: Mutex<HashMap<String, oneshot::Sender<Result<Response, IpcError>>>>,
 }
 
+impl Default for PendingRequests {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PendingRequests {
     pub fn new() -> Self {
         Self {

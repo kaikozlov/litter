@@ -59,7 +59,7 @@ pub fn app_server_event_to_provider_event(
 /// the full dynamic tool flow still uses the existing UiEvent pipeline).
 /// Unrecognized requests map to `ProviderEvent::Unknown`.
 pub fn server_request_to_provider_event(
-    server_id: &str,
+    _server_id: &str,
     request: &ServerRequest,
 ) -> ProviderEvent {
     match request {
@@ -110,7 +110,7 @@ pub fn server_request_to_provider_event(
                 call_id: request_id_to_string(request_id),
             }
         }
-        ServerRequest::ChatgptAuthTokensRefresh { request_id, .. } => {
+        ServerRequest::ChatgptAuthTokensRefresh { request_id: _, .. } => {
             // Auth token refresh is an internal mechanism, not a user-visible event.
             // Map to Unknown with relevant info for logging.
             ProviderEvent::Unknown {
@@ -289,7 +289,8 @@ pub fn server_notification_to_provider_event(
 /// internally and return `None`.
 ///
 /// Returns `None` for events that do not correspond to any `UiEvent`.
-pub fn provider_event_to_ui_event(
+#[allow(dead_code)]
+pub(crate) fn provider_event_to_ui_event(
     server_id: &str,
     event: &ProviderEvent,
 ) -> Option<UiEvent> {
@@ -560,6 +561,7 @@ pub fn provider_event_to_ui_event(
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 fn mk_key(server_id: &str, thread_id: &str) -> ThreadKey {
     ThreadKey {
         server_id: server_id.to_string(),

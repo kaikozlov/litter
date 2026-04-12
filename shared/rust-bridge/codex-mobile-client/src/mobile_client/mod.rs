@@ -719,6 +719,7 @@ impl MobileClient {
         result
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn finish_connect_remote_over_ssh(
         &self,
         mut config: ServerConfig,
@@ -1670,6 +1671,7 @@ impl MobileClient {
     }
 
     /// Fork a thread from a selected user message boundary.
+    #[allow(clippy::too_many_arguments)]
     pub async fn fork_thread_from_message(
         &self,
         key: &ThreadKey,
@@ -2149,15 +2151,18 @@ impl MobileClient {
         self.app_store.set_voice_handoff_thread(key);
     }
 
+    #[allow(clippy::await_holding_lock)]
     pub async fn scan_servers_with_mdns_context(
         &self,
         mdns_results: Vec<MdnsSeed>,
         local_ipv4: Option<String>,
     ) -> Vec<DiscoveredServer> {
         let discovery = self.discovery_write();
-        discovery
+        let result = discovery
             .scan_once_with_context(&mdns_results, local_ipv4.as_deref())
-            .await
+            .await;
+        drop(discovery);
+        result
     }
 
     pub fn subscribe_scan_servers_with_mdns_context(

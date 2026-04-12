@@ -5,6 +5,12 @@ use crate::parser::{AppCodeReviewPayload, AppToolCallCard};
 #[derive(uniffi::Object)]
 pub struct MessageParser;
 
+impl Default for MessageParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[uniffi::export]
 impl MessageParser {
     #[uniffi::constructor]

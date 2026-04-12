@@ -352,18 +352,18 @@ fn find_code_fences(text: &str) -> Vec<(usize, usize, Option<String>, String)> {
         } else {
             // Check if this line opens a fence
             let first_char = trimmed.chars().next();
-            if let Some(fc) = first_char {
-                if fc == '`' || fc == '~' {
-                    let fl = trimmed.chars().take_while(|&c| c == fc).count();
-                    if fl >= 3 {
-                        fence_char = Some(fc);
-                        fence_len = fl;
-                        fence_start = line_start;
-                        fence_language = trimmed[fc.len_utf8() * fl..].trim().to_owned();
-                        in_fence = true;
-                        code_lines.clear();
-                        continue;
-                    }
+            if let Some(fc) = first_char
+                && (fc == '`' || fc == '~')
+            {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= 3 {
+                    fence_char = Some(fc);
+                    fence_len = fl;
+                    fence_start = line_start;
+                    fence_language = trimmed[fc.len_utf8() * fl..].trim().to_owned();
+                    in_fence = true;
+                    code_lines.clear();
+                    continue;
                 }
             }
         }
@@ -529,22 +529,21 @@ fn find_math_spans(
                         continue;
                     }
                 }
-            } else if bytes[cursor..].starts_with(br"\(") {
-                if let Some(close_start) =
+            } else if bytes[cursor..].starts_with(br"\(")
+                && let Some(close_start) =
                     find_closing_math_delimiter(text, cursor + 2, br"\)", false)
-                {
-                    let latex = &text[cursor + 2..close_start];
-                    if !latex.is_empty() && !latex.contains('\n') {
-                        spans.push((
-                            cursor,
-                            close_start + 2,
-                            MessageSegment::InlineMath {
-                                latex: latex.to_owned(),
-                            },
-                        ));
-                        cursor = close_start + 2;
-                        continue;
-                    }
+            {
+                let latex = &text[cursor + 2..close_start];
+                if !latex.is_empty() && !latex.contains('\n') {
+                    spans.push((
+                        cursor,
+                        close_start + 2,
+                        MessageSegment::InlineMath {
+                            latex: latex.to_owned(),
+                        },
+                    ));
+                    cursor = close_start + 2;
+                    continue;
                 }
             }
         }
@@ -702,10 +701,10 @@ pub fn extract_message_segments(text: &str) -> Vec<MessageSegment> {
     // Remove overlapping spans (keep earlier ones)
     let mut deduped: Vec<(usize, usize, MessageSegment)> = Vec::new();
     for span in spans {
-        if let Some(last) = deduped.last() {
-            if span.0 < last.1 {
-                continue;
-            }
+        if let Some(last) = deduped.last()
+            && span.0 < last.1
+        {
+            continue;
         }
         deduped.push(span);
     }

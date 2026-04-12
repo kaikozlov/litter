@@ -372,6 +372,7 @@ impl PartialEq for ConnectionHealth {
 // Internal command type for the worker task
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::large_enum_variant)]
 enum SessionCommand {
     Request {
         request: ClientRequest,
@@ -472,13 +473,13 @@ impl ServerSession {
             }
         }
 
-        if let Some(ref working_dir) = in_process.working_directory {
-            if let Err(e) = std::env::set_current_dir(working_dir) {
-                return Err(TransportError::ConnectionFailed(format!(
-                    "failed to set working directory {:?}: {e}",
-                    working_dir
-                )));
-            }
+        if let Some(ref working_dir) = in_process.working_directory
+            && let Err(e) = std::env::set_current_dir(working_dir)
+        {
+            return Err(TransportError::ConnectionFailed(format!(
+                "failed to set working directory {:?}: {e}",
+                working_dir
+            )));
         }
 
         let cli_overrides = vec![
@@ -1356,28 +1357,28 @@ async fn reconnect_remote_client(
                 return true;
             }
             Err(error) => {
-                if let Some(ssh_transport) = ssh_transport {
-                    if rebootstrap_remote_client_over_ssh(ssh_transport, websocket_url).await {
-                        match connect_remote_client(args).await {
-                            Ok(next_client) => {
-                                *client = next_client;
-                                let _ = health_tx.send(ConnectionHealth::Connected);
-                                info!(
-                                    "remote server session reconnected after ssh rebootstrap: {} (attempt {attempt}/{})",
-                                    websocket_url, REMOTE_RECONNECT_MAX_ATTEMPTS
-                                );
-                                append_android_debug_log(&format!(
-                                    "reconnect_success url={} attempt={}/{} mode=ssh_rebootstrap",
-                                    websocket_url, attempt, REMOTE_RECONNECT_MAX_ATTEMPTS
-                                ));
-                                return true;
-                            }
-                            Err(retry_error) => {
-                                warn!(
-                                    "remote reconnect after ssh rebootstrap still failed: {} (attempt {attempt}/{}) - {}",
-                                    websocket_url, REMOTE_RECONNECT_MAX_ATTEMPTS, retry_error
-                                );
-                            }
+                if let Some(ssh_transport) = ssh_transport
+                    && rebootstrap_remote_client_over_ssh(ssh_transport, websocket_url).await
+                {
+                    match connect_remote_client(args).await {
+                        Ok(next_client) => {
+                            *client = next_client;
+                            let _ = health_tx.send(ConnectionHealth::Connected);
+                            info!(
+                                "remote server session reconnected after ssh rebootstrap: {} (attempt {attempt}/{})",
+                                websocket_url, REMOTE_RECONNECT_MAX_ATTEMPTS
+                            );
+                            append_android_debug_log(&format!(
+                                "reconnect_success url={} attempt={}/{} mode=ssh_rebootstrap",
+                                websocket_url, attempt, REMOTE_RECONNECT_MAX_ATTEMPTS
+                            ));
+                            return true;
+                        }
+                        Err(retry_error) => {
+                            warn!(
+                                "remote reconnect after ssh rebootstrap still failed: {} (attempt {attempt}/{}) - {}",
+                                websocket_url, REMOTE_RECONNECT_MAX_ATTEMPTS, retry_error
+                            );
                         }
                     }
                 }
@@ -2214,6 +2215,7 @@ mod tests {
             }
         }
 
+        #[allow(dead_code)]
         fn emit_event(&self, event: ProviderEvent) {
             let _ = self.events.send(event);
         }

@@ -65,6 +65,12 @@ enum ItemMutationUpdate {
     Upsert(HydratedConversationItem),
 }
 
+impl Default for AppStoreReducer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AppStoreReducer {
     pub fn new() -> Self {
         // Streaming turns can burst small deltas quickly; keep enough headroom so
@@ -1203,15 +1209,14 @@ impl AppStoreReducer {
             return IpcFailureClassification::ServerTransportUnhealthy;
         }
 
-        if let Some(pending) = server.transport.pending_mutation.as_ref() {
-            if server.transport.last_lifecycle_phase != pending.lifecycle_phase_at_send
+        if let Some(pending) = server.transport.pending_mutation.as_ref()
+            && (server.transport.last_lifecycle_phase != pending.lifecycle_phase_at_send
                 || server
                     .transport
                     .last_lifecycle_transition_at
-                    .is_some_and(|at| at >= pending.started_at)
-            {
-                return IpcFailureClassification::LifecycleInterrupted;
-            }
+                    .is_some_and(|at| at >= pending.started_at))
+        {
+            return IpcFailureClassification::LifecycleInterrupted;
         }
 
         if timed_out {
@@ -1686,15 +1691,12 @@ impl AppStoreReducer {
                     .voice_state
                     .handle_typed_transcript_delta(key, role, text)
                 {
-                    match update {
-                        VoiceDerivedUpdate::Transcript(update) => {
-                            self.apply_voice_transcript_update(key, &update);
-                            self.emit(AppStoreUpdateRecord::RealtimeTranscriptUpdated {
-                                key: key.clone(),
-                                update,
-                            });
-                        }
-                        _ => {}
+                    if let VoiceDerivedUpdate::Transcript(update) = update {
+                        self.apply_voice_transcript_update(key, &update);
+                        self.emit(AppStoreUpdateRecord::RealtimeTranscriptUpdated {
+                            key: key.clone(),
+                            update,
+                        });
                     }
                 }
             }
@@ -2041,7 +2043,7 @@ impl AppStoreReducer {
         }
         self.emit(AppStoreUpdateRecord::ThreadItemChanged {
             key: key.clone(),
-            item: HydratedConversationItem::from(item),
+            item,
         });
     }
 
@@ -2635,6 +2637,7 @@ pub(crate) fn remove_duplicate_local_overlay_items(thread: &mut ThreadSnapshot) 
     });
 }
 
+#[allow(dead_code)]
 pub(crate) fn reconcile_local_overlay_items(thread: &mut ThreadSnapshot) {
     if let Some(turn_id) = thread.active_turn_id.clone() {
         for item in &mut thread.local_overlay_items {
@@ -2778,7 +2781,7 @@ fn is_duplicate_overlay_item(
 fn is_superseded_overlay_item(
     local: &HydratedConversationItem,
     existing: &HydratedConversationItem,
-    active_turn_id: Option<&str>,
+    _active_turn_id: Option<&str>,
 ) -> bool {
     if is_duplicate_overlay_item(local, existing) {
         return true;
@@ -4384,9 +4387,7 @@ fn classify_item_mutation(
     item: &HydratedConversationItem,
 ) -> Option<ItemMutationUpdate> {
     let Some(existing) = existing else {
-        return Some(ItemMutationUpdate::Upsert(HydratedConversationItem::from(
-            item.clone(),
-        )));
+        return Some(ItemMutationUpdate::Upsert(item.clone()));
     };
 
     match (&existing.content, &item.content) {
@@ -4403,9 +4404,7 @@ fn classify_item_mutation(
                 || existing_data.cwd != projected_data.cwd
                 || existing_data.actions != projected_data.actions
             {
-                return Some(ItemMutationUpdate::Upsert(HydratedConversationItem::from(
-                    item.clone(),
-                )));
+                return Some(ItemMutationUpdate::Upsert(item.clone()));
             }
 
             let output_delta =
@@ -4417,15 +4416,11 @@ fn classify_item_mutation(
             if output_delta.is_empty() && !status_changed {
                 None
             } else {
-                Some(ItemMutationUpdate::Upsert(HydratedConversationItem::from(
-                    item.clone(),
-                )))
+                Some(ItemMutationUpdate::Upsert(item.clone()))
             }
         }
         _ if existing.content == item.content => None,
-        _ => Some(ItemMutationUpdate::Upsert(HydratedConversationItem::from(
-            item.clone(),
-        ))),
+        _ => Some(ItemMutationUpdate::Upsert(item.clone())),
     }
 }
 

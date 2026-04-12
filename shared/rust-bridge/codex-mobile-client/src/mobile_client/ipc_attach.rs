@@ -2,6 +2,7 @@ use super::*;
 
 const MOBILE_IPC_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+#[allow(clippy::type_complexity)]
 pub(super) fn make_accept_unknown_host_callback(
     accept_unknown_host: bool,
 ) -> Box<
@@ -53,7 +54,6 @@ pub(super) async fn attach_ipc_client_via_ssh(
         socket_path: std::path::PathBuf::from(socket_path),
         client_type: "mobile".to_string(),
         request_timeout: MOBILE_IPC_REQUEST_TIMEOUT,
-        ..IpcClientConfig::default()
     };
     match ssh_client.open_streamlocal(socket_path).await {
         Ok(stream) => match IpcClient::connect_with_stream(&ipc_config, stream).await {
