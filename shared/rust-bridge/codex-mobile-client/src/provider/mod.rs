@@ -396,6 +396,7 @@ pub trait ProviderTransport: Send + Sync + 'static {
     fn is_connected(&self) -> bool;
 }
 
+pub mod acp;
 pub mod codex;
 pub mod error_handling;
 pub mod mapping;
