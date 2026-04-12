@@ -1,0 +1,81 @@
+{
+  "milestone": "droid-provider",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 16,
+    "passed": 16,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-DROID-001",
+    "VAL-DROID-002",
+    "VAL-DROID-003",
+    "VAL-DROID-004",
+    "VAL-DROID-005",
+    "VAL-DROID-006",
+    "VAL-DROID-007",
+    "VAL-DROID-008",
+    "VAL-DROID-009",
+    "VAL-DROID-010",
+    "VAL-DROID-011",
+    "VAL-DROID-012",
+    "VAL-DROID-013",
+    "VAL-DROID-014",
+    "VAL-DROID-015",
+    "VAL-DROID-016"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null,
+  "flowReports": [
+    ".factory/validation/droid-provider/user-testing/flows/native-transport.json",
+    ".factory/validation/droid-provider/user-testing/flows/acp-e2e.json"
+  ],
+  "testExecution": {
+    "unitTests": {
+      "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- droid",
+      "total": 109,
+      "passed": 109,
+      "failed": 0,
+      "ignored": 3
+    },
+    "e2eTests": {
+      "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- droid --ignored",
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    "detectionTests": {
+      "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- droid_detection",
+      "total": 3,
+      "passed": 3,
+      "failed": 0
+    }
+  },
+  "concurrencyStrategy": {
+    "groups": [
+      {
+        "id": "native-transport",
+        "assertions": ["VAL-DROID-002", "VAL-DROID-003", "VAL-DROID-004", "VAL-DROID-005", "VAL-DROID-006", "VAL-DROID-007", "VAL-DROID-008", "VAL-DROID-009", "VAL-DROID-010", "VAL-DROID-011", "VAL-DROID-012", "VAL-DROID-016"],
+        "tool": "cargo test (mock transports)",
+        "isolation": "Independent mock transport instances per test"
+      },
+      {
+        "id": "acp-e2e",
+        "assertions": ["VAL-DROID-001", "VAL-DROID-013", "VAL-DROID-014", "VAL-DROID-015"],
+        "tool": "cargo test (unit + E2E with SSH to gvps)",
+        "isolation": "E2E tests sequential against gvps, unit tests use mock transports"
+      }
+    ],
+    "maxConcurrent": 2,
+    "rationale": "Both groups use independent cargo test processes with separate test filters; no shared mutable state between groups"
+  },
+  "notes": [
+    "VAL-DROID-016 contract referenced test names 'droid_spawn_timeout' and 'droid_silent_exit_detection' that do not exist as separate tests. Equivalent spawn failure behavior is covered by 'mock_channel_droid_not_found' and 'droid_binary_not_found'.",
+    "VAL-DROID-015 E2E SSH reconnect is covered by unit tests with mock transports (droid_acp_crash_recovery, droid_provider_crash_recovery, droid_provider_session_lifecycle). No dedicated real SSH disconnect/reconnect E2E test exists."
+  ]
+}

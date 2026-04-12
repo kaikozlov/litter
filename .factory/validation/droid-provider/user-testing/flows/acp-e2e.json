@@ -1,0 +1,198 @@
+{
+  "groupId": "acp-e2e",
+  "testedAt": "2026-04-12T13:50:00Z",
+  "isolation": {
+    "workingDirectory": "/home/kai/gitrepos/litter",
+    "testTarget": "shared/rust-bridge/codex-mobile-client",
+    "sshTarget": "100.82.102.84:5132 (ubuntu)",
+    "testType": "cargo test (Rust unit + E2E tests)"
+  },
+  "toolsUsed": ["cargo test"],
+  "assertions": [
+    {
+      "id": "VAL-DROID-001",
+      "title": "ACP transport spawn and initial handshake",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run unit test droid_acp_handshake",
+          "expected": "ProviderEvent::SessionStarted with non-empty session ID within 15s",
+          "observed": "Test passed — provider parsed first ACP message and extracted session ID successfully"
+        }
+      ],
+      "evidence": {
+        "testOutput": "test provider::droid::acp_transport::tests::droid_acp_handshake ... ok",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROID-013",
+      "title": "E2E — connect to Droid on gvps, start session, send prompt, receive streaming response",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run E2E test e2e_droid_acp_stream_json_init",
+          "expected": "SSH to gvps, spawn droid exec, initialize session, verify valid session ID",
+          "observed": "Test passed — SSH connected to 100.82.102.84:5132, session initialized with valid session ID"
+        },
+        {
+          "action": "Run E2E test e2e_droid_acp_full_pipeline",
+          "expected": "Full round-trip: send prompt, verify streaming deltas, verify idle state, verify hydrated conversation",
+          "observed": "Test passed — full pipeline completed with working_state_changed → streaming, create_message deltas, working_state_changed → idle, and correct HydratedConversationItem list"
+        }
+      ],
+      "evidence": {
+        "testOutput": "test provider::droid::acp_transport::tests::e2e_droid_acp_stream_json_init ... ok\ntest provider::droid::acp_transport::tests::e2e_droid_acp_full_pipeline ... ok",
+        "sshConnection": "SSH connected and authenticated to 100.82.102.84:5132",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROID-014",
+      "title": "E2E — Droid session with tool use on gvps",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run E2E test e2e_droid_acp_stream_json_tool_use",
+          "expected": "SSH to gvps, send tool-use prompt, verify tool_result notifications and correct UiEvent mapping",
+          "observed": "Test passed — tool_result notifications received and correctly mapped to UiEvent"
+        },
+        {
+          "action": "Run unit test droid_session_with_tool_use",
+          "expected": "Verify tool call appears in hydrated conversation with correct fields",
+          "observed": "Test passed — tool call item present in final hydrated conversation"
+        }
+      ],
+      "evidence": {
+        "testOutput": "test provider::droid::acp_transport::tests::e2e_droid_acp_stream_json_tool_use ... ok\ntest provider::droid::transport::tests::droid_session_with_tool_use ... ok",
+        "sshConnection": "SSH connected and authenticated to 100.82.102.84:5132",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROID-015",
+      "title": "E2E — Droid session recovery after SSH reconnect on gvps",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run unit test droid_acp_crash_recovery",
+          "expected": "Provider detects crash, emits TransportDisconnected, preserves partial state correctly",
+          "observed": "Test passed — crash recovery handled correctly"
+        },
+        {
+          "action": "Run unit test droid_provider_crash_recovery",
+          "expected": "Provider emits disconnect event, discards partial state, emits error for interrupted streaming",
+          "observed": "Test passed — disconnect detected within 5s, no partial/corrupted hydrated items"
+        },
+        {
+          "action": "Run unit test droid_provider_session_lifecycle",
+          "expected": "Session ID tracking, fork, and resume work correctly",
+          "observed": "Test passed — fork returns distinct session ID, resume restores conversation state"
+        }
+      ],
+      "evidence": {
+        "testOutput": "test provider::droid::acp_transport::tests::droid_acp_crash_recovery ... ok\ntest provider::droid::transport::tests::droid_provider_crash_recovery ... ok\ntest provider::droid::transport::tests::droid_provider_session_lifecycle ... ok",
+        "consoleErrors": "none"
+      },
+      "issues": "Full SSH reconnect E2E test (real disconnect/reconnect with session ID preservation) is covered by unit tests with mock transports. The real gvps-based reconnect test was not run as a dedicated E2E test; the contract note acknowledges this may not have a dedicated test."
+    }
+  ],
+  "supportingTests": [
+    {
+      "test": "droid_acp_assistant_streaming",
+      "status": "pass",
+      "note": "ACP streaming works correctly"
+    },
+    {
+      "test": "droid_acp_tool_result_mapping",
+      "status": "pass",
+      "note": "ACP tool result mapping works"
+    },
+    {
+      "test": "droid_acp_tool_result_error",
+      "status": "pass",
+      "note": "ACP tool result error handled"
+    },
+    {
+      "test": "droid_acp_full_session_lifecycle",
+      "status": "pass",
+      "note": "Full ACP session lifecycle works"
+    },
+    {
+      "test": "droid_acp_completion_event",
+      "status": "pass",
+      "note": "ACP completion event works"
+    },
+    {
+      "test": "droid_acp_list_sessions_returns_current",
+      "status": "pass",
+      "note": "ACP list sessions works"
+    },
+    {
+      "test": "droid_acp_permission_suggest",
+      "status": "pass",
+      "note": "ACP permission handling works"
+    },
+    {
+      "test": "droid_acp_malformed_json_skipped",
+      "status": "pass",
+      "note": "ACP malformed JSON handled gracefully"
+    },
+    {
+      "test": "droid_acp_send_user_message",
+      "status": "pass",
+      "note": "ACP user message works"
+    },
+    {
+      "test": "droid_acp_send_request_prompt",
+      "status": "pass",
+      "note": "ACP prompt request works"
+    },
+    {
+      "test": "droid_idle_before_complete_deferred",
+      "status": "pass",
+      "note": "Droid idle-before-complete quirk handled"
+    },
+    {
+      "test": "droid_malformed_json_does_not_crash",
+      "status": "pass",
+      "note": "Malformed JSON does not crash provider"
+    },
+    {
+      "test": "droid_unknown_notification_method",
+      "status": "pass",
+      "note": "Unknown notification method handled gracefully"
+    },
+    {
+      "test": "droid_provider_transport_is_connected",
+      "status": "pass",
+      "note": "Connection state tracking works"
+    },
+    {
+      "test": "droid_provider_transport_unknown_method",
+      "status": "pass",
+      "note": "Unknown method returns error correctly"
+    },
+    {
+      "test": "droid_cancel_command",
+      "status": "pass",
+      "note": "Cancel command works"
+    },
+    {
+      "test": "droid_list_sessions",
+      "status": "pass",
+      "note": "List sessions works"
+    },
+    {
+      "test": "droid_full_session_lifecycle",
+      "status": "pass",
+      "note": "Full session lifecycle works"
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 4 assertions: all 4 passed. Unit tests: 35/35 passed (including 27 droid_acp tests + 8 transport tests). E2E tests: 3/3 passed (e2e_droid_acp_stream_json_init, e2e_droid_acp_full_pipeline, e2e_droid_acp_stream_json_tool_use). All supporting tests also passed. VAL-DROID-015 session recovery is covered by unit tests with mock transports rather than a dedicated real SSH reconnect E2E test."
+}
