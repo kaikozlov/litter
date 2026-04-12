@@ -1,0 +1,182 @@
+{
+  "groupId": "group-2-integration-parity",
+  "testedAt": "2026-04-12T12:00:00Z",
+  "isolation": {
+    "workingDirectory": "/home/kai/gitrepos/litter",
+    "testCommand": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib",
+    "testProfile": "mock transports only (no real SSH)"
+  },
+  "toolsUsed": ["cargo test"],
+  "assertions": [
+    {
+      "id": "VAL-CROSS-009",
+      "title": "Permission Flow Parity Across Providers",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test with filter 'permission_parity codex_regression_approval_flow'",
+          "expected": "All permission parity tests pass — Codex/Droid/ACP permission events map to same store shape, Pi emits no permission events",
+          "observed": "3 tests passed: codex_regression_approval_flow, permission_parity_droid_vs_codex, permission_parity_pi_no_permissions"
+        }
+      ],
+      "evidence": {
+        "testOutput": "cross-integration/group-2-integration-parity/VAL-CROSS-009-permission-parity.txt",
+        "testsRun": [
+          "provider::cross_provider::codex_regression_approval_flow",
+          "provider::droid::e2e::tests::permission_parity_droid_vs_codex",
+          "provider::droid::e2e::tests::permission_parity_pi_no_permissions"
+        ],
+        "result": "3 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-010",
+      "title": "Session History Aggregation Across Providers",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test with filter 'session_history_aggregation'",
+          "expected": "Session listing across multiple providers returns correctly attributed sessions",
+          "observed": "2 tests passed: session_history_aggregation_across_providers, session_history_aggregation_with_droid"
+        }
+      ],
+      "evidence": {
+        "testOutput": "cross-integration/group-2-integration-parity/VAL-CROSS-010-session-history-aggregation.txt",
+        "testsRun": [
+          "provider::cross_provider::session_history_aggregation_across_providers",
+          "provider::droid::e2e::tests::session_history_aggregation_with_droid"
+        ],
+        "result": "2 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-011",
+      "title": "Discovery Detects All Agent Types on Single Host",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test with filters 'discovery_detects pi_detection droid_detection'",
+          "expected": "Discovery probes correctly detect Pi, Droid, and Codex agent types on hosts",
+          "observed": "12 tests passed covering Pi detection scenarios (native only, both, neither, partial), Droid detection (available, not found, no Codex interference), and multi-agent discovery"
+        }
+      ],
+      "evidence": {
+        "testOutput": "cross-integration/group-2-integration-parity/VAL-CROSS-011-discovery-detects-agents.txt",
+        "testsRun": [
+          "provider::droid::detection::tests::droid_detection_available_on_path",
+          "provider::droid::detection::tests::droid_detection_does_not_interfere_with_codex",
+          "provider::droid::detection::tests::droid_detection_not_found",
+          "provider::pi::detection::tests::pi_detection_scenario_a_native_only",
+          "provider::pi::detection::tests::pi_detection_scenario_b_both",
+          "provider::pi::detection::tests::pi_detection_partial_native_binary_no_version",
+          "provider::pi::detection::tests::pi_detection_scenario_c_neither",
+          "provider::pi::e2e::tests::discovery_detects_pi_only",
+          "provider::droid::e2e::tests::discovery_detects_no_agents",
+          "provider::droid::e2e::tests::discovery_detects_droid_only",
+          "provider::droid::e2e::tests::discovery_detects_droid_on_host",
+          "provider::pi::e2e::tests::discovery_detects_pi_alongside_other_agents"
+        ],
+        "result": "12 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-012",
+      "title": "Store/Reducer Produces Identical HydratedConversationItem Regardless of Provider Source",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test with filters 'store_parity provider_event_serde_parity'",
+          "expected": "Equivalent semantic events from different providers produce identical hydrated conversation items",
+          "observed": "2 tests passed: store_parity_identical_events_from_different_providers, provider_event_serde_parity_across_agent_types"
+        }
+      ],
+      "evidence": {
+        "testOutput": "cross-integration/group-2-integration-parity/VAL-CROSS-012-store-parity.txt",
+        "testsRun": [
+          "provider::cross_provider::store_parity_identical_events_from_different_providers",
+          "provider::cross_provider::provider_event_serde_parity_across_agent_types"
+        ],
+        "result": "2 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-013",
+      "title": "ACP and Native Transport Fallback for Same Agent",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test with filter 'transport_fallback'",
+          "expected": "System respects user's transport preference and falls back gracefully when preferred transport fails",
+          "observed": "4 tests passed: transport_fallback_native_to_acp, transport_fallback_acp_to_native, transport_fallback_acp_when_native_unavailable, transport_fallback_native_preferred_acp_secondary"
+        }
+      ],
+      "evidence": {
+        "testOutput": "cross-integration/group-2-integration-parity/VAL-CROSS-013-transport-fallback.txt",
+        "testsRun": [
+          "provider::cross_provider::transport_fallback_native_to_acp",
+          "provider::cross_provider::transport_fallback_acp_to_native",
+          "provider::pi::detection::tests::transport_fallback_acp_when_native_unavailable",
+          "provider::pi::detection::tests::transport_fallback_native_preferred_acp_secondary"
+        ],
+        "result": "4 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-014",
+      "title": "UniFFI Boundary Type Stability Across Agent Types",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test with filters 'agent_type_ uniffi_permission_policy uniffi_agent_type uniffi_provider_event provider_event_serde_roundtrip agent_type_distinguishes'",
+          "expected": "All UniFFI boundary types (AgentType, PermissionPolicy, ProviderEvent) serialize/deserialize correctly and distinguish providers",
+          "observed": "10 tests passed covering AgentType variants, serde roundtrips, display formatting, UniFFI stability for permission policies and provider events, and provider discrimination"
+        }
+      ],
+      "evidence": {
+        "testOutput": "cross-integration/group-2-integration-parity/VAL-CROSS-014-uniffi-boundary-types.txt",
+        "testsRun": [
+          "mobile_client::tests::mobile_client_tests::agent_type_unsupported_rejection_message_clear",
+          "discovery::tests::discovered_server_default_agent_type_is_codex",
+          "provider::tests::agent_type_display",
+          "provider::tests::agent_type_serde_roundtrip",
+          "provider::droid::e2e::tests::uniffi_agent_type_all_variants_stability",
+          "provider::droid::e2e::tests::uniffi_permission_policy_stability",
+          "provider::cross_provider::agent_type_distinguishes_providers",
+          "provider::tests::agent_type_all_variants",
+          "provider::tests::provider_event_serde_roundtrip",
+          "provider::droid::e2e::tests::uniffi_provider_event_all_variants_stability"
+        ],
+        "result": "10 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-021",
+      "title": "Session ID Collision Across Providers",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test with filter 'session_id_collision'",
+          "expected": "Store distinguishes sessions with same ID from different providers via ThreadKey discriminator",
+          "observed": "1 test passed: session_id_collision_isolation — verifies store isolation for colliding session IDs across providers"
+        }
+      ],
+      "evidence": {
+        "testOutput": "cross-integration/group-2-integration-parity/VAL-CROSS-021-session-id-collision.txt",
+        "testsRun": [
+          "provider::cross_provider::session_id_collision_isolation"
+        ],
+        "result": "1 passed; 0 failed"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 7 assertions: all 7 passed. Total of 34 individual cargo tests passed with 0 failures. VAL-CROSS-009 (3 tests), VAL-CROSS-010 (2 tests), VAL-CROSS-011 (12 tests), VAL-CROSS-012 (2 tests), VAL-CROSS-013 (4 tests), VAL-CROSS-014 (10 tests), VAL-CROSS-021 (1 test)."
+}

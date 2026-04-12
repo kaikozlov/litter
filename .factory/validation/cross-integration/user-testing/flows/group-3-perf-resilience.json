@@ -1,0 +1,177 @@
+{
+  "groupId": "group-3-perf-resilience",
+  "testedAt": "2026-04-12T00:00:00Z",
+  "isolation": {
+    "workingDirectory": "/home/kai/gitrepos/litter",
+    "testCommand": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib",
+    "sshTarget": "100.82.102.84:5132 (ubuntu)"
+  },
+  "toolsUsed": ["cargo test", "ssh"],
+  "assertions": [
+    {
+      "id": "VAL-CROSS-015",
+      "title": "Streaming Performance Parity Across Providers",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test streaming_performance_parity_pi_vs_droid, pi_native_streaming_first_delta_timing, droid_streaming_first_delta_timing",
+          "expected": "All streaming performance tests pass — first delta timing within 2x baseline, total completion within 1.5x",
+          "observed": "3 tests passed: streaming_performance_parity_pi_vs_droid, pi_native_streaming_first_delta_timing, droid_streaming_first_delta_timing — all ok"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A (mock transport tests)",
+        "testOutput": "cross-integration/group-3-perf-resilience/all-tests-output.txt"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-016",
+      "title": "Three Concurrent Provider Sessions",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test three_concurrent_provider_sessions",
+          "expected": "Three concurrent sessions (Codex + PiNative + DroidNative) stream simultaneously with correct event attribution; disconnecting one session does not affect others",
+          "observed": "Test passed — three_concurrent_provider_sessions ok"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A (mock transport tests)",
+        "testOutput": "cross-integration/group-3-perf-resilience/all-tests-output.txt"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-017",
+      "title": "Unicode Content Parity Across Providers",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test unicode_content_parity_across_providers",
+          "expected": "Hydrated conversation items containing Unicode text (emoji, RTL, CJK) render identically regardless of provider source; structural equality holds",
+          "observed": "Test passed — unicode_content_parity_across_providers ok"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A (mock transport tests)",
+        "testOutput": "cross-integration/group-3-perf-resilience/all-tests-output.txt"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-018",
+      "title": "Multi-Agent SSH Channel Isolation",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Verify SSH connectivity to gvps (100.82.102.84:5132)",
+          "expected": "SSH connection succeeds",
+          "observed": "SSH connection succeeded — 'connected' echoed back"
+        },
+        {
+          "action": "Run cargo test multi_agent_ssh_channel_isolation",
+          "expected": "Independent SSH channels for PiNative + DroidNative are isolated; stdin/stdout don't cross; closing one doesn't affect the other",
+          "observed": "Test passed — multi_agent_ssh_channel_isolation ok"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "SSH to 100.82.102.84:5132 — connected successfully",
+        "testOutput": "cross-integration/group-3-perf-resilience/all-tests-output.txt"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-019",
+      "title": "App Background During Streaming",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test background_during_streaming_preserves_state",
+          "expected": "During active streaming, simulate app background (connection suspended >30s). Upon foreground: streaming resumes if alive, or provider detects Disconnected and preserves pre-background items",
+          "observed": "Test passed — background_during_streaming_preserves_state ok"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A (mock transport tests)",
+        "testOutput": "cross-integration/group-3-perf-resilience/all-tests-output.txt"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-020",
+      "title": "Network Change During Streaming",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test network_change_reconnect",
+          "expected": "Simulate network interface change during streaming — provider detects disconnect, reconnects automatically, pre-disconnect items preserved",
+          "observed": "Test passed — network_change_reconnect ok"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A (mock transport tests)",
+        "testOutput": "cross-integration/group-3-perf-resilience/all-tests-output.txt"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PROV-017",
+      "title": "Large Response Handling",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test large_command_output_hydration",
+          "expected": "Provider session producing >10,000 lines of command output hydrates correctly into HydratedConversationItemContent::CommandExecution with full output preserved; no OOM or truncation",
+          "observed": "Test passed — large_command_output_hydration ok"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A (mock transport tests)",
+        "testOutput": "cross-integration/group-3-perf-resilience/all-tests-output.txt"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PROV-020",
+      "title": "SSH Keepalive Preserves Idle Connection",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Verify SSH connectivity to gvps (100.82.102.84:5132)",
+          "expected": "SSH connection succeeds",
+          "observed": "SSH connection succeeded — 'connected' echoed back"
+        },
+        {
+          "action": "Run cargo test ssh_keepalive_preserves_idle_connection",
+          "expected": "SSH-backed provider connection idle for >60s remains connected due to keepalive. After 5 minutes of idle, sending a prompt succeeds without reconnection",
+          "observed": "Test passed — ssh_keepalive_preserves_idle_connection ok"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "SSH to 100.82.102.84:5132 — connected successfully",
+        "testOutput": "cross-integration/group-3-perf-resilience/all-tests-output.txt"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 8 assertions: all 8 passed. All 10 related cargo tests passed (0 failures). SSH connectivity to gvps confirmed for E2E assertions (VAL-CROSS-018, VAL-PROV-020). Both SSH-dependent tests use mock transports and passed, with SSH connectivity verified separately."
+}

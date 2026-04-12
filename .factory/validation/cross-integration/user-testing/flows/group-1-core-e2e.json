@@ -1,0 +1,418 @@
+{
+  "groupId": "group-1-core-e2e",
+  "testedAt": "2026-04-12T00:00:00Z",
+  "isolation": {
+    "workingDirectory": "/home/kai/gitrepos/litter",
+    "testCommand": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib",
+    "transport": "mock-only",
+    "realSSH": false
+  },
+  "toolsUsed": ["cargo test"],
+  "assertions": [
+    {
+      "id": "VAL-CROSS-001",
+      "title": "Full Codex Regression — Connect Through Prompt",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test for provider trait object safety, codex provider tests, mobile client dispatch, session connection, and event processing",
+          "expected": "All 77 tests pass with 0 failures",
+          "observed": "77 passed, 0 failed, 0 ignored — all Codex provider trait, event mapping, session connection, and mobile client dispatch tests pass"
+        },
+        {
+          "action": "Verify provider::tests::provider_trait_object_safe compiles Box<dyn ProviderTransport> with Send+Sync",
+          "expected": "Compiles and passes",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify mobile_client_dispatches_codex_provider routes through CodexProvider",
+          "expected": "Request succeeds through trait",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify session::connection::tests::from_provider_* tests confirm session lifecycle through trait transport",
+          "expected": "All session lifecycle tests pass",
+          "observed": "from_provider_creates_connected_session, from_provider_disconnect_transitions_health, from_provider_events_forwarded, from_provider_notify_succeeds, from_provider_request_through_session all pass"
+        }
+      ],
+      "evidence": {
+        "testOutput": "cross-integration/group-1-core-e2e/VAL-CROSS-001-codex-regression.txt",
+        "testCount": "77 passed, 0 failed",
+        "keyTests": [
+          "provider::tests::provider_trait_object_safe",
+          "provider::codex::tests::box_dyn_provider_is_send_sync",
+          "provider::codex::tests::codex_provider_implements_trait",
+          "provider::codex::tests::mock_provider_connect_disconnect",
+          "provider::codex::tests::mock_provider_event_stream",
+          "provider::codex::tests::mock_provider_send_request",
+          "mobile_client::tests::mobile_client_tests::mobile_client_dispatches_codex_provider",
+          "mobile_client::tests::mobile_client_tests::mobile_client_connect_with_provider_succeeds",
+          "mobile_client::tests::mobile_client_tests::mobile_client_connect_with_provider_reuses_existing",
+          "session::connection::tests::from_provider_creates_connected_session",
+          "session::connection::tests::from_provider_disconnect_transitions_health",
+          "session::connection::tests::from_provider_events_forwarded",
+          "session::events::tests::agent_message_delta",
+          "session::events::tests::turn_started",
+          "session::events::tests::turn_completed",
+          "session::events::tests::command_execution_output_delta",
+          "session::events::tests::thread_status_changed"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-002",
+      "title": "Full Codex Regression — Approval Flow",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test for approval-related Codex session event tests",
+          "expected": "All approval lifecycle tests pass",
+          "observed": "10 passed, 0 failed — command approval request, file change approval, pending approval tracking, and approval resolution all pass"
+        },
+        {
+          "action": "Verify command_approval_request emits correct approval event",
+          "expected": "ApprovalRequested event with command details",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify pending_approvals_are_tracked and resolve_approval_removes_it",
+          "expected": "Approval tracked then removed on resolution",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify file_change_approval_request works through provider abstraction",
+          "expected": "File change approval event emitted",
+          "observed": "ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "cross-integration/group-1-core-e2e/VAL-CROSS-002-codex-approval.txt",
+        "testCount": "10 passed, 0 failed",
+        "keyTests": [
+          "session::events::tests::command_approval_request",
+          "session::events::tests::file_change_approval_request",
+          "session::events::tests::pending_approvals_are_tracked",
+          "session::events::tests::resolve_approval_removes_it",
+          "session::events::tests::resolve_nonexistent_approval_returns_none",
+          "session::events::tests::permissions_approval_request"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-003",
+      "title": "Pi Native End-to-End — Session Lifecycle",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test for Pi native E2E lifecycle tests",
+          "expected": "All Pi lifecycle, event mapping, transport, and E2E tests pass",
+          "observed": "42 passed, 0 failed — all Pi native transport, protocol, event mapping, session, E2E, and error handling tests pass"
+        },
+        {
+          "action": "Verify pi_full_lifecycle_mapping maps complete agent_start through agent_end",
+          "expected": "Full lifecycle hydrated conversation produced",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify pi_text_delta_mapping maps Pi text_delta to ProviderEvent::MessageDelta",
+          "expected": "Correct delta mapping",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify pi_thinking_delta_mapping maps thinking_delta to ProviderEvent::ReasoningDelta",
+          "expected": "Correct reasoning delta mapping",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify pi_tool_execution_mapping maps tool_execution_start/update/end",
+          "expected": "CommandStarted, CommandOutputDelta, CommandCompleted events",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify pi_process_crash emits error and preserves state",
+          "expected": "TransportError event emitted, no panic",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify pi_ssh_disconnect_emits_event detects SSH disconnect",
+          "expected": "Disconnected event emitted",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify E2E tests: pi_native_e2e_full_lifecycle, session resume, detection, tool execution, thinking, cancel mid-stream, process crash, streaming timing",
+          "expected": "All E2E scenarios pass",
+          "observed": "ok — pi_native_e2e_full_lifecycle, pi_native_e2e_session_resume, pi_native_e2e_detection, pi_native_e2e_with_tool_execution, pi_native_e2e_with_thinking, pi_native_e2e_cancel_mid_stream, pi_native_e2e_process_crash_handling, pi_native_e2e_binary_not_found, pi_native_no_permission_delegation, pi_native_streaming_first_delta_timing, pi_native_streaming_consistent_intervals all pass"
+        }
+      ],
+      "evidence": {
+        "testOutput": "cross-integration/group-1-core-e2e/VAL-CROSS-003-pi-native-e2e.txt",
+        "testCount": "42 passed, 0 failed",
+        "keyTests": [
+          "provider::pi::transport::tests::pi_full_lifecycle_mapping",
+          "provider::pi::transport::tests::pi_text_delta_mapping",
+          "provider::pi::transport::tests::pi_thinking_delta_mapping",
+          "provider::pi::transport::tests::pi_tool_execution_mapping",
+          "provider::pi::transport::tests::pi_process_crash",
+          "provider::pi::transport::tests::pi_ssh_disconnect_emits_event",
+          "provider::pi::transport::tests::pi_malformed_jsonl",
+          "provider::pi::transport::tests::pi_native_jsonl_framing",
+          "provider::pi::transport::tests::pi_abort_command_sent",
+          "provider::pi::transport::tests::pi_binary_not_found",
+          "provider::pi::e2e::tests::pi_native_e2e_full_lifecycle",
+          "provider::pi::e2e::tests::pi_native_e2e_session_resume",
+          "provider::pi::e2e::tests::pi_native_e2e_detection",
+          "provider::pi::e2e::tests::pi_native_e2e_with_tool_execution",
+          "provider::pi::e2e::tests::pi_native_e2e_with_thinking",
+          "provider::pi::e2e::tests::pi_native_e2e_cancel_mid_stream",
+          "provider::pi::acp_transport::tests::pi_acp_session_lifecycle",
+          "provider::pi::acp_transport::tests::pi_acp_session_load"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-004",
+      "title": "Droid Native End-to-End — Session with Permissions",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test for Droid native E2E and provider transport tests",
+          "expected": "All Droid lifecycle, permission, and error handling tests pass",
+          "observed": "15 passed, 0 failed — all Droid transport, E2E, permission flow, crash recovery, and config tests pass"
+        },
+        {
+          "action": "Verify droid_provider_working_state_mapping maps streaming/idle states",
+          "expected": "1:1 state to UiEvent mapping",
+          "observed": "ok — droid_provider_working_state_mapping and droid_provider_working_state_idempotent both pass"
+        },
+        {
+          "action": "Verify droid_provider_assistant_streaming concatenates text deltas correctly",
+          "expected": "Individual deltas emitted, final hydrated item contains complete text",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify droid_provider_tool_result_mapping maps tool results to hydrated items",
+          "expected": "Tool call appears as correctly typed hydrated conversation item",
+          "observed": "ok — droid_provider_tool_result_mapping and droid_provider_tool_result_running_then_completed both pass"
+        },
+        {
+          "action": "Verify droid_provider_crash_recovery detects disconnect and preserves state",
+          "expected": "Disconnect event emitted, no partial/corrupted items",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify droid_native_e2e_full_lifecycle_with_permissions completes full session including permission flow",
+          "expected": "Full round-trip with permission request/approve",
+          "observed": "ok (took ~60s)"
+        },
+        {
+          "action": "Verify droid_native_e2e_tool_use_with_permission exercises permission flow end-to-end",
+          "expected": "Tool use triggers permission request, approval allows completion",
+          "observed": "ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "cross-integration/group-1-core-e2e/VAL-CROSS-004-droid-native-e2e.txt",
+        "testCount": "15 passed, 0 failed",
+        "keyTests": [
+          "provider::droid::transport::tests::droid_provider_working_state_mapping",
+          "provider::droid::transport::tests::droid_provider_working_state_idempotent",
+          "provider::droid::transport::tests::droid_provider_assistant_streaming",
+          "provider::droid::transport::tests::droid_provider_tool_result_mapping",
+          "provider::droid::transport::tests::droid_provider_tool_result_running_then_completed",
+          "provider::droid::transport::tests::droid_provider_error_mapping",
+          "provider::droid::transport::tests::droid_provider_config_params",
+          "provider::droid::transport::tests::droid_provider_auth_key_handling",
+          "provider::droid::transport::tests::droid_provider_session_lifecycle",
+          "provider::droid::transport::tests::droid_provider_crash_recovery",
+          "provider::droid::transport::tests::droid_provider_api_error_handling",
+          "provider::droid::e2e::tests::droid_native_e2e_full_lifecycle_with_permissions",
+          "provider::droid::e2e::tests::droid_native_e2e_tool_use_with_permission",
+          "provider::droid::e2e::tests::droid_native_e2e_session_fork_resume",
+          "provider::droid::e2e::tests::droid_native_e2e_process_crash"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-005",
+      "title": "ACP Generic End-to-End — Adapter Lifecycle",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test for all ACP provider tests (client, framing, handlers, mock)",
+          "expected": "All ACP lifecycle, protocol, framing, handler, and mock tests pass",
+          "observed": "79 passed, 0 failed — full ACP client lifecycle (initialize, authenticate, session new/prompt/cancel/list/load), framing (NDJSON serialization, deserialization, partial buffering), handlers (fs operations, permissions), and mock transport all pass"
+        },
+        {
+          "action": "Verify acp_initialize_handshake_success completes initialize handshake",
+          "expected": "Initialize succeeds with capabilities",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify acp_authenticate_after_initialize completes authentication",
+          "expected": "Authenticate succeeds after initialize",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify acp_session_prompt_streams_updates streams session updates",
+          "expected": "Streaming updates received",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify ACP permission handlers: auto_approve, auto_reject, prompt_emits_event, per_agent_policy_independence",
+          "expected": "All permission policy variants work correctly",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify NDJSON framing: serialize, deserialize, partial buffering, empty lines, invalid lines, large messages, multi-byte UTF-8",
+          "expected": "All framing edge cases handled",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify mock transport: queue responses, capture sent messages, simulate disconnect",
+          "expected": "Mock transport supports all test scenarios",
+          "observed": "ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "cross-integration/group-1-core-e2e/VAL-CROSS-005-acp-generic-e2e.txt",
+        "testCount": "79 passed, 0 failed",
+        "keyTests": [
+          "provider::acp::client::tests::acp_initialize_handshake_success",
+          "provider::acp::client::tests::acp_authenticate_after_initialize",
+          "provider::acp::client::tests::acp_session_new_returns_id",
+          "provider::acp::client::tests::acp_session_prompt_streams_updates",
+          "provider::acp::client::tests::acp_session_cancel_mid_stream",
+          "provider::acp::client::tests::acp_session_list_returns_sessions",
+          "provider::acp::client::tests::acp_session_load_replays_history",
+          "provider::acp::client::tests::acp_streaming_agent_message_chunk_maps_to_message_delta",
+          "provider::acp::client::tests::acp_streaming_tool_call_lifecycle",
+          "provider::acp::client::tests::acp_streaming_concurrent_requests_correlated_by_id",
+          "provider::acp::client::tests::acp_transport_disconnect_emits_event",
+          "provider::acp::handlers::tests::acp_permission_auto_approve",
+          "provider::acp::handlers::tests::acp_permission_auto_reject",
+          "provider::acp::handlers::tests::acp_permission_prompt_emits_event",
+          "provider::acp::framing::tests::ndjson_serialize_single_message",
+          "provider::acp::framing::tests::ndjson_partial_message_buffered",
+          "provider::acp::mock::tests::mock_transport_full_exchange"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-006",
+      "title": "Multi-Provider Coexistence on Single Server",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test for three_concurrent_providers and multi_provider_concurrent_sessions",
+          "expected": "Both multi-provider tests pass — concurrent sessions from multiple providers work independently",
+          "observed": "2 passed, 0 failed — three_concurrent_provider_sessions and multi_provider_concurrent_sessions both pass"
+        },
+        {
+          "action": "Verify three_concurrent_provider_sessions: Codex + PiNative + DroidNative stream simultaneously",
+          "expected": "Events attributed to correct ThreadKey, disconnecting one doesn't affect others",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify multi_provider_concurrent_sessions: multiple concurrent sessions work without interference",
+          "expected": "Independent streaming, correct event attribution",
+          "observed": "ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "cross-integration/group-1-core-e2e/VAL-CROSS-006-multi-provider.txt",
+        "testCount": "2 passed, 0 failed",
+        "keyTests": [
+          "provider::cross_provider::three_concurrent_provider_sessions",
+          "provider::cross_provider::multi_provider_concurrent_sessions"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-007",
+      "title": "Agent Switching Mid-Conversation",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test for agent_switching tests",
+          "expected": "All agent switching tests pass — state preserved across switches",
+          "observed": "3 passed, 0 failed — droid_pi_agent_switching, agent_switching_preserves_previous_state, and agent_switching_pi_to_droid_and_back all pass"
+        },
+        {
+          "action": "Verify agent_switching_preserves_previous_state: Codex thread history intact after switching to another agent",
+          "expected": "Previous thread's HydratedConversationItem history intact in store snapshot",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify agent_switching_pi_to_droid_and_back: switch Pi→Droid→Pi preserves Pi state",
+          "expected": "Round-trip switching preserves state",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify droid_pi_agent_switching: Droid and Pi agents can switch between each other",
+          "expected": "Both agent types work after switching",
+          "observed": "ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "cross-integration/group-1-core-e2e/VAL-CROSS-007-agent-switching.txt",
+        "testCount": "3 passed, 0 failed",
+        "keyTests": [
+          "provider::droid::e2e::tests::droid_pi_agent_switching",
+          "provider::pi::e2e::tests::agent_switching_preserves_previous_state",
+          "provider::pi::e2e::tests::agent_switching_pi_to_droid_and_back"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-008",
+      "title": "Reconnection After Transport Disconnect",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test for reconnect and network_change tests",
+          "expected": "All reconnection tests pass — disconnect detected, reconnect succeeds, state preserved",
+          "observed": "34 passed, 0 failed — reconnection_after_transport_disconnect, network_change_reconnect, and all IPC reconnect tests pass"
+        },
+        {
+          "action": "Verify reconnection_after_transport_disconnect: disconnect detected, reconnect through trait transport, state restored",
+          "expected": "Provider detects transport failure, reconnect logic fires, session history rehydrated",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify network_change_reconnect: network interface change during streaming handled correctly",
+          "expected": "Provider detects disconnect, reconnects automatically, pre-disconnect items preserved",
+          "observed": "ok"
+        },
+        {
+          "action": "Verify IPC reconnect tests: stale_ipc_start_turn_falls_back, ipc_wrapper_invalidation_reconnects, etc.",
+          "expected": "IPC reconnect path works through trait transport",
+          "observed": "ok — multiple IPC reconnect scenarios pass"
+        }
+      ],
+      "evidence": {
+        "testOutput": "cross-integration/group-1-core-e2e/VAL-CROSS-008-reconnection.txt",
+        "testCount": "34 passed, 0 failed",
+        "keyTests": [
+          "provider::cross_provider::reconnection_after_transport_disconnect",
+          "provider::cross_provider::network_change_reconnect",
+          "mobile_client::tests::mobile_client_tests::stale_ipc_start_turn_falls_back_to_direct_only_once_per_server",
+          "mobile_client::tests::mobile_client_tests::ipc_wrapper_invalidation_reconnects_with_new_client",
+          "mobile_client::tests::mobile_client_tests::stale_ipc_delete_queued_follow_up_updates_local_state_and_reconnects",
+          "reconnect::tests::plan_direct_remote_when_port_available",
+          "reconnect::tests::plan_ssh_when_mode_is_ssh_and_credential"
+        ]
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 8 assertions: all 8 passed. Total: 262 unique cargo tests across all assertion groups (77 Codex regression + 10 approval + 42 Pi native + 15 Droid native + 79 ACP + 2 multi-provider + 3 agent switching + 34 reconnection). Zero failures, zero panics, zero test errors. All mock-based transport tests exercise the full provider trait abstraction, event mapping, store/reducer integration, and error handling paths."
+}
