@@ -1,0 +1,67 @@
+{
+  "featureId": "droid-native-transport",
+  "reviewedAt": "2026-04-12T18:30:00Z",
+  "commitId": "32e08d8",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Well-structured Droid native Factory API transport implementation. The code follows the established provider pattern (ProviderTransport trait), correctly maps Droid JSON-RPC 2.0 notifications to ProviderEvents, handles the idle-before-complete quirk, and provides comprehensive test coverage (75 new tests, all passing). Architecture is clean with good separation: protocol types (protocol.rs), transport logic (transport.rs), mock infrastructure (mock.rs), and auto-detection (detection.rs). No UniFFI types were added (correct — these are internal-only types), no generated bindings needed. The implementation aligns with project conventions for Rust-first shared logic. A few non-blocking observations noted below.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs",
+        "line": 455,
+        "severity": "non_blocking",
+        "description": "blocking_lock() used as fallback in subscribe() and event_receiver() when try_lock() fails. This can deadlock if the async runtime's Mutex is held across an await point by the same task that calls subscribe(). The Pi transport has the same pattern. In practice this is unlikely to trigger since subscribe() is called at test setup time before the IO loop starts, but a cleaner approach would be to store event_tx separately (e.g., in an Arc) outside the inner Mutex, avoiding the lock entirely for subscribe operations."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs",
+        "line": 637,
+        "severity": "non_blocking",
+        "description": "is_connected() returns true when the Mutex is contended (Err(_) branch). This is a conservative default but could briefly report connected when the IO loop has already set connected=false. The Pi transport uses Arc<AtomicBool> for this field, which is more accurate. Consider extracting connected state to an Arc<AtomicBool> for consistency and correctness."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs",
+        "line": 480,
+        "severity": "non_blocking",
+        "description": "connect() returns Err when already disconnected, stating 'cannot reconnect; create a new instance'. This is correct behavior but the ProviderTransport trait contract doesn't explicitly document this reconnection constraint. The ACP transport has the same pattern. This is fine for now but should be documented in the trait docstring if it becomes a convention."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs",
+        "line": 1826,
+        "severity": "non_blocking",
+        "description": "droid_transient_error_retries test doesn't fully validate retry behavior — it tests that a single 429 is returned as an error from send_rpc_request (no retry at that level) and that send_rpc_request_with_retry succeeds on a fresh request with a different ID. It doesn't verify that the same request is actually retried (same method, new ID) after a transient error. A better test would queue 429 for ID 1, then queue success for ID 2, and call send_rpc_request_with_retry once — verifying it internally retried and got the success on ID 2."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/detection.rs",
+        "line": 102,
+        "severity": "non_blocking",
+        "description": "probe_droid_binary uses `test -x $HOME/.bun/bin/droid` with shell-expanded $HOME. This works on typical SSH hosts but could fail if the remote shell doesn't expand $HOME in test arguments. Using single-quotes for the variable and a different test approach would be more robust. Minor issue since the probe falls through gracefully."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The Droid native transport uses JSON-RPC 2.0 with NDJSON framing, distinct from the ACP JSON-RPC protocol. The protocol types are Droid-specific and not shared with ACP. This distinction (Droid native = Factory API JSON-RPC 2.0, Droid ACP = stream-json format) should be documented in the library to prevent confusion for future workers implementing Droid-related features.",
+      "evidence": "provider/droid/protocol.rs defines its own JsonRpcRequest/JsonRpcResponse/JsonRpcNotification types separate from the ACP protocol types. The provider-transport.md library doc covers ACP and stream-json but does not yet cover the native JSON-RPC transport."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The 'idle-before-complete' quirk in Droid protocol (droid_working_state_changed(idle) arrives before the complete notification) requires deferred StreamingCompleted handling. This is a Droid-specific protocol behavior that other workers should know about when working on Droid event mapping or testing.",
+      "evidence": "transport.rs lines 750-770 handle deferred_complete state. The quirk is well-documented in module doc comments but not in the library docs."
+    },
+    {
+      "area": "conventions",
+      "observation": "Provider implementations now have an established pattern: module with {protocol.rs, transport.rs, mock.rs, detection.rs}, using broadcast::Sender<ProviderEvent> for events, Arc<Mutex<Inner>> for shared state, and io_loop as the background task. This pattern should be documented as a convention for future provider implementations.",
+      "evidence": "Pi provider (protocol.rs, transport.rs, mock.rs, detection.rs), ACP provider (framing.rs, client.rs, mock.rs, mapping.rs, handlers.rs), and now Droid native (protocol.rs, transport.rs, mock.rs, detection.rs) all follow the same structural pattern."
+    },
+    {
+      "area": "conventions",
+      "observation": "Tests across providers rely on tokio::time::sleep(50ms..100ms) to wait for async IO loop processing. This is fragile — tests could intermittently fail on slow CI. Consider using Notify or oneshot channels to synchronize test expectations with actual event processing completion, or at minimum document the timing dependency.",
+      "evidence": "transport.rs tests consistently use `tokio::time::sleep(std::time::Duration::from_millis(50/100))` before checking received events. Same pattern in Pi transport tests."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS — The Droid native transport implementation is solid, well-tested (75 tests, all passing), and follows established project patterns. The ProviderTransport trait is correctly implemented with all required methods. Event mapping covers all Droid notifications: working_state_changed, create_message, tool_result, error, and complete. The idle-before-complete quirk is handled with deferred completion logic. Error handling is comprehensive: fatal errors disconnect, non-fatal errors propagate, transient errors (429) retry with exponential backoff, crash recovery emits interrupted-message errors. Auto-detection probes PATH and common install locations independently of Codex detection. Test coverage addresses VAL-DROID-002 through VAL-DROID-012. VAL-DROID-016 (spawn failure detection) is partially covered by the droid_binary_not_found test but lacks explicit timeout and silent-exit detection tests. The four non-blocking issues (blocking_lock in subscribe, is_connected defaulting true on contention, incomplete transient retry test, and $HOME shell expansion) are minor and consistent with patterns already established by the Pi transport. The provider-transport.md library doc should be updated to include the Droid native JSON-RPC transport details alongside the existing ACP/stream-json documentation."
+}

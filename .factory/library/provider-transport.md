@@ -360,3 +360,69 @@ Input: `{"type":"user_message","text":"..."}\n` via stdin
   - `e2e_droid_acp_stream_json_tool_use` — tool call with file read
   - `e2e_droid_acp_full_pipeline` — full ProviderEvent pipeline verification
 - Full suite: 800 passed; 0 failed; 6 ignored
+
+## Droid Native Transport (Factory API JSON-RPC 2.0)
+
+### Architecture
+- `DroidNativeTransport` implements `ProviderTransport` over Droid's native Factory API
+- Connects via SSH → spawns `droid exec --input-format stream-jsonrpc --output-format stream-jsonrpc` → JSON-RPC 2.0 over NDJSON
+- Distinct from the stream-json protocol (used by `DroidAcpTransport`) — this is full JSON-RPC 2.0 with methods and notifications
+
+### Module Structure
+- `provider/droid/protocol.rs` — Droid JSON-RPC 2.0 protocol types: `JsonRpcRequest`, `JsonRpcResponse`, `JsonRpcNotification`, Droid-specific notification variants (`WorkingStateChanged`, `CreateMessage`, `ToolResult`, `Error`, `Complete`)
+- `provider/droid/transport.rs` — `DroidNativeTransport` implementing `ProviderTransport`, manages bidirectional stream lifecycle, JSON-RPC request/response correlation, and Droid notification → ProviderEvent mapping
+- `provider/droid/mock.rs` — `MockDroidChannel` implementing `AsyncRead + AsyncWrite` for in-memory testing with response queuing and write capture
+- `provider/droid/detection.rs` — Auto-detection of `droid` binary on SSH host
+
+### Droid JSON-RPC 2.0 Protocol
+- **Request**: `droid.initialize_session` — returns session ID, model info, available models
+- **Request**: `droid.add_user_message` — sends prompt, streams response via notifications
+- **Notification**: `droid_working_state_changed` — idle/streaming status transitions
+- **Notification**: `create_message` — incremental assistant text deltas
+- **Notification**: `tool_result` — tool call results with name, input, output
+- **Notification**: `error` — error events with message and optional code
+- **Notification**: `complete` — session turn completion
+
+### Idle-Before-Complete Quirk
+Droid sends `droid_working_state_changed(idle)` *before* the `complete` notification. The transport handles this with deferred completion logic: when `idle` is received during active streaming, it waits for the subsequent `complete` notification before emitting `StreamingCompleted`.
+
+### Event Mapping
+| Droid Notification | ProviderEvent |
+|---|---|
+| `droid_working_state_changed(streaming)` | `WorkingStateChanged(Streaming)` |
+| `droid_working_state_changed(idle)` | Deferred: waits for `complete` |
+| `create_message` (text deltas) | `MessageDelta` |
+| `tool_result` | `ToolCallStarted` → `CommandOutputDelta` → `ToolCallUpdate` |
+| `error` | `ProviderEvent::Error` |
+| `complete` (with deferred idle) | `WorkingStateChanged(Idle)` + `StreamingCompleted` |
+
+### Droid-Specific Features
+- **Autonomy levels**: `Suggest`/`Normal`/`Full` → mapped to approval policies
+- **Model selection**: passed through to `droid.initialize_session`, not validated locally
+- **Reasoning effort**: `Low`/`Medium`/`High` → forwarded to Droid API
+- **Session fork/resume**: supported via session ID tracking
+- **FACTORY_API_KEY**: read from remote SSH host environment, passed in API requests, never logged or exposed in error messages
+
+### Auto-Detection
+- Probes SSH host for `droid` binary at: `$HOME/.bun/bin/droid`, `/usr/local/bin/droid`, `$HOME/.cargo/bin/droid`, and via `command -v droid`
+- Returns `Some(path)` when found, `None` when absent
+- Does not block Codex binary detection — both probes run independently
+
+### Error Handling
+- **Process crash**: Stream EOF → `ProviderEvent::Disconnected`, partial assistant messages discarded with interrupted-message error
+- **Transient errors** (429): Retry up to 3 times with exponential backoff
+- **Permanent errors** (400/401/403/404): Surface immediately with correct code and message
+- **API errors**: Mapped to `ProviderEvent::Error` with parsed code and message
+- **Post-disconnect requests**: Return `Err(TransportError::Disconnected)`
+- **Disconnect idempotent**: Multiple disconnect calls are no-ops
+
+### Test Coverage
+- 75 unit tests in `transport::tests`, `protocol::tests`, `detection::tests` (all pass)
+- Full suite: 800 passed; 0 failed; 6 ignored
+- VAL-DROID-002 through VAL-DROID-012, VAL-DROID-016 covered
+
+### Known Non-Blocking Issues
+- `is_connected()` returns true on Mutex contention (conservative default)
+- `blocking_lock()` used as fallback in subscribe/event_receiver
+- Transient retry test doesn't fully validate same-request retry semantics
+- `$HOME` shell expansion in detection probe may fail on non-standard shells

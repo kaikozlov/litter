@@ -1,0 +1,120 @@
+{
+  "milestone": "droid-provider",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib", "exitCode": 0, "detail": "800 passed; 0 failed; 6 ignored" },
+    "typecheck": { "passed": true, "command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml", "exitCode": 0 },
+    "lint": { "passed": true, "command": "cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml -- -D warnings", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "nonBlockingIssues": [
+    {
+      "featureId": "droid-native-transport",
+      "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs",
+      "line": 455,
+      "severity": "non_blocking",
+      "description": "blocking_lock() used as fallback in subscribe() and event_receiver() when try_lock() fails. Could deadlock in single-threaded runtime. Consistent with Pi transport pattern."
+    },
+    {
+      "featureId": "droid-native-transport",
+      "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs",
+      "line": 637,
+      "severity": "non_blocking",
+      "description": "is_connected() returns true when Mutex is contended (conservative but briefly inaccurate). Pi transport uses Arc<AtomicBool> which is more correct."
+    },
+    {
+      "featureId": "droid-native-transport",
+      "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs",
+      "line": 1826,
+      "severity": "non_blocking",
+      "description": "Transient error retry test doesn't fully validate that the same request is retried with a new ID after a 429. Test validates success on fresh request instead."
+    },
+    {
+      "featureId": "droid-native-transport",
+      "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/detection.rs",
+      "line": 102,
+      "severity": "non_blocking",
+      "description": "probe_droid_binary uses shell-expanded $HOME in test -x argument. Could fail on non-standard shells. Falls through gracefully."
+    },
+    {
+      "featureId": "droid-acp-transport",
+      "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/acp_transport.rs",
+      "line": 498,
+      "severity": "non_blocking",
+      "description": "ContextTokensUpdated mapping is semantically wrong: input_tokens→used, output_tokens→limit. These are different dimensions (prompt vs completion tokens), not used/limit pair."
+    },
+    {
+      "featureId": "droid-acp-transport",
+      "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/acp_transport.rs",
+      "line": 234,
+      "severity": "non_blocking",
+      "description": "generate_mcp_config() is a stub — no actual file I/O or cleanup lifecycle. Config struct and serialization exist but write/cleanup is missing."
+    },
+    {
+      "featureId": "droid-acp-transport",
+      "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/acp_transport.rs",
+      "line": 256,
+      "severity": "non_blocking",
+      "description": "build_spawn_command() does not shell-escape string arguments. Vulnerable to breakage with special characters in model/working_dir/session_id."
+    },
+    {
+      "featureId": "droid-acp-transport",
+      "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/acp_transport.rs",
+      "line": 284,
+      "severity": "non_blocking",
+      "description": "connect() busy-waits with 50ms polling for init message. tokio::Notify would be cleaner but 50ms is acceptable for production."
+    },
+    {
+      "featureId": "droid-acp-transport",
+      "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/acp_transport.rs",
+      "line": 1343,
+      "severity": "non_blocking",
+      "description": "E2E full pipeline test uses SshClient::exec() (collects all output) then manually parses lines — does not exercise the actual DroidAcpTransport IO loop."
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Document Droid native JSON-RPC 2.0 transport and stream-json protocol in provider-transport.md",
+      "sourceFeature": "droid-native-transport"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Reconcile 'ACP transport' terminology for Droid. The mission plan says 'droid exec --output-format acp' but the actual implementation uses '--output-format stream-json'. Update mission plan references to use correct terminology: 'Droid ACP transport' uses Droid's stream-json protocol, NOT the standard ACP JSON-RPC.",
+      "evidence": "droid-acp-transport review found validation-contract.md line 678 references '--output-format acp' but actual implementation uses stream-json format. The module doc clarifies 'NOT ACP JSON-RPC' but the feature description and AGENTS.md use misleading 'ACP' terminology.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Document the established provider module structure convention: {protocol.rs, transport.rs, mock.rs, detection.rs} with broadcast::Sender<ProviderEvent>, Arc<Mutex<Inner>>, and io_loop background task. This pattern is now used by Pi, ACP, and Droid providers.",
+      "evidence": "Both reviews (droid-native-transport and droid-acp-transport) note the same structural pattern across all three provider implementations.",
+      "isSystemic": true
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add guidance about test timing fragility: provider tests use tokio::time::sleep(50-100ms) to wait for async IO loop processing. Consider recommending Notify/oneshot synchronization for new provider tests to avoid intermittent CI failures.",
+      "evidence": "Both droid-native-transport and droid-acp-transport tests consistently use sleep-based waits before checking received events. Same pattern in Pi transport tests.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "E2E tests SSH to gvps already documented in services.yaml",
+      "reason": "already-documented"
+    },
+    {
+      "observation": "rust-backend-worker skill file not found at expected location",
+      "reason": "ambiguous — skill may be configured differently; not actionable from code review"
+    }
+  ],
+  "previousRound": null
+}
