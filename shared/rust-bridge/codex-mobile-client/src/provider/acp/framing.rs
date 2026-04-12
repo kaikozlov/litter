@@ -209,7 +209,7 @@ pub fn decode_line(line: &str) -> IncomingMessage {
     }
 
     IncomingMessage::Skipped {
-        reason: format!("unrecognized message format"),
+        reason: "unrecognized message format".to_string(),
     }
 }
 
@@ -272,6 +272,36 @@ impl<R: AsyncRead + Unpin> NdjsonReader<R> {
                 }
                 _ => return Ok(message),
             }
+        }
+    }
+
+    /// Read the next raw line from the stream (trimmed).
+    ///
+    /// Returns `Ok(String)` for each non-empty line.
+    /// Returns `Err(FramingError::StreamClosed)` on clean EOF.
+    /// Skips empty lines automatically.
+    pub async fn next_raw_line(&mut self) -> Result<String, FramingError> {
+        loop {
+            let mut line = String::new();
+            let bytes_read = self.reader.read_line(&mut line).await?;
+
+            if bytes_read == 0 {
+                return Err(FramingError::StreamClosed);
+            }
+
+            let trimmed = line.trim().to_string();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            if trimmed.len() > self.max_line_length {
+                return Err(FramingError::LineTooLong {
+                    length: trimmed.len(),
+                    max: self.max_line_length,
+                });
+            }
+
+            return Ok(trimmed);
         }
     }
 

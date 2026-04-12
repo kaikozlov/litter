@@ -376,4 +376,57 @@ mod tests {
             ),
         }
     }
+
+    /// Test that the mock works with tokio::io::split, which is how the
+    /// ACP client uses it. This verifies that split halves can concurrently
+    /// read and write through the shared Arc<Mutex<MockTransportInner>>.
+    #[tokio::test]
+    async fn mock_transport_works_with_split() {
+        let transport = MockTransport::new();
+
+        // Queue two responses.
+        let response1 = serde_json::to_string(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": { "protocolVersion": 1, "capabilities": {}, "authMethods": [] }
+        })).unwrap();
+        let response2 = serde_json::to_string(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {}
+        })).unwrap();
+
+        transport.queue_responses(&[&format!("{response1}\n"), &format!("{response2}\n")]).await;
+
+        // Split the transport.
+        let (read_half, mut write_half) = tokio::io::split(transport.clone());
+        let mut reader = NdjsonReader::new(read_half);
+
+        // Write a request (should go through fine).
+        let init = ClientRequest::InitializeRequest(
+            agent_client_protocol_schema::InitializeRequest::new(
+                ProtocolVersion::V1,
+            ),
+        );
+        let line = serialize_client_request(&RequestId::Number(1), &init).unwrap();
+        crate::provider::acp::framing::write_line(&mut write_half, &line)
+            .await
+            .unwrap();
+
+        // Read first response.
+        let msg1 = reader.next_message().await;
+        assert!(msg1.is_ok(), "first message should succeed: {msg1:?}");
+
+        // Read second response.
+        let msg2 = reader.next_message().await;
+        assert!(msg2.is_ok(), "second message should succeed: {msg2:?}");
+
+        // Now disconnect should give StreamClosed.
+        transport.simulate_disconnect().await;
+        let msg3 = reader.next_message().await;
+        match msg3 {
+            Err(FramingError::StreamClosed) => {}
+            other => panic!("expected StreamClosed after disconnect, got {other:?}"),
+        }
+    }
 }
