@@ -450,7 +450,14 @@ Droid sends `droid_working_state_changed(idle)` *before* the `complete` notifica
 - `emit_streaming_sequence()`: helper for standard message streaming
 - `emit_command_sequence()`: helper for tool call lifecycle
 - `emit_approval_sequence()`: helper for approval request/resolution
-- `collect_events()`: async helper with 200ms timeout for event collection
+- `collect_events()`: async helper with 200ms timeout for event collection (unit tests use 200ms, E2E mock transport tests use 500ms due to async overhead)
+- `ErrorMockProvider`: mock that simulates transport errors on specific methods
+
+### Pi Native Transport Notes
+- `PiNativeTransport::list_sessions()` returns an empty `Vec` because Pi session listing requires SSH file I/O (reading `~/.pi/agent/sessions/*.jsonl`), not the native RPC protocol. Session listing is handled at a higher level via the SSH bridge, not the transport layer.
+
+### Ignored E2E Placeholder Tests
+- Several `#[ignore]` tests (e.g., `droid_e2e_gvps_*`, `pi_e2e_gvps_*`) are placeholder functions with `println!` statements that document expected real E2E flows against gvps. Running `cargo test -- --ignored` will show these pass without testing anything. These should be replaced with real SSH-based E2E tests or removed.
 
 ### Test Count
-- Full suite: 822 passed; 0 failed; 6 ignored (800 pre-existing + 22 new cross-provider)
+- Full suite: 868 passed; 0 failed; 9 ignored

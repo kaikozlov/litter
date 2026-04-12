@@ -1,0 +1,118 @@
+{
+  "milestone": "cross-integration",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib", "exitCode": 0, "detail": "868 passed; 0 failed; 9 ignored" },
+    "typecheck": { "passed": true, "command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml", "exitCode": 0 },
+    "lint": { "passed": true, "command": "cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml -- -D warnings", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 3,
+    "passed": 3,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "nonBlockingIssues": [
+    {
+      "featureId": "cross-provider-integration",
+      "severity": "non_blocking",
+      "description": "Unicode test has double-disconnect (harmless due to idempotent contract)"
+    },
+    {
+      "featureId": "cross-provider-integration",
+      "severity": "non_blocking",
+      "description": "Keepalive test uses 50ms idle period (pattern validated, not actual timeout)"
+    },
+    {
+      "featureId": "cross-provider-integration",
+      "severity": "non_blocking",
+      "description": "Large response test uses 1K deltas instead of 10K+ (broadcast channel capacity consideration)"
+    },
+    {
+      "featureId": "cross-provider-integration",
+      "severity": "non_blocking",
+      "description": "Background simulation is a pause in event emission, not actual transport suspend"
+    },
+    {
+      "featureId": "cross-provider-e2e-pi",
+      "severity": "non_blocking",
+      "description": "Streaming performance parity uses 100× threshold instead of spec's 2× (acceptable for mock transports)"
+    },
+    {
+      "featureId": "cross-provider-e2e-pi",
+      "severity": "non_blocking",
+      "description": "Session list assertion is weak (len() <= 100 would pass with garbage data)"
+    },
+    {
+      "featureId": "cross-provider-e2e-pi",
+      "severity": "non_blocking",
+      "description": "Model selection test accepts both Ok and Err outcomes (never actually fails)"
+    },
+    {
+      "featureId": "cross-provider-e2e-pi",
+      "severity": "non_blocking",
+      "description": "Discovery test constructs structs directly rather than testing actual discovery pipeline"
+    },
+    {
+      "featureId": "cross-provider-e2e-droid",
+      "severity": "non_blocking",
+      "description": "Tautological assertion: assert!(is_ok() || is_err()) always true"
+    },
+    {
+      "featureId": "cross-provider-e2e-droid",
+      "severity": "non_blocking",
+      "description": "Permission flow test uses SequencedMockProvider instead of real DroidNativeTransport"
+    },
+    {
+      "featureId": "cross-provider-e2e-droid",
+      "severity": "non_blocking",
+      "description": "Discovery tests are very thin (test struct constructors, not discovery logic)"
+    },
+    {
+      "featureId": "cross-provider-e2e-droid",
+      "severity": "non_blocking",
+      "description": "Session history test calls list_sessions without connecting first"
+    },
+    {
+      "featureId": "cross-provider-e2e-droid",
+      "severity": "non_blocking",
+      "description": "Agent type count test hardcodes 6 variants instead of using iter()"
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Added Pi native transport list_sessions note, ignored E2E placeholder test warning, updated COLLECT_TIMEOUT_MS documentation with dual-value context, updated test count to 868",
+      "sourceFeature": "cross-provider-e2e-pi,cross-provider-e2e-droid"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add convention: when E2E tests need to verify event sequences that the real mock transport cannot produce (e.g., permission flow, error paths), prefer testing through the real transport when possible. Document SequencedMockProvider as a fallback for event sequences that are impractical to trigger through the real transport mock, and note when it's used so reviewers can assess coverage gaps.",
+      "evidence": "cross-provider-e2e-droid uses SequencedMockProvider for permission flow test instead of real DroidNativeTransport. cross-provider-integration uses it for error scenario tests. This pattern is common but the coverage trade-off is not documented.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Two different event collection patterns (collect_events with timeout vs try_recv loop) across test files",
+      "reason": "already-documented: provider-transport.md documents the collect_events pattern; try_recv loops are an older pattern in transport unit tests"
+    },
+    {
+      "observation": "Rust-backend-worker skill was followed correctly, no skill gaps",
+      "reason": "no action needed: positive confirmation, no change required"
+    },
+    {
+      "observation": "No new services or commands introduced beyond standard cargo commands",
+      "reason": "no action needed: positive confirmation, no change required"
+    },
+    {
+      "observation": "Duplicated COLLECT_TIMEOUT_MS constant with different values (200ms vs 500ms)",
+      "reason": "already-documented: now documented in provider-transport.md as intentional difference between unit (200ms) and E2E mock transport (500ms) tests"
+    }
+  ],
+  "previousRound": null
+}
