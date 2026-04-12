@@ -432,6 +432,8 @@ pub trait ProviderTransport: Send + Sync + 'static {
 
 pub mod acp;
 pub mod codex;
+#[cfg(test)]
+mod cross_provider;
 pub mod droid;
 pub mod error_handling;
 pub mod mapping;
