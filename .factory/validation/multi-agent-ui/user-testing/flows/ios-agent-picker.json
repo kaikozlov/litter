@@ -1,0 +1,302 @@
+{
+  "groupId": "ios-agent-picker",
+  "testedAt": "2026-04-12T19:55:00Z",
+  "isolation": {
+    "platform": "iOS Simulator",
+    "appPath": "/Users/kai/Library/Developer/Xcode/DerivedData/Litter-giuluwahwbydmbfctdwnphrrkcnt/Build/Products/Debug-iphonesimulator/Litter.app",
+    "pid": 22433,
+    "method": "Code inspection + simctl screenshots"
+  },
+  "toolsUsed": ["code-inspection", "simctl-screenshot"],
+  "assertions": [
+    {
+      "id": "VAL-UI-001",
+      "title": "Agent picker displays available agents for connected server",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Inspect HeaderView.swift — ConversationModelPickerPanel.body",
+          "expected": "InlineAgentSelectorView shown when availableAgentTypes.count > 1",
+          "observed": "ConversationModelPickerPanel checks availableAgentTypes.count > 1 and conditionally renders InlineAgentSelectorView with all available agent types from AgentSelectionStore"
+        },
+        {
+          "action": "Inspect AgentPickerView.swift — InlineAgentSelectorView",
+          "expected": "ForEach over agentTypes, each showing icon, name, transport label, and checkmark for selected",
+          "observed": "InlineAgentSelectorView uses ForEach(agentTypes) with AgentBadgeView (icon + label), displayName, transportLabel, and checkmark when agentType == selectedAgentType"
+        },
+        {
+          "action": "Inspect AgentSelectionStore.shared.agentTypes(for:)",
+          "expected": "Agent types come from Rust FFI discovery data, not hardcoded",
+          "observed": "AgentTypes populated from DiscoveredServer.agentTypes which comes from Rust FFI AppDiscoveredServer.agent_types field. DiscoveryView.discoveryAgentTypes() calls AgentSelectionStore.shared.updateAgentTypes(). Default is [.codex] when no discovery data available."
+        },
+        {
+          "action": "Inspect Rust provider/mod.rs — AgentType enum",
+          "expected": "All required variants: Codex, PiAcp, PiNative, DroidAcp, DroidNative, GenericAcp",
+          "observed": "AgentType is #[derive(uniffi::Enum)] with exactly these 6 variants. Generated Swift bindings in codex_mobile_client.swift confirm the same variants."
+        },
+        {
+          "action": "Verify accent color highlights selected agent",
+          "expected": "Selected agent shown with checkmark in LitterTheme.accent color (#00FF9C)",
+          "observed": "Image(systemName: 'checkmark').foregroundColor(LitterTheme.accent) when agentType == selectedAgentType"
+        },
+        {
+          "action": "Verify persistence of selection via AgentSelectionStore",
+          "expected": "Selected agent persisted to UserDefaults on change",
+          "observed": "ConversationModelPickerPanel.onChange(of: selectedAgentType) calls AgentSelectionStore.shared.setSelectedAgentType(). Store writes persistentKey to UserDefaults under 'litter.selectedAgent.<serverId>' key."
+        }
+      ],
+      "evidence": {
+        "screenshots": ["multi-agent-ui/ios-agent-picker/VAL-UI-app-running-state.png"],
+        "consoleErrors": "none (code inspection only)",
+        "network": "N/A (code inspection only)",
+        "codeReferences": {
+          "pickerView": "apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+          "headerIntegration": "apps/ios/Sources/Litter/Views/HeaderView.swift (ConversationModelPickerPanel)",
+          "persistenceStore": "apps/ios/Sources/Litter/Views/AgentPickerView.swift (AgentSelectionStore)",
+          "rustAgentType": "shared/rust-bridge/codex-mobile-client/src/provider/mod.rs:25",
+          "generatedBindings": "shared/rust-bridge/generated/swift/codex_mobile_client.swift:11444"
+        }
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-UI-002",
+      "title": "Agent picker filters to transports available on active connection",
+      "status": "fail",
+      "steps": [
+        {
+          "action": "Search iOS codebase for transport filtering/graying logic",
+          "expected": "Agents whose detected_transports don't intersect server's available transports shown grayed out with 'Transport unavailable' subtitle",
+          "observed": "NO transport filtering or graying logic found in InlineAgentSelectorView, AgentPickerSheet, or any iOS view. All agents from AgentSelectionStore are listed as-is with full selection capability. No code checks detected_transports intersection with available server transports. No grayed-out/disabled styling based on transport compatibility."
+        },
+        {
+          "action": "Check Rust AgentInfo.detected_transports usage in iOS",
+          "expected": "iOS reads AgentInfo.detectedTransports and filters display accordingly",
+          "observed": "AgentInfo is a UniFFI record with detectedTransports field, but iOS agent picker uses AgentType enum directly (not AgentInfo records). The InlineAgentSelectorView takes [AgentType] not [AgentInfo]. The detected_transports field is never read by any iOS view for filtering purposes."
+        },
+        {
+          "action": "Check for 'Transport unavailable' text in codebase",
+          "expected": "String 'Transport unavailable' or equivalent appears in agent picker",
+          "observed": "No match for 'Transport unavailable', 'grayed', or 'disabled.*transport' patterns in iOS source."
+        }
+      ],
+      "evidence": {
+        "screenshots": ["multi-agent-ui/ios-agent-picker/VAL-UI-app-running-state.png"],
+        "consoleErrors": "none (code inspection only)",
+        "network": "N/A",
+        "codeReferences": {
+          "inlineSelector": "apps/ios/Sources/Litter/Views/AgentPickerView.swift (InlineAgentSelectorView)",
+          "pickerSheet": "apps/ios/Sources/Litter/Views/AgentPickerView.swift (AgentPickerSheet)",
+          "agentInfoRust": "shared/rust-bridge/codex-mobile-client/src/provider/mod.rs:94 (AgentInfo with detected_transports)"
+        }
+      },
+      "issues": "Transport filtering is not implemented in the iOS agent picker. The contract requires agents with incompatible transports to appear grayed out with 'Transport unavailable' subtitle. The Rust AgentInfo.detected_transports field exists but is not consumed by iOS views. All agents are shown as fully selectable regardless of transport compatibility."
+    },
+    {
+      "id": "VAL-UI-003",
+      "title": "Agent type badge renders correct icon and color per AgentType variant",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Inspect AgentBadgeView.swift — AgentType.icon extension",
+          "expected": "Codex→terminal.fill, Pi→brain, Droid→robot, GenericAcp→gearshape.fill",
+          "observed": "Exact mapping: .codex→'terminal.fill', .piAcp/.piNative→'brain', .droidAcp/.droidNative→'robot', .genericAcp→'gearshape.fill'. Matches contract specification."
+        },
+        {
+          "action": "Inspect AgentBadgeView.swift — AgentType.tintColor extension",
+          "expected": "Codex→green, Pi→purple, Droid→orange, GenericAcp→gray",
+          "observed": "Exact mapping: .codex→LitterTheme.accent (green #00FF9C), .piAcp/.piNative→Color.purple, .droidAcp/.droidNative→Color.orange, .genericAcp→Color.gray. Matches contract specification."
+        },
+        {
+          "action": "Inspect AgentBadgeView and AgentTypePill",
+          "expected": "Badge renders icon with tint color in compact form",
+          "observed": "AgentBadgeView: Image(systemName: agentType.icon) + optional displayName text, both with agentType.tintColor. AgentTypePill: icon + displayName with tintColor, pill background using tintColor.opacity(0.15) and Capsule shape."
+        },
+        {
+          "action": "Verify badge used in SessionsScreen for session rows",
+          "expected": "Session rows show agent badge for non-Codex agents",
+          "observed": "SessionsScreen.agentBadgeType(for:) returns the selected agent type when non-Codex, then renders AgentTypePill(agentType:). Badge updates on store snapshot changes."
+        },
+        {
+          "action": "Verify badge used in HeaderView",
+          "expected": "Header shows agent pill when multi-agent or non-Codex",
+          "observed": "HeaderView.showAgentBadge returns true when availableAgentTypes.count > 1 || currentAgentType != .codex. When true, renders AgentTypePill(agentType: currentAgentType)."
+        },
+        {
+          "action": "Verify badge used in DiscoveryView server cards",
+          "expected": "Discovery shows detected agents per server",
+          "observed": "DiscoveryView.serverRow shows ScrollView with ForEach(detectedAgentTypes) { AgentBadgeView(agentType:, size: 10, showsLabel: true) } when detectedAgentTypes.count > 1 or first != .codex."
+        }
+      ],
+      "evidence": {
+        "screenshots": ["multi-agent-ui/ios-agent-picker/VAL-UI-app-running-state.png"],
+        "consoleErrors": "none",
+        "network": "N/A",
+        "codeReferences": {
+          "badgeView": "apps/ios/Sources/Litter/Views/AgentBadgeView.swift",
+          "sessionBadge": "apps/ios/Sources/Litter/Views/SessionsScreen.swift:1243 (agentBadgeType)",
+          "headerBadge": "apps/ios/Sources/Litter/Views/HeaderView.swift:72-74 (showAgentBadge)",
+          "discoveryBadge": "apps/ios/Sources/Litter/Views/DiscoveryView.swift:408-413"
+        }
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-UI-005",
+      "title": "Connection flow: connect → select agent → start session",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Inspect DiscoveryView.handleTapAsync — multi-agent picker trigger",
+          "expected": "When server has >1 agent types and no selection made, agent picker sheet presented",
+          "observed": "handleTapAsync checks: let needsPicker = server.agentTypes.count > 1 && AgentSelectionStore.shared.selectedAgentType(for: server.id) == nil. If needsPicker, sets agentPickerServer = server and agentPickerSelection = nil."
+        },
+        {
+          "action": "Inspect DiscoveryView — .sheet(item: $agentPickerServer)",
+          "expected": "AgentPickerSheet shown with server's agent types",
+          "observed": ".sheet(item: $agentPickerServer) { server in AgentPickerSheet(agentTypes: server.agentTypes, selectedAgentType: $agentPickerSelection) }"
+        },
+        {
+          "action": "Inspect AgentPickerSheet — selection handling",
+          "expected": "Selecting agent persists selection and continues connection flow",
+          "observed": "AgentPickerSheet button sets selectedAgentType = agentType and calls dismiss(). DiscoveryView.onChange(of: agentPickerSelection) calls AgentSelectionStore.shared.setSelectedAgentType(selected, for: server.id), then proceeds with connection via Task { await proceedWithConnection(server) }."
+        },
+        {
+          "action": "Verify auto-select when only one agent available",
+          "expected": "Picker skipped when server has only one agent type",
+          "observed": "handleTapAsync: if server.agentTypes.count == 1 { AgentSelectionStore.shared.setSelectedAgentType(server.agentTypes.first, for: server.id) }. No agentPickerServer set, so sheet never shown. Connection proceeds directly."
+        },
+        {
+          "action": "Verify already-connected server can still show picker",
+          "expected": "If connected but no agent selected, picker shown on tap",
+          "observed": "When server is already connected: let needsPicker = server.agentTypes.count > 1 && AgentSelectionStore.shared.selectedAgentType(for: server.id) == nil. If needsPicker, shows agentPickerServer sheet."
+        },
+        {
+          "action": "Verify proceedWithConnection continues the flow",
+          "expected": "After agent selection, normal connection logic runs",
+          "observed": "proceedWithConnection checks if already connected (navigates), otherwise checks requiresConnectionChoice, hasCodexServer, or canConnectViaSSH to continue the standard connection flow."
+        }
+      ],
+      "evidence": {
+        "screenshots": ["multi-agent-ui/ios-agent-picker/VAL-UI-app-running-state.png"],
+        "consoleErrors": "none",
+        "network": "N/A",
+        "codeReferences": {
+          "handleTapAsync": "apps/ios/Sources/Litter/Views/DiscoveryView.swift:553-584",
+          "agentPickerSheet": "apps/ios/Sources/Litter/Views/DiscoveryView.swift:118-128",
+          "proceedWithConnection": "apps/ios/Sources/Litter/Views/DiscoveryView.swift:523-539",
+          "autoSelect": "apps/ios/Sources/Litter/Views/DiscoveryView.swift:582-583"
+        }
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-UI-017",
+      "title": "Agent-specific controls appear and disappear correctly on agent switch",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Inspect InlineModelSelectorView — agent-specific controls section",
+          "expected": "Pi thinking level shown when activeAgentType.isPi, Droid autonomy shown when activeAgentType.isDroid, neither for Codex",
+          "observed": "InlineModelSelectorView.body has conditional: if activeAgentType.isPi { PiThinkingLevelPicker } else if activeAgentType.isDroid { DroidAutonomyControl }. No else branch for Codex, meaning no extra controls shown."
+        },
+        {
+          "action": "Inspect AgentType.isPi and isDroid computed properties",
+          "expected": "isPi true for .piAcp and .piNative; isDroid true for .droidAcp and .droidNative",
+          "observed": "AgentBadgeView.swift: isPi returns true for .piAcp, .piNative. isDroid returns true for .droidAcp, .droidNative. All other cases return false."
+        },
+        {
+          "action": "Inspect PiThinkingLevelPicker",
+          "expected": "Segmented picker with Quick/Balanced/Deep options",
+          "observed": "PiThinkingLevelPicker with 3 levels: ('Quick', 'off'), ('Balanced', 'medium'), ('Deep', 'high'). Shows brain icon in purple. Active level gets purple background, inactive gets surfaceLight."
+        },
+        {
+          "action": "Inspect DroidAutonomyControl",
+          "expected": "Slider/buttons with Cautious/Normal/Aggressive options",
+          "observed": "DroidAutonomyControl with 3 levels: ('Cautious', 'suggest'), ('Normal', 'normal'), ('Aggressive', 'full'). Shows robot icon in orange. Active level gets orange background."
+        },
+        {
+          "action": "Verify activeAgentType flows from agent selection",
+          "expected": "Changing agent in InlineAgentSelectorView updates activeAgentType in InlineModelSelectorView",
+          "observed": "ConversationModelPickerPanel passes selectedAgentType as activeAgentType to InlineModelSelectorView. onChange(of: selectedAgentType) persists to AgentSelectionStore. The conditional rendering of PiThinkingLevelPicker vs DroidAutonomyControl vs nothing responds to activeAgentType changes immediately."
+        },
+        {
+          "action": "Verify no stale controls after agent switch",
+          "expected": "Switching from Pi to Codex removes thinking level; switching from Droid to Pi removes autonomy and shows thinking level",
+          "observed": "The if/else if chain ensures only ONE control is visible at a time: isPi→PiThinkingLevelPicker, isDroid→DroidAutonomyControl, else→nothing. SwiftUI re-renders on activeAgentType change, so switching immediately shows/hides the correct control."
+        }
+      ],
+      "evidence": {
+        "screenshots": ["multi-agent-ui/ios-agent-picker/VAL-UI-app-running-state.png"],
+        "consoleErrors": "none",
+        "network": "N/A",
+        "codeReferences": {
+          "agentSpecificControls": "apps/ios/Sources/Litter/Views/HeaderView.swift:526-542 (InlineModelSelectorView)",
+          "piThinkingLevel": "apps/ios/Sources/Litter/Views/AgentPickerView.swift (PiThinkingLevelPicker)",
+          "droidAutonomy": "apps/ios/Sources/Litter/Views/AgentPickerView.swift (DroidAutonomyControl)",
+          "isPiIsDroid": "apps/ios/Sources/Litter/Views/AgentBadgeView.swift (AgentType.isPi, .isDroid)"
+        }
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-UI-018",
+      "title": "Agent picker persists across app restarts",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Inspect AgentSelectionStore persistence mechanism",
+          "expected": "Selected agent type persisted to UserDefaults",
+          "observed": "AgentSelectionStore.setSelectedAgentType writes to UserDefaults.standard under key 'litter.selectedAgent.<serverId>' with agentType.persistentKey string value."
+        },
+        {
+          "action": "Inspect AgentSelectionStore initialization — loading persisted data",
+          "expected": "On init, AgentSelectionStore reads persisted selection from UserDefaults",
+          "observed": "selectedAgentType(for:) reads from UserDefaults.standard.string(forKey:). Returns AgentType.fromPersistentKey(key) which maps string back to AgentType enum variant."
+        },
+        {
+          "action": "Verify UserDefaults survives app restart",
+          "expected": "UserDefaults.standard persists across app launches",
+          "observed": "UserDefaults is Apple's standard persistence mechanism. Data written to UserDefaults.standard survives app termination and relaunch. The agent selection key 'litter.selectedAgent.<serverId>' is a standard string key that persists."
+        },
+        {
+          "action": "Verify agent types cache also persisted",
+          "expected": "Discovered agent types for servers also survive restarts",
+          "observed": "AgentSelectionStore persists serverAgentTypesCache to UserDefaults under 'litter.serverAgentTypes' key as JSON-encoded [String: [String]] dictionary mapping server IDs to arrays of persistentKey strings. On init, this cache is loaded and decoded."
+        },
+        {
+          "action": "Verify HeaderView loads persisted selection on appear",
+          "expected": "HeaderView shows previously selected agent after restart",
+          "observed": "ConversationModelPickerPanel.task(id: thread.key) calls AgentSelectionStore.shared.effectiveAgentType() which checks selectedAgentType(for:) from UserDefaults first. The selectedAgentType state is initialized from this persisted value."
+        },
+        {
+          "action": "Inspect AgentType Codable conformance",
+          "expected": "AgentType has Codable conformance for serialization",
+          "observed": "AgentPickerView.swift adds @retroactive Codable conformance via a rawValueMap mapping each variant to a stable string key (codex, piAcp, piNative, droidAcp, droidNative, genericAcp). encode/decode use singleValueContainer with the persistentKey string."
+        }
+      ],
+      "evidence": {
+        "screenshots": ["multi-agent-ui/ios-agent-picker/VAL-UI-app-running-state.png"],
+        "consoleErrors": "none",
+        "network": "N/A",
+        "codeReferences": {
+          "selectionPersistence": "apps/ios/Sources/Litter/Views/AgentPickerView.swift (AgentSelectionStore.setSelectedAgentType, selectedAgentType)",
+          "agentTypesCache": "apps/ios/Sources/Litter/Views/AgentPickerView.swift (AgentSelectionStore.persistAgentTypesCache, init)",
+          "codableConformance": "apps/ios/Sources/Litter/Views/AgentPickerView.swift (AgentType: @retroactive Codable)",
+          "headerLoading": "apps/ios/Sources/Litter/Views/HeaderView.swift:265-269 (ConversationModelPickerPanel.task)"
+        }
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [
+    {
+      "description": "VAL-UI-002 requires testing agent grayed-out behavior for transport-incompatible agents, but the codebase doesn't use AgentInfo records in the picker — it uses AgentType enums directly. The AgentInfo.detected_transports field exists in Rust but isn't consumed by iOS views for filtering.",
+      "resolved": false,
+      "resolution": "This is an implementation gap, not a testing friction. The feature is simply not implemented.",
+      "affectedAssertions": ["VAL-UI-002"]
+    }
+  ],
+  "blockers": [],
+  "summary": "Tested 6 assertions: 5 passed, 1 failed (VAL-UI-002: transport filtering not implemented). Agent types come from Rust FFI (not hardcoded), badges map correctly to icons/colors, connection flow wires agent picker sheet properly, agent-specific controls (Pi thinking level, Droid autonomy) appear/disappear correctly based on activeAgentType, and agent selection persists to UserDefaults across app restarts."
+}

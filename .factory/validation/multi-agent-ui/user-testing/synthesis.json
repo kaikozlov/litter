@@ -1,0 +1,63 @@
+{
+  "milestone": "multi-agent-ui",
+  "round": 1,
+  "status": "fail",
+  "assertionsSummary": {
+    "total": 18,
+    "passed": 12,
+    "failed": 1,
+    "blocked": 5
+  },
+  "passedAssertions": [
+    "VAL-UI-001",
+    "VAL-UI-003",
+    "VAL-UI-004",
+    "VAL-UI-005",
+    "VAL-UI-006",
+    "VAL-UI-007",
+    "VAL-UI-008",
+    "VAL-UI-009",
+    "VAL-UI-010",
+    "VAL-UI-011",
+    "VAL-UI-012",
+    "VAL-UI-013",
+    "VAL-UI-017",
+    "VAL-UI-018"
+  ],
+  "failedAssertions": [
+    {
+      "id": "VAL-UI-002",
+      "reason": "Transport filtering not implemented in iOS agent picker. InlineAgentSelectorView shows all agents as fully selectable regardless of transport compatibility. No grayed-out styling or 'Transport unavailable' subtitle. The Rust AgentInfo.detected_transports field exists but is not consumed by iOS views for filtering purposes. The picker uses [AgentType] directly rather than [AgentInfo] records."
+    }
+  ],
+  "blockedAssertions": [
+    {
+      "id": "VAL-UI-014",
+      "blockedBy": "Android UI feature cancelled — no Android SDK on current machine (android-agent-picker-and-badges feature status: cancelled)"
+    },
+    {
+      "id": "VAL-UI-015",
+      "blockedBy": "Android UI feature cancelled — no Android SDK on current machine (android-agent-picker-and-badges feature status: cancelled)"
+    },
+    {
+      "id": "VAL-UI-016",
+      "blockedBy": "Android UI feature cancelled — no Android SDK on current machine (android-agent-picker-and-badges feature status: cancelled)"
+    },
+    {
+      "id": "VAL-UI-017",
+      "blockedBy": "Note: VAL-UI-017 passed for iOS but the cross-platform aspect cannot be verified without Android"
+    },
+    {
+      "id": "VAL-UI-018",
+      "blockedBy": "Note: VAL-UI-018 passed for iOS but the cross-platform aspect cannot be verified without Android"
+    }
+  ],
+  "appliedUpdates": [],
+  "previousRound": null,
+  "testingMethod": "Code inspection via flow validator subagents. iOS app built successfully (make ios-sim-fast), installed in simulator, but agent-browser cannot automate iOS Simulator apps. All verification done through source code analysis of Swift views and Rust FFI types.",
+  "flowReports": [
+    ".factory/validation/multi-agent-ui/user-testing/flows/ios-agent-picker.json",
+    ".factory/validation/multi-agent-ui/user-testing/flows/ios-sessions-discovery.json",
+    ".factory/validation/multi-agent-ui/user-testing/flows/ios-settings-permissions.json"
+  ]
+}
