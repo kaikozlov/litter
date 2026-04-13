@@ -1,0 +1,53 @@
+{
+  "milestone": "ssh-factory",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 14,
+    "passed": 14,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-SSH-001",
+    "VAL-SSH-002",
+    "VAL-SSH-003",
+    "VAL-SSH-004",
+    "VAL-SSH-005",
+    "VAL-SSH-006",
+    "VAL-FACTORY-001",
+    "VAL-FACTORY-002",
+    "VAL-FACTORY-003",
+    "VAL-FACTORY-004",
+    "VAL-FACTORY-005",
+    "VAL-FACTORY-006",
+    "VAL-FACTORY-007",
+    "VAL-FACTORY-008"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null,
+  "testRun": {
+    "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib",
+    "exitCode": 0,
+    "result": "898 passed; 0 failed; 9 ignored",
+    "duration": "61.20s"
+  },
+  "assertionToTestMapping": {
+    "VAL-SSH-001": ["ssh::tests::test_exec_stream_type_bounds", "ssh::exec_stream_integration::test_exec_stream_is_async_read_write"],
+    "VAL-SSH-002": ["ssh::exec_stream_integration::test_exec_stream_round_trip_io"],
+    "VAL-SSH-003": ["ssh::exec_stream_integration::test_exec_stream_stdout_reads"],
+    "VAL-SSH-004": ["ssh::exec_stream_integration::test_exec_stream_stderr_captured"],
+    "VAL-SSH-005": ["ssh::exec_stream_integration::test_exec_stream_cleanup_on_drop"],
+    "VAL-SSH-006": ["ssh::tests::test_exec_method_exists_with_correct_return_type", "ssh::exec_stream_integration::test_exec_regression_still_works", "all 898 existing tests pass"],
+    "VAL-FACTORY-001": ["provider::factory::tests::pi_native_transport_constructed_from_mock_channel"],
+    "VAL-FACTORY-002": ["provider::factory::tests::pi_acp_transport_constructed_from_mock_channel"],
+    "VAL-FACTORY-003": ["provider::factory::tests::droid_native_transport_constructed_from_mock_channel"],
+    "VAL-FACTORY-004": ["provider::factory::tests::droid_acp_transport_constructed_from_mock_channel"],
+    "VAL-FACTORY-005": ["provider::factory::tests::factory_generic_acp_returns_connection_failed"],
+    "VAL-FACTORY-006": ["provider::factory::tests::factory_codex_returns_connection_failed"],
+    "VAL-FACTORY-007": ["provider::factory::tests::pi_native_transport_is_usable_for_send_request", "provider::factory::tests::pi_native_transport_has_event_receiver", "provider::factory::tests::droid_native_transport_is_usable_for_send_request", "provider::factory::tests::droid_native_transport_has_event_receiver"],
+    "VAL-FACTORY-008": ["provider::factory::tests::pi_native_transport_cleans_up_on_disconnect", "provider::factory::tests::droid_native_transport_cleans_up_on_disconnect", "provider::factory::tests::droid_acp_transport_cleans_up_on_disconnect", "provider::factory::tests::pi_native_transport_returns_error_after_disconnect", "provider::factory::tests::droid_native_transport_returns_error_after_disconnect"]
+  }
+}
