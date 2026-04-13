@@ -436,6 +436,7 @@ pub mod codex;
 mod cross_provider;
 pub mod droid;
 pub mod error_handling;
+pub mod factory;
 pub mod mapping;
 pub mod pi;
 
