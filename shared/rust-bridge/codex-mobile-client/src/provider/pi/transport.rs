@@ -47,6 +47,43 @@ use crate::provider::pi::protocol::{
 use crate::provider::{ProviderConfig, ProviderEvent, ProviderTransport, SessionInfo};
 use crate::transport::{RpcError, TransportError};
 
+/// Extract text from Codex wire method params.
+///
+/// Tries multiple param locations in order:
+/// 1. `items` array → first item's `content` field (Codex thread/start format)
+/// 2. `content` field directly
+/// 3. `text` field directly
+fn extract_text_from_params(params: &serde_json::Value) -> Result<String, RpcError> {
+    // 1. Try items array: params.items[0].content
+    if let Some(items) = params.get("items").and_then(|v| v.as_array()) {
+        for item in items {
+            if let Some(content) = item.get("content").and_then(|v| v.as_str())
+                && !content.is_empty()
+            {
+                return Ok(content.to_string());
+            }
+        }
+    }
+
+    // 2. Try content field directly.
+    if let Some(content) = params.get("content").and_then(|v| v.as_str())
+        && !content.is_empty()
+    {
+        return Ok(content.to_string());
+    }
+
+    // 3. Try text field directly.
+    if let Some(text) = params.get("text").and_then(|v| v.as_str())
+        && !text.is_empty()
+    {
+        return Ok(text.to_string());
+    }
+
+    Err(RpcError::Deserialization(
+        "no text found in params (checked items[].content, content, text)".to_string(),
+    ))
+}
+
 /// Channel buffer size for the event broadcast.
 const EVENT_CHANNEL_CAPACITY: usize = 256;
 /// Channel buffer size for outgoing commands.
@@ -449,6 +486,35 @@ impl ProviderTransport for PiNativeTransport {
             "compact" => {
                 self.compact().await?;
                 Ok(serde_json::Value::Null)
+            }
+            // ── Codex wire method adapters ───────────────────────────────
+            // These map upstream Codex JSON-RPC methods to Pi native commands.
+            "thread/start" | "turn/start" => {
+                let text = extract_text_from_params(&params)?;
+                let session_id = params.get("session_id").and_then(|v| v.as_str());
+                self.prompt(&text, session_id).await?;
+                // Return synthetic ThreadStart result with a generated thread ID.
+                let thread_id = format!("pi-thread-{}", uuid::Uuid::new_v4());
+                Ok(serde_json::json!({
+                    "id": thread_id,
+                    "thread_id": thread_id,
+                }))
+            }
+            "turn/interrupt" => {
+                self.abort().await?;
+                Ok(serde_json::Value::Null)
+            }
+            "thread/list" => {
+                Ok(serde_json::json!({"threads": []}))
+            }
+            "thread/read" => {
+                self.get_state().await
+            }
+            "thread/archive" | "thread/rollback" | "thread/name/set" => {
+                Ok(serde_json::json!({"ok": true}))
+            }
+            "collaborationMode/list" => {
+                Ok(serde_json::json!({"data": []}))
             }
             _ => Err(RpcError::Server {
                 code: -32601,
@@ -1437,5 +1503,357 @@ mod tests {
             }
         }
         assert!(got_error, "should map Pi error event to ProviderEvent::Error");
+    }
+
+    // ── Codex Wire Method Mapping (VAL-PI-MAP-*) ──────────────────────
+
+    // VAL-PI-MAP-001: thread/start extracts text and calls prompt()
+
+    #[tokio::test]
+    async fn pi_codex_thread_start_extracts_text_from_items() {
+        let (mut transport, mock) = setup();
+
+        // The prompt method sends without waiting for a response.
+        let result = transport
+            .send_request(
+                "thread/start",
+                serde_json::json!({
+                    "items": [{"role": "user", "content": "Hello Pi!"}]
+                }),
+            )
+            .await
+            .unwrap();
+
+        // Should return a synthetic ThreadStart result with a thread ID.
+        assert!(result["id"].is_string(), "should have 'id' field");
+        assert!(result["thread_id"].is_string(), "should have 'thread_id' field");
+        assert!(result["id"].as_str().unwrap().starts_with("pi-thread-"));
+
+        // Verify a prompt command was sent with the extracted text.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let commands = mock.captured_commands().await;
+        assert!(!commands.is_empty(), "should have sent a command");
+        let cmd: serde_json::Value = serde_json::from_str(&commands[0]).unwrap();
+        assert_eq!(cmd["type"], "prompt");
+        assert_eq!(cmd["text"], "Hello Pi!");
+    }
+
+    #[tokio::test]
+    async fn pi_codex_thread_start_extracts_text_from_content_field() {
+        let (mut transport, mock) = setup();
+
+        let result = transport
+            .send_request(
+                "thread/start",
+                serde_json::json!({"content": "Direct content text"}),
+            )
+            .await
+            .unwrap();
+
+        assert!(result["id"].is_string());
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let commands = mock.captured_commands().await;
+        assert!(!commands.is_empty());
+        let cmd: serde_json::Value = serde_json::from_str(&commands[0]).unwrap();
+        assert_eq!(cmd["type"], "prompt");
+        assert_eq!(cmd["text"], "Direct content text");
+    }
+
+    #[tokio::test]
+    async fn pi_codex_thread_start_extracts_text_from_text_field() {
+        let (mut transport, mock) = setup();
+
+        let result = transport
+            .send_request(
+                "thread/start",
+                serde_json::json!({"text": "Text field content"}),
+            )
+            .await
+            .unwrap();
+
+        assert!(result["id"].is_string());
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let commands = mock.captured_commands().await;
+        assert!(!commands.is_empty());
+        let cmd: serde_json::Value = serde_json::from_str(&commands[0]).unwrap();
+        assert_eq!(cmd["type"], "prompt");
+        assert_eq!(cmd["text"], "Text field content");
+    }
+
+    #[tokio::test]
+    async fn pi_codex_thread_start_no_text_returns_error() {
+        let (mut transport, _mock) = setup();
+
+        let result = transport
+            .send_request("thread/start", serde_json::json!({}))
+            .await;
+
+        assert!(result.is_err(), "should error when no text in params");
+        match result {
+            Err(RpcError::Deserialization(msg)) => {
+                assert!(msg.contains("no text found"));
+            }
+            other => panic!("expected Deserialization error, got {other:?}"),
+        }
+    }
+
+    // VAL-PI-MAP-002: turn/start maps to Pi prompt (same as thread/start)
+
+    #[tokio::test]
+    async fn pi_codex_turn_start_extracts_text_from_items() {
+        let (mut transport, mock) = setup();
+
+        let result = transport
+            .send_request(
+                "turn/start",
+                serde_json::json!({
+                    "items": [{"role": "user", "content": "Follow-up question"}]
+                }),
+            )
+            .await
+            .unwrap();
+
+        assert!(result["id"].is_string());
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let commands = mock.captured_commands().await;
+        assert!(!commands.is_empty());
+        let cmd: serde_json::Value = serde_json::from_str(&commands[0]).unwrap();
+        assert_eq!(cmd["type"], "prompt");
+        assert_eq!(cmd["text"], "Follow-up question");
+    }
+
+    // VAL-PI-MAP-003: turn/interrupt calls abort()
+
+    #[tokio::test]
+    async fn pi_codex_turn_interrupt_calls_abort() {
+        let (mut transport, mock) = setup();
+
+        let result = transport
+            .send_request("turn/interrupt", serde_json::Value::Null)
+            .await
+            .unwrap();
+
+        assert!(result.is_null(), "interrupt should return null");
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let commands = mock.captured_commands().await;
+        assert!(!commands.is_empty(), "should have sent an abort command");
+        let cmd: serde_json::Value = serde_json::from_str(&commands[0]).unwrap();
+        assert_eq!(cmd["type"], "abort");
+    }
+
+    // VAL-PI-MAP-003: abort on idle is a no-op (success)
+
+    #[tokio::test]
+    async fn pi_codex_turn_interrupt_idle_is_noop() {
+        let (mut transport, _mock) = setup();
+
+        // Calling interrupt when no prompt is active should still succeed.
+        let result = transport
+            .send_request("turn/interrupt", serde_json::Value::Null)
+            .await;
+
+        assert!(result.is_ok(), "abort on idle should succeed");
+    }
+
+    // VAL-PI-MAP-004: thread/list returns structured response
+
+    #[tokio::test]
+    async fn pi_codex_thread_list_returns_empty_threads() {
+        let (mut transport, _mock) = setup();
+
+        let result = transport
+            .send_request("thread/list", serde_json::Value::Null)
+            .await
+            .unwrap();
+
+        // Response must be compatible with Codex ThreadList format.
+        assert!(result["threads"].is_array(), "should have 'threads' array");
+        assert_eq!(result["threads"].as_array().unwrap().len(), 0);
+    }
+
+    // VAL-PI-MAP-005: thread/read delegates to get_state()
+
+    #[tokio::test]
+    async fn pi_codex_thread_read_delegates_to_get_state() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_command_response("get_state", serde_json::json!({"status": "idle", "session_id": "sess-1"}))
+            .await;
+
+        let result = transport
+            .send_request("thread/read", serde_json::json!({"thread_id": "some-thread"}))
+            .await
+            .unwrap();
+
+        assert_eq!(result["status"], "idle");
+        assert_eq!(result["session_id"], "sess-1");
+
+        // Verify get_state command was sent.
+        let commands = mock.captured_commands().await;
+        assert!(!commands.is_empty());
+        let cmd: serde_json::Value = serde_json::from_str(&commands[0]).unwrap();
+        assert_eq!(cmd["type"], "get_state");
+    }
+
+    // VAL-PI-MAP-006: thread/archive, rollback, name/set return success no-op
+
+    #[tokio::test]
+    async fn pi_codex_thread_archive_noop() {
+        let (mut transport, mock) = setup();
+
+        let result = transport
+            .send_request("thread/archive", serde_json::json!({"thread_id": "t1"}))
+            .await
+            .unwrap();
+
+        assert_eq!(result, serde_json::json!({"ok": true}));
+
+        // No command should have been sent to Pi.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let commands = mock.captured_commands().await;
+        assert!(commands.is_empty(), "archive should not send a Pi command");
+    }
+
+    #[tokio::test]
+    async fn pi_codex_thread_rollback_noop() {
+        let (mut transport, mock) = setup();
+
+        let result = transport
+            .send_request("thread/rollback", serde_json::json!({"thread_id": "t1"}))
+            .await
+            .unwrap();
+
+        assert_eq!(result, serde_json::json!({"ok": true}));
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let commands = mock.captured_commands().await;
+        assert!(commands.is_empty(), "rollback should not send a Pi command");
+    }
+
+    #[tokio::test]
+    async fn pi_codex_thread_name_set_noop() {
+        let (mut transport, mock) = setup();
+
+        let result = transport
+            .send_request("thread/name/set", serde_json::json!({"thread_id": "t1", "name": "New Name"}))
+            .await
+            .unwrap();
+
+        assert_eq!(result, serde_json::json!({"ok": true}));
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let commands = mock.captured_commands().await;
+        assert!(commands.is_empty(), "name/set should not send a Pi command");
+    }
+
+    // VAL-PI-MAP-007: collaborationMode/list returns empty
+
+    #[tokio::test]
+    async fn pi_codex_collaboration_mode_list_returns_empty() {
+        let (mut transport, mock) = setup();
+
+        let result = transport
+            .send_request("collaborationMode/list", serde_json::Value::Null)
+            .await
+            .unwrap();
+
+        assert_eq!(result, serde_json::json!({"data": []}));
+
+        // No command should have been sent to Pi.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let commands = mock.captured_commands().await;
+        assert!(commands.is_empty(), "collaborationMode/list should not send a Pi command");
+    }
+
+    // VAL-PI-MAP-008: unknown methods return -32601
+
+    #[tokio::test]
+    async fn pi_codex_unknown_method_returns_error() {
+        let (mut transport, _mock) = setup();
+
+        let result = transport
+            .send_request("some/future/method", serde_json::Value::Null)
+            .await;
+
+        assert!(result.is_err());
+        match result {
+            Err(RpcError::Server { code, message }) => {
+                assert_eq!(code, -32601);
+                assert!(message.contains("some/future/method"));
+            }
+            other => panic!("expected Server error -32601, got {other:?}"),
+        }
+    }
+
+    // ── extract_text_from_params unit tests ─────────────────────────────
+
+    #[test]
+    fn extract_text_from_items_array() {
+        let params = serde_json::json!({
+            "items": [
+                {"role": "user", "content": "Hello from items"},
+                {"role": "assistant", "content": "ignored"}
+            ]
+        });
+        let text = extract_text_from_params(&params).unwrap();
+        assert_eq!(text, "Hello from items");
+    }
+
+    #[test]
+    fn extract_text_from_content_field() {
+        let params = serde_json::json!({"content": "Direct content"});
+        let text = extract_text_from_params(&params).unwrap();
+        assert_eq!(text, "Direct content");
+    }
+
+    #[test]
+    fn extract_text_from_text_field() {
+        let params = serde_json::json!({"text": "Text field"});
+        let text = extract_text_from_params(&params).unwrap();
+        assert_eq!(text, "Text field");
+    }
+
+    #[test]
+    fn extract_text_items_priority_over_content() {
+        let params = serde_json::json!({
+            "items": [{"content": "From items"}],
+            "content": "From content"
+        });
+        let text = extract_text_from_params(&params).unwrap();
+        assert_eq!(text, "From items");
+    }
+
+    #[test]
+    fn extract_text_skips_empty_items_content() {
+        let params = serde_json::json!({
+            "items": [{"content": ""}, {"content": "Found one"}],
+        });
+        let text = extract_text_from_params(&params).unwrap();
+        assert_eq!(text, "Found one");
+    }
+
+    #[test]
+    fn extract_text_empty_content_falls_through() {
+        let params = serde_json::json!({"content": "", "text": "From text"});
+        let text = extract_text_from_params(&params).unwrap();
+        assert_eq!(text, "From text");
+    }
+
+    #[test]
+    fn extract_text_no_text_returns_error() {
+        let params = serde_json::json!({"foo": "bar"});
+        let result = extract_text_from_params(&params);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_text_empty_params_returns_error() {
+        let params = serde_json::json!({});
+        let result = extract_text_from_params(&params);
+        assert!(result.is_err());
     }
 }

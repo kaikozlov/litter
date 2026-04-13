@@ -456,8 +456,10 @@ mod tests {
         let mut transport: Box<dyn ProviderTransport> = Box::new(PiNativeTransport::new(mock));
         transport.disconnect().await;
 
+        // Use a method that goes through send_command() to test disconnect behavior.
+        // thread/list and no-op methods return hardcoded values without checking connection.
         let result = transport
-            .send_request("thread/list", serde_json::json!({}))
+            .send_request("get_state", serde_json::json!({}))
             .await;
         assert!(result.is_err(), "send_request after disconnect should fail");
     }
