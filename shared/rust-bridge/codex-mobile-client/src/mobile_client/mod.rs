@@ -591,7 +591,7 @@ impl MobileClient {
         self.replace_existing_session(server_id.as_str()).await;
 
         let session = Arc::new(
-            ServerSession::from_provider(config, provider)
+            ServerSession::from_provider(config, provider, None)
                 .await
                 .map_err(|e| {
                     warn!("MobileClient: provider session connect failed for {server_id}: {e}");
@@ -717,6 +717,159 @@ impl MobileClient {
             }
         }
         result
+    }
+
+    /// Connect to a remote server over SSH with an explicit agent type.
+    ///
+    /// This is the agent-type-aware variant of `connect_remote_over_ssh`.
+    /// For `AgentType::Codex` (or `None`), it delegates to the existing
+    /// `connect_remote_over_ssh` unchanged. For Pi/Droid/ACP agent types,
+    /// it establishes the SSH connection, skips Codex bootstrap, calls
+    /// the provider factory to create the appropriate transport, then
+    /// connects via `connect_with_provider`.
+    ///
+    /// The SSH client is stored with the session for cleanup on disconnect.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn connect_remote_over_ssh_with_agent_type(
+        &self,
+        config: ServerConfig,
+        ssh_credentials: SshCredentials,
+        accept_unknown_host: bool,
+        working_dir: Option<String>,
+        ipc_socket_path_override: Option<String>,
+        agent_type: Option<crate::provider::AgentType>,
+    ) -> Result<String, TransportError> {
+        use crate::provider::factory::create_provider_over_ssh;
+        use crate::provider::AgentType;
+
+        // For Codex (or no agent type), delegate to the existing path unchanged.
+        let agent_type = match agent_type {
+            None | Some(AgentType::Codex) => {
+                return self
+                    .connect_remote_over_ssh(
+                        config,
+                        ssh_credentials,
+                        accept_unknown_host,
+                        working_dir,
+                        ipc_socket_path_override,
+                    )
+                    .await;
+            }
+            Some(at) => at,
+        };
+
+        let server_id = config.server_id.clone();
+        info!(
+            "MobileClient: connect_remote_over_ssh_with_agent_type start server_id={} host={} ssh_port={} agent_type={}",
+            server_id,
+            ssh_credentials.host.as_str(),
+            ssh_credentials.port,
+            agent_type,
+        );
+        self.app_store
+            .upsert_server(&config, ServerHealthSnapshot::Connecting, false);
+        self.app_store.update_server_connection_progress(
+            server_id.as_str(),
+            Some(AppConnectionProgressSnapshot::ssh_bootstrap()),
+        );
+        // Replace any existing session for this server.
+        self.replace_existing_session(server_id.as_str()).await;
+
+        // Establish SSH connection.
+        let ssh_client = match SshClient::connect(
+            ssh_credentials.clone(),
+            make_accept_unknown_host_callback(accept_unknown_host),
+        )
+        .await
+        {
+            Ok(client) => Arc::new(client),
+            Err(error) => {
+                let msg = map_ssh_transport_error(error);
+                warn!(
+                    "MobileClient: SSH connect failed for agent_type={} server_id={}: {msg}",
+                    agent_type, server_id
+                );
+                self.app_store
+                    .update_server_health(server_id.as_str(), ServerHealthSnapshot::Disconnected);
+                self.app_store
+                    .update_server_connection_progress(server_id.as_str(), None);
+                return Err(msg);
+            }
+        };
+        info!(
+            "MobileClient: SSH transport established for agent_type={} server_id={} host={}",
+            agent_type,
+            server_id,
+            ssh_credentials.host.as_str(),
+        );
+
+        // Build a provider config for the factory.
+        let provider_config = crate::provider::ProviderConfig {
+            agent_type,
+            ssh_host: Some(ssh_credentials.host.to_string()),
+            ssh_port: Some(ssh_credentials.port),
+            working_dir: working_dir.clone(),
+            ..Default::default()
+        };
+
+        // Create the provider transport via the factory.
+        let provider = match create_provider_over_ssh(agent_type, &ssh_client, &provider_config)
+            .await
+        {
+            Ok(provider) => provider,
+            Err(error) => {
+                warn!(
+                    "MobileClient: provider factory failed for agent_type={} server_id={}: {error}",
+                    agent_type, server_id
+                );
+                ssh_client.disconnect().await;
+                self.app_store
+                    .update_server_health(server_id.as_str(), ServerHealthSnapshot::Disconnected);
+                self.app_store
+                    .update_server_connection_progress(server_id.as_str(), None);
+                return Err(error);
+            }
+        };
+
+        // Connect using the provider transport with the SSH client for cleanup.
+        let session = match ServerSession::from_provider(
+            config,
+            provider,
+            Some(Arc::clone(&ssh_client)),
+        )
+        .await
+        {
+            Ok(session) => Arc::new(session),
+            Err(error) => {
+                warn!(
+                    "MobileClient: provider session connect failed for agent_type={} server_id={}: {error}",
+                    agent_type, server_id
+                );
+                ssh_client.disconnect().await;
+                self.app_store
+                    .update_server_health(server_id.as_str(), ServerHealthSnapshot::Disconnected);
+                self.app_store
+                    .update_server_connection_progress(server_id.as_str(), None);
+                return Err(error);
+            }
+        };
+
+        self.app_store.upsert_server(
+            session.config(),
+            ServerHealthSnapshot::Connected,
+            server_supports_ipc(&session),
+        );
+        self.spawn_event_reader(server_id.clone(), Arc::clone(&session));
+        self.spawn_health_reader(server_id.clone(), session.health());
+        self.sessions_write()
+            .insert(server_id.clone(), Arc::clone(&session));
+
+        self.app_store
+            .update_server_connection_progress(server_id.as_str(), None);
+        info!(
+            "MobileClient: connected provider-backed server {server_id} agent_type={agent_type}"
+        );
+        Ok(server_id)
     }
 
     #[allow(clippy::too_many_arguments)]

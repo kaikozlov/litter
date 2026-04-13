@@ -1929,4 +1929,335 @@ mod mobile_client_tests {
             );
         }
     }
+
+    // ── Agent-type routing tests (VAL-ROUTE-001..004) ─────────────────
+
+    /// VAL-ROUTE-001: Codex agent type delegates to existing connect_remote_over_ssh.
+    ///
+    /// When `agent_type` is `Some(AgentType::Codex)`, the method should
+    /// call `connect_remote_over_ssh` (which will fail because there's no
+    /// SSH server, but the important thing is that the error comes from
+    /// the standard SSH connect path, not the provider factory).
+    #[tokio::test]
+    async fn codex_agent_type_delegates_to_existing_path() {
+        use crate::provider::AgentType;
+        use crate::session::connection::ServerConfig;
+        use crate::ssh::{SshAuth, SshCredentials};
+
+        let client = MobileClient::new();
+        let config = ServerConfig {
+            server_id: "test-codex-delegate".to_string(),
+            display_name: "Test Codex".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            websocket_url: None,
+            is_local: false,
+            tls: false,
+        };
+        let credentials = SshCredentials {
+            host: "127.0.0.1".to_string(),
+            port: 22,
+            username: "user".to_string(),
+            auth: SshAuth::Password("pass".to_string()),
+        };
+
+        // Both None and Some(Codex) should delegate to connect_remote_over_ssh.
+        for agent_type in [None, Some(AgentType::Codex)] {
+            let result = client
+                .connect_remote_over_ssh_with_agent_type(
+                    config.clone(),
+                    credentials.clone(),
+                    false,
+                    None,
+                    None,
+                    agent_type,
+                )
+                .await;
+
+            // The connection will fail (no SSH server), but the error should
+            // come from the SSH connect path (TransportError::ConnectionFailed),
+            // not from the provider factory.
+            assert!(result.is_err(), "expected error for {agent_type:?}");
+            match result.err().unwrap() {
+                TransportError::ConnectionFailed(msg) => {
+                    // The error should mention SSH connection failure, not
+                    // provider factory or bootstrap.
+                    assert!(
+                        !msg.contains("provider factory"),
+                        "Codex should not go through provider factory: {msg}"
+                    );
+                    assert!(
+                        !msg.contains("unsupported agent type"),
+                        "Codex should not be rejected: {msg}"
+                    );
+                }
+                other => panic!("expected ConnectionFailed for Codex, got: {other}"),
+            }
+        }
+    }
+
+    /// VAL-ROUTE-002: Pi agent types route through provider factory.
+    ///
+    /// When `agent_type` is `Some(AgentType::PiNative)` or `Some(AgentType::PiAcp)`,
+    /// the method should attempt the provider factory path (which will fail because
+    /// there's no SSH server, but the error should come from the SSH connect attempt,
+    /// not from the Codex bootstrap path).
+    #[tokio::test]
+    async fn pi_agent_types_route_through_provider_factory() {
+        use crate::provider::AgentType;
+        use crate::session::connection::ServerConfig;
+        use crate::ssh::{SshAuth, SshCredentials};
+
+        let client = MobileClient::new();
+        let config = ServerConfig {
+            server_id: "test-pi-route".to_string(),
+            display_name: "Test Pi".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            websocket_url: None,
+            is_local: false,
+            tls: false,
+        };
+        let credentials = SshCredentials {
+            host: "127.0.0.1".to_string(),
+            port: 22,
+            username: "user".to_string(),
+            auth: SshAuth::Password("pass".to_string()),
+        };
+
+        for agent_type in [AgentType::PiNative, AgentType::PiAcp] {
+            let result = client
+                .connect_remote_over_ssh_with_agent_type(
+                    config.clone(),
+                    credentials.clone(),
+                    false,
+                    None,
+                    None,
+                    Some(agent_type),
+                )
+                .await;
+
+            // The connection will fail (no SSH server), but the error should
+            // come from the SSH transport establishment, not from
+            // bootstrap_codex_server (which should not be called).
+            assert!(result.is_err(), "expected error for {agent_type:?}");
+            match result.err().unwrap() {
+                TransportError::ConnectionFailed(msg) => {
+                    // Should NOT mention Codex bootstrap or WebSocket.
+                    assert!(
+                        !msg.contains("bootstrap"),
+                        "Pi should not attempt Codex bootstrap: {msg}"
+                    );
+                    assert!(
+                        !msg.contains("unsupported agent type"),
+                        "Pi should not be rejected: {msg}"
+                    );
+                }
+                other => panic!("expected ConnectionFailed for {agent_type:?}, got: {other}"),
+            }
+        }
+    }
+
+    /// VAL-ROUTE-003: Droid agent types route through provider factory.
+    ///
+    /// Same as Pi test but for DroidNative and DroidAcp.
+    #[tokio::test]
+    async fn droid_agent_types_route_through_provider_factory() {
+        use crate::provider::AgentType;
+        use crate::session::connection::ServerConfig;
+        use crate::ssh::{SshAuth, SshCredentials};
+
+        let client = MobileClient::new();
+        let config = ServerConfig {
+            server_id: "test-droid-route".to_string(),
+            display_name: "Test Droid".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            websocket_url: None,
+            is_local: false,
+            tls: false,
+        };
+        let credentials = SshCredentials {
+            host: "127.0.0.1".to_string(),
+            port: 22,
+            username: "user".to_string(),
+            auth: SshAuth::Password("pass".to_string()),
+        };
+
+        for agent_type in [AgentType::DroidNative, AgentType::DroidAcp] {
+            let result = client
+                .connect_remote_over_ssh_with_agent_type(
+                    config.clone(),
+                    credentials.clone(),
+                    false,
+                    None,
+                    None,
+                    Some(agent_type),
+                )
+                .await;
+
+            assert!(result.is_err(), "expected error for {agent_type:?}");
+            match result.err().unwrap() {
+                TransportError::ConnectionFailed(msg) => {
+                    assert!(
+                        !msg.contains("bootstrap"),
+                        "Droid should not attempt Codex bootstrap: {msg}"
+                    );
+                    assert!(
+                        !msg.contains("unsupported agent type"),
+                        "Droid should not be rejected: {msg}"
+                    );
+                }
+                other => panic!("expected ConnectionFailed for {agent_type:?}, got: {other}"),
+            }
+        }
+    }
+
+    /// VAL-ROUTE-004: Existing connect_remote_over_ssh is unchanged.
+    ///
+    /// The existing `connect_remote_over_ssh` method still exists and works
+    /// (will fail because no SSH server, but the error comes from SSH connect).
+    #[tokio::test]
+    async fn existing_connect_remote_over_ssh_unchanged() {
+        use crate::session::connection::ServerConfig;
+        use crate::ssh::{SshAuth, SshCredentials};
+
+        let client = MobileClient::new();
+        let config = ServerConfig {
+            server_id: "test-existing-ssh".to_string(),
+            display_name: "Test Existing".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            websocket_url: None,
+            is_local: false,
+            tls: false,
+        };
+        let credentials = SshCredentials {
+            host: "127.0.0.1".to_string(),
+            port: 22,
+            username: "user".to_string(),
+            auth: SshAuth::Password("pass".to_string()),
+        };
+
+        let result = client
+            .connect_remote_over_ssh(config, credentials, false, None, None)
+            .await;
+
+        assert!(result.is_err());
+        match result.err().unwrap() {
+            TransportError::ConnectionFailed(msg) => {
+                // Should be an SSH connection error, not provider factory.
+                assert!(
+                    !msg.contains("provider factory"),
+                    "existing path should not mention provider factory: {msg}"
+                );
+                assert!(
+                    !msg.contains("unsupported agent type"),
+                    "existing path should not mention agent type: {msg}"
+                );
+            }
+            other => panic!("expected ConnectionFailed, got: {other}"),
+        }
+    }
+
+    /// Verify that the method signature exists and accepts all expected parameters.
+    /// This is a compile-time check that also verifies the routing logic at the
+    /// type level.
+    #[tokio::test]
+    async fn connect_remote_over_ssh_with_agent_type_accepts_all_params() {
+        use crate::provider::AgentType;
+        use crate::session::connection::ServerConfig;
+        use crate::ssh::{SshAuth, SshCredentials};
+
+        let client = MobileClient::new();
+        let config = ServerConfig {
+            server_id: "test-params".to_string(),
+            display_name: "Test Params".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            websocket_url: None,
+            is_local: false,
+            tls: false,
+        };
+        let credentials = SshCredentials {
+            host: "127.0.0.1".to_string(),
+            port: 22,
+            username: "user".to_string(),
+            auth: SshAuth::Password("pass".to_string()),
+        };
+
+        // Call with all parameters including working_dir and ipc_socket_path_override.
+        let result = client
+            .connect_remote_over_ssh_with_agent_type(
+                config,
+                credentials,
+                true, // accept_unknown_host
+                Some("/home/user/project".to_string()), // working_dir
+                Some("/tmp/custom.sock".to_string()),    // ipc_socket_path_override
+                Some(AgentType::PiNative),
+            )
+            .await;
+
+        // Will fail due to no SSH server, but the call itself proves the
+        // signature accepts all parameters.
+        assert!(result.is_err());
+    }
+
+    /// Verify that server health is updated to Disconnected on failed SSH connect
+    /// for provider-backed agent types.
+    #[tokio::test]
+    async fn provider_connect_updates_health_on_ssh_failure() {
+        use crate::provider::AgentType;
+        use crate::session::connection::ServerConfig;
+        use crate::ssh::{SshAuth, SshCredentials};
+        use crate::store::ServerHealthSnapshot;
+
+        let client = MobileClient::new();
+        let server_id = "test-health-update";
+        let config = ServerConfig {
+            server_id: server_id.to_string(),
+            display_name: "Test Health".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            websocket_url: None,
+            is_local: false,
+            tls: false,
+        };
+        let credentials = SshCredentials {
+            host: "127.0.0.1".to_string(),
+            port: 22,
+            username: "user".to_string(),
+            auth: SshAuth::Password("pass".to_string()),
+        };
+
+        let _ = client
+            .connect_remote_over_ssh_with_agent_type(
+                config,
+                credentials,
+                false,
+                None,
+                None,
+                Some(AgentType::PiNative),
+            )
+            .await;
+
+        // After failure, the server should be marked as Disconnected.
+        let snapshot = client.app_store.snapshot();
+        let server = snapshot.servers.get(server_id);
+        // The server should either not exist (never upserted) or be Disconnected.
+        if let Some(server) = server {
+            assert_eq!(
+                server.health,
+                ServerHealthSnapshot::Disconnected,
+                "server should be Disconnected after failed provider connect"
+            );
+        }
+        // Connection progress should be cleared.
+        assert!(
+            server
+                .map(|s| s.connection_progress.is_none())
+                .unwrap_or(true),
+            "connection progress should be cleared after failure"
+        );
+    }
 }

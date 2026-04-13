@@ -1026,6 +1026,7 @@ impl ServerSession {
     pub async fn from_provider(
         config: ServerConfig,
         provider: Box<dyn crate::provider::ProviderTransport>,
+        ssh_client: Option<Arc<SshClient>>,
     ) -> Result<Self, TransportError> {
         let (health_tx, health_rx) = watch::channel(ConnectionHealth::Connected);
         let (event_tx, _) = broadcast::channel::<ServerEvent>(256);
@@ -1218,7 +1219,7 @@ impl ServerSession {
             command_tx,
             event_tx,
             ipc_stream_client: None,
-            ssh_client: None,
+            ssh_client,
             ssh_pid: None,
             ipc_ssh_client: None,
             ipc_stream_bridge_pid: None,
@@ -2295,7 +2296,7 @@ mod tests {
             is_local: false,
             tls: false,
         };
-        let session = ServerSession::from_provider(config, provider)
+        let session = ServerSession::from_provider(config, provider, None)
             .await
             .expect("from_provider should succeed");
 
@@ -2318,7 +2319,7 @@ mod tests {
             is_local: false,
             tls: false,
         };
-        let session = ServerSession::from_provider(config, provider)
+        let session = ServerSession::from_provider(config, provider, None)
             .await
             .expect("from_provider should succeed");
 
@@ -2344,7 +2345,7 @@ mod tests {
             tls: false,
         };
 
-        let session = ServerSession::from_provider(config, Box::new(provider))
+        let session = ServerSession::from_provider(config, Box::new(provider), None)
             .await
             .expect("from_provider should succeed");
 
@@ -2386,7 +2387,7 @@ mod tests {
             is_local: false,
             tls: false,
         };
-        let session = ServerSession::from_provider(config, Box::new(provider))
+        let session = ServerSession::from_provider(config, Box::new(provider), None)
             .await
             .expect("from_provider should succeed");
 
@@ -2415,7 +2416,7 @@ mod tests {
             is_local: false,
             tls: false,
         };
-        let session = ServerSession::from_provider(config, provider)
+        let session = ServerSession::from_provider(config, provider, None)
             .await
             .expect("from_provider should succeed");
 
