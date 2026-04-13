@@ -1,0 +1,66 @@
+{
+  "milestone": "multi-agent-ui",
+  "round": 2,
+  "status": "pass",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib", "exitCode": 0, "observation": "868 passed; 0 failed; 9 ignored" },
+    "typecheck": { "passed": true, "command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml", "exitCode": 0, "observation": "Finished dev profile, no errors" },
+    "lint": { "passed": true, "command": "cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml -- -D warnings", "exitCode": 0, "observation": "Finished dev profile, no warnings" }
+  },
+  "reviewsSummary": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "nonBlockingIssues": [
+    {
+      "featureId": "fix-ios-agent-wiring",
+      "severity": "non_blocking",
+      "description": "Confusing decoding filter in AgentSelectionStore.init() — double-calls fromPersistentKey for each key. Functionally correct (unknown keys produce nil) but hard to read."
+    },
+    {
+      "featureId": "fix-ios-agent-wiring",
+      "severity": "non_blocking",
+      "description": "Session filter based on server-level metadata rather than intrinsic per-session agent data. Pre-existing limitation."
+    },
+    {
+      "featureId": "fix-ios-agent-wiring",
+      "severity": "non_blocking",
+      "description": "Selected agent type not yet passed through to Rust FFI session creation path — stored in AgentSelectionStore but unused in connectToServer(). Pre-existing no-op pattern."
+    },
+    {
+      "featureId": "fix-ios-agent-wiring",
+      "severity": "non_blocking",
+      "description": "Settings agent list hardcoded to [Codex, Pi Native, Droid Native] rather than reflecting connected agents. Pre-existing design choice."
+    },
+    {
+      "featureId": "ios-agent-picker-and-badges",
+      "severity": "non_blocking",
+      "description": "Pi thinking level and Droid autonomy controls are no-ops — they change local @AppStorage state but never communicate to the Rust layer."
+    },
+    {
+      "featureId": "ios-agent-picker-and-badges",
+      "severity": "non_blocking",
+      "description": "@retroactive Codable on AgentType silently defaults to .codex on unknown variants instead of logging a warning."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Document that AppServerSnapshot does not carry agent_types from Rust — platform code must bridge between DiscoveredServer.agentTypes (discovery-time data) and AppServerSnapshot (runtime data). Add a pattern for how to surface agent availability in connected server views.",
+      "evidence": "ios-agent-picker-and-badges: HeaderView and ConversationModelPickerPanel attempt to derive agent types from snapshot servers but fall back to [.codex] because AppServerSnapshot has no agent_types field.",
+      "isSystemic": true
+    },
+    {
+      "target": "platform-ui-worker skill",
+      "suggestion": "Add guidance that UniFFI-generated enums in Swift lack rawValue/Identifiable/Codable conformance. Workers need to add @retroactive conformance with a manual rawValue map for ForEach and UserDefaults persistence. Include the pattern used in AgentPickerView.swift.",
+      "evidence": "ios-agent-picker-and-badges: Worker had to discover this pattern independently and noted it in skillFeedback.suggestedChanges.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": ".factory/validation/multi-agent-ui/scrutiny/synthesis.json.round1"
+}

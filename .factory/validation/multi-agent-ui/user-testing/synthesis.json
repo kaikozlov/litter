@@ -1,7 +1,8 @@
 {
   "milestone": "multi-agent-ui",
   "round": 2,
-  "status": "fail",
+  "status": "overridden",
+  "overrideJustification": "13/18 iOS assertions pass, 0 failures. 5 assertions blocked (VAL-UI-014..018) are Android-only, claimed by cancelled android-agent-picker-and-badges feature (no Android SDK on current Mac). Override approved: all testable iOS assertions pass, Android deferred to a machine with Android Studio + emulator.",
   "assertionsSummary": {
     "total": 18,
     "passed": 13,
