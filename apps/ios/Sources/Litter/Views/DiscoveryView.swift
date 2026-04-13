@@ -54,6 +54,19 @@ struct DiscoveryView: View {
         discovery.isScanning = false
     }
 
+    /// Returns the available transports for a server based on its connection capabilities.
+    private func transportsForServer(_ server: DiscoveredServer) -> [AgentType] {
+        if server.source == .local {
+            return [.codex]
+        }
+        // If the server has SSH capability, all transports are available
+        if server.canConnectViaSSH {
+            return [.codex, .piAcp, .piNative, .droidAcp, .droidNative, .genericAcp]
+        }
+        // WebSocket-only server: only Codex transport
+        return [.codex]
+    }
+
     private func refreshDiscovery() {
         guard autoStartDiscovery else {
             applyInitialServersIfNeeded()
@@ -117,7 +130,16 @@ struct DiscoveryView: View {
         }
         .sheet(item: $agentPickerServer) { server in
             AgentPickerSheet(
-                agentTypes: server.agentTypes,
+                agentInfos: server.agentInfos.isEmpty
+                    ? server.agentTypes.map { AgentInfo(
+                        id: $0.persistentKey,
+                        displayName: $0.displayName,
+                        description: "",
+                        detectedTransports: [$0],
+                        capabilities: []
+                    )}
+                    : server.agentInfos,
+                availableTransports: transportsForServer(server),
                 selectedAgentType: $agentPickerSelection
             )
         }
@@ -509,6 +531,8 @@ struct DiscoveryView: View {
         // Keep the shared registry in sync so HeaderView/ConversationModelPickerPanel
         // can look up agent types without direct access to NetworkDiscovery.
         AgentSelectionStore.shared.updateAgentTypes(types, for: server.id)
+        AgentSelectionStore.shared.updateAgentInfos(server.agentInfos, for: server.id)
+        AgentSelectionStore.shared.updateSSHCapability(server.canConnectViaSSH, for: server.id)
         return types
     }
 
@@ -553,6 +577,8 @@ struct DiscoveryView: View {
     private func handleTapAsync(_ server: DiscoveredServer) async {
         // Ensure the agent types registry is updated for this server.
         AgentSelectionStore.shared.updateAgentTypes(server.agentTypes, for: server.id)
+        AgentSelectionStore.shared.updateAgentInfos(server.agentInfos, for: server.id)
+        AgentSelectionStore.shared.updateSSHCapability(server.canConnectViaSSH, for: server.id)
 
         if appModel.snapshot?.servers.first(where: { $0.serverId == server.id })?.health == .connected {
             // Already connected — check if agent picker is needed
@@ -569,8 +595,24 @@ struct DiscoveryView: View {
 
         let prepared = await prepareServerForSelection(server)
 
+        // Filter agents by transport compatibility
+        let serverTransports = transportsForServer(server)
+        let compatibleInfos: [AgentInfo]
+        if server.agentInfos.isEmpty {
+            // No agent info — treat all agent types as compatible
+            compatibleInfos = server.agentTypes.map {
+                AgentInfo(id: $0.persistentKey, displayName: $0.displayName, description: "", detectedTransports: [$0], capabilities: [])
+            }
+        } else {
+            compatibleInfos = server.agentInfos.filter { info in
+                guard !serverTransports.isEmpty else { return true }
+                return !Set(info.detectedTransports).isDisjoint(with: Set(serverTransports))
+            }
+        }
+        let compatibleTypes = compatibleInfos.map { $0.detectedTransports.first ?? .codex }
+
         // Check if multi-agent picker should be shown before connecting
-        let needsPicker = server.agentTypes.count > 1
+        let needsPicker = compatibleTypes.count > 1
             && AgentSelectionStore.shared.selectedAgentType(for: server.id) == nil
         if needsPicker {
             agentPickerServer = server
@@ -578,9 +620,9 @@ struct DiscoveryView: View {
             return
         }
 
-        // Auto-select single agent
-        if server.agentTypes.count == 1 {
-            AgentSelectionStore.shared.setSelectedAgentType(server.agentTypes.first, for: server.id)
+        // Auto-select single compatible agent
+        if compatibleTypes.count == 1 {
+            AgentSelectionStore.shared.setSelectedAgentType(compatibleTypes.first, for: server.id)
         }
 
         if prepared.server.requiresConnectionChoice {

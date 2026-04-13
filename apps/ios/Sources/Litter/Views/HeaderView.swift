@@ -23,6 +23,11 @@ struct HeaderView: View {
         AgentSelectionStore.shared.agentTypes(for: thread.key.serverId)
     }
 
+    /// The available agent info records for the current server from discovery data.
+    private var availableAgentInfos: [AgentInfo] {
+        AgentSelectionStore.shared.agentInfos(for: thread.key.serverId)
+    }
+
     /// The currently selected agent type for this server.
     private var currentAgentType: AgentType {
         AgentSelectionStore.shared.selectedAgentType(for: thread.key.serverId)
@@ -233,13 +238,53 @@ struct ConversationModelPickerPanel: View {
         AgentSelectionStore.shared.agentTypes(for: thread.key.serverId)
     }
 
+    /// Available agent info records for the current server.
+    private var availableAgentInfos: [AgentInfo] {
+        AgentSelectionStore.shared.agentInfos(for: thread.key.serverId)
+    }
+
+    /// The transports available for this server based on the connection mode.
+    /// Determines which agents can be selected based on their detected_transports.
+    /// Returns empty if no filter should be applied (backward compat / no agent info).
+    private var availableTransportsForServer: [AgentType] {
+        // No agent info means we can't filter — show everything
+        guard !availableAgentInfos.isEmpty else { return [] }
+        guard let server = appModel.snapshot?.serverSnapshot(for: thread.key.serverId) else {
+            return []
+        }
+        // Local servers only support WebSocket (Codex) transport
+        if server.isLocal {
+            return [.codex]
+        }
+        // For remote servers, check if SSH is available from the discovery data.
+        // The AgentSelectionStore holds the serverId which we can use to look up
+        // the discovered server's SSH capability.
+        // All transports are available for remote servers with SSH capability.
+        // WebSocket-only remote servers only support Codex.
+        let hasSSH = AgentSelectionStore.shared.serverHasSSH(server.serverId)
+        if hasSSH {
+            return [.codex, .piAcp, .piNative, .droidAcp, .droidNative, .genericAcp]
+        }
+        // WebSocket-only remote server: only Codex transport available
+        return [.codex]
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Agent selector (only shown when multiple agents available)
             if availableAgentTypes.count > 1 {
                 InlineAgentSelectorView(
-                    agentTypes: availableAgentTypes,
+                    agentInfos: availableAgentInfos.isEmpty
+                        ? availableAgentTypes.map { AgentInfo(
+                            id: $0.persistentKey,
+                            displayName: $0.displayName,
+                            description: "",
+                            detectedTransports: [$0],
+                            capabilities: []
+                        )}
+                        : availableAgentInfos,
                     selectedAgentType: $selectedAgentType,
+                    availableTransports: availableTransportsForServer,
                     onDismiss: {
                         appState.showModelSelector = false
                     }

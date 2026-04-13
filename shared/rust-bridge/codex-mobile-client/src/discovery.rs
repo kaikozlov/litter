@@ -53,6 +53,11 @@ pub struct DiscoveredServer {
     /// no agent type probing has been performed yet.
     #[serde(default = "default_agent_types")]
     pub agent_types: Vec<crate::provider::AgentType>,
+    /// Detailed agent information records with detected transports and capabilities.
+    ///
+    /// Populated during discovery probing. Empty when no agent probing has been done.
+    #[serde(default)]
+    pub agent_infos: Vec<crate::provider::AgentInfo>,
 }
 
 /// Default agent types for backward compatibility.
@@ -521,6 +526,7 @@ impl DiscoveryService {
             last_seen: Instant::now(),
             reachable: false, // will be verified on next scan
             agent_types: default_agent_types(),
+            agent_infos: vec![],
         };
 
         self.manual_servers.lock().unwrap().push((host, port));
@@ -802,6 +808,7 @@ impl DiscoveryService {
                 last_seen: Instant::now(),
                 reachable,
                 agent_types: default_agent_types(),
+                agent_infos: vec![],
             });
         }
 
@@ -876,6 +883,7 @@ impl DiscoveryService {
                     last_seen: Instant::now(),
                     reachable,
                     agent_types: default_agent_types(),
+                    agent_infos: vec![],
                 }
             }));
         }
@@ -966,6 +974,7 @@ async fn server_from_reachable_ports(
         last_seen: Instant::now(),
         reachable: true,
         agent_types: default_agent_types(),
+        agent_infos: vec![],
     }
 }
 
@@ -1523,6 +1532,7 @@ mod tests {
             last_seen: Instant::now(),
             reachable: true,
             agent_types: default_agent_types(),
+            agent_infos: vec![],
         };
         let cloned = server.clone();
         assert_eq!(cloned.id, server.id);
@@ -1545,6 +1555,7 @@ mod tests {
             last_seen: Instant::now(),
             reachable: true,
             agent_types: default_agent_types(),
+            agent_infos: vec![],
         };
         let newer = DiscoveredServer {
             id: "server-1".to_string(),
@@ -1559,6 +1570,7 @@ mod tests {
             last_seen: Instant::now(),
             reachable: true,
             agent_types: default_agent_types(),
+            agent_infos: vec![],
         };
 
         let reconciled = reconcile_discovered_servers(vec![older, newer]);
@@ -1632,6 +1644,7 @@ mod tests {
             last_seen: Instant::now(),
             reachable: true,
             agent_types: default_agent_types(),
+            agent_infos: vec![],
         };
         assert_eq!(server.agent_types, vec![crate::provider::AgentType::Codex]);
     }
@@ -1654,6 +1667,7 @@ mod tests {
                 crate::provider::AgentType::Codex,
                 crate::provider::AgentType::PiAcp,
             ],
+            agent_infos: vec![],
         };
         assert_eq!(server.agent_types.len(), 2);
         assert_eq!(server.agent_types[0], crate::provider::AgentType::Codex);
@@ -1678,6 +1692,7 @@ mod tests {
             last_seen: Instant::now(),
             reachable: true,
             agent_types: vec![AgentType::Codex, AgentType::DroidNative],
+            agent_infos: vec![],
         };
 
         let app_server: AppDiscoveredServer = server.into();
@@ -1704,6 +1719,7 @@ mod tests {
             os: None,
             ssh_banner: None,
             agent_types: vec![AgentType::PiNative, AgentType::PiAcp],
+            agent_infos: vec![],
         };
 
         let server: DiscoveredServer = app.into();

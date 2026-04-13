@@ -83,9 +83,14 @@ final class AgentSelectionStore {
     private let defaults = UserDefaults.standard
     private static let selectedAgentKey = "litter.selectedAgent"
     private static let serverAgentTypesKey = "litter.serverAgentTypes"
+    private static let serverSSHCapabilityKey = "litter.serverSSHCapability"
 
     /// In-memory cache of detected agent types per server, updated from discovery.
     private var serverAgentTypesCache: [String: [AgentType]] = [:]
+    /// In-memory cache of agent info records per server, updated from discovery.
+    private var serverAgentInfosCache: [String: [AgentInfo]] = [:]
+    /// In-memory cache of SSH capability per server, updated from discovery.
+    private var serverSSHCapabilityCache: [String: Bool] = [:]
 
     private init() {
         // Load persisted agent types cache
@@ -106,9 +111,39 @@ final class AgentSelectionStore {
         }
     }
 
+    /// Update the detected agent infos for a server (called from discovery reconciliation).
+    func updateAgentInfos(_ agentInfos: [AgentInfo], for serverId: String) {
+        serverAgentInfosCache[serverId] = agentInfos
+        // Also update agent types from the infos if they carry data
+        if !agentInfos.isEmpty {
+            let types = agentInfos.map { $0.detectedTransports }.flatMap { $0 }.map { $0 }
+            let uniqueTypes = Array(types)
+            let current = serverAgentTypesCache[serverId] ?? []
+            if current != uniqueTypes {
+                serverAgentTypesCache[serverId] = uniqueTypes.isEmpty ? [.codex] : uniqueTypes
+                persistAgentTypesCache()
+            }
+        }
+    }
+
     /// Returns the detected agent types for a server, defaulting to [.codex].
     func agentTypes(for serverId: String) -> [AgentType] {
         serverAgentTypesCache[serverId] ?? [.codex]
+    }
+
+    /// Returns the detected agent infos for a server.
+    func agentInfos(for serverId: String) -> [AgentInfo] {
+        serverAgentInfosCache[serverId] ?? []
+    }
+
+    /// Update the SSH capability for a server (called from discovery reconciliation).
+    func updateSSHCapability(_ hasSSH: Bool, for serverId: String) {
+        serverSSHCapabilityCache[serverId] = hasSSH
+    }
+
+    /// Returns whether the server has SSH capability.
+    func serverHasSSH(_ serverId: String) -> Bool {
+        serverSSHCapabilityCache[serverId] ?? false
     }
 
     private func persistAgentTypesCache() {
@@ -205,45 +240,67 @@ final class AgentPermissionStore {
 
 /// Inline agent selector shown inside the model picker popover in HeaderView.
 /// Lists available agents for the current server and allows selection.
+/// Agents with incompatible transports are grayed out and disabled.
 struct InlineAgentSelectorView: View {
-    let agentTypes: [AgentType]
+    let agentInfos: [AgentInfo]
     @Binding var selectedAgentType: AgentType
+    /// The transports available on the active connection (e.g. SSH, WebSocket).
+    /// If empty, all agents are considered compatible (backward compat).
+    let availableTransports: [AgentType]
     @Environment(AppModel.self) private var appModel
     var onDismiss: () -> Void = {}
 
+    /// Returns true if this agent has at least one transport matching the available transports.
+    private func isCompatible(_ info: AgentInfo) -> Bool {
+        guard !availableTransports.isEmpty else { return true }
+        return !Set(info.detectedTransports).isDisjoint(with: Set(availableTransports))
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            if agentTypes.count > 1 {
+            if agentInfos.count > 1 {
                 SectionHeader(label: "Agent")
-                ForEach(agentTypes) { agentType in
-                    agentRow(agentType)
+                ForEach(agentInfos, id: \.id) { info in
+                    agentRow(info)
                 }
                 Divider().background(LitterTheme.separator).padding(.leading, 16)
             }
         }
     }
 
-    private func agentRow(_ agentType: AgentType) -> some View {
-        Button {
+    private func agentRow(_ info: AgentInfo) -> some View {
+        let compatible = isCompatible(info)
+        // Pick the best display agent type from detected transports
+        let agentType = info.detectedTransports.first ?? .codex
+
+        return Button {
+            guard compatible else { return }
             selectedAgentType = agentType
             onDismiss()
         } label: {
             HStack(spacing: 10) {
                 AgentBadgeView(agentType: agentType, size: 16, showsLabel: true)
                     .frame(width: 70, alignment: .leading)
+                    .opacity(compatible ? 1.0 : 0.4)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(agentType.displayName)
+                    Text(info.displayName)
                         .litterFont(.footnote)
-                        .foregroundColor(LitterTheme.textPrimary)
-                    Text(agentType.transportLabel)
-                        .litterFont(.caption2)
-                        .foregroundColor(LitterTheme.textSecondary)
+                        .foregroundColor(compatible ? LitterTheme.textPrimary : LitterTheme.textMuted)
+                    if compatible {
+                        Text(info.detectedTransports.map { $0.transportLabel }.joined(separator: ", "))
+                            .litterFont(.caption2)
+                            .foregroundColor(LitterTheme.textSecondary)
+                    } else {
+                        Text("Transport unavailable")
+                            .litterFont(.caption2)
+                            .foregroundColor(LitterTheme.danger)
+                    }
                 }
 
                 Spacer()
 
-                if agentType == selectedAgentType {
+                if compatible && agentType == selectedAgentType {
                     Image(systemName: "checkmark")
                         .litterFont(size: 12, weight: .medium)
                         .foregroundColor(LitterTheme.accent)
@@ -252,6 +309,7 @@ struct InlineAgentSelectorView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
         }
+        .disabled(!compatible)
     }
 }
 
@@ -259,33 +317,52 @@ struct InlineAgentSelectorView: View {
 
 /// Full agent picker sheet shown during connection flow when server has multiple agents.
 struct AgentPickerSheet: View {
-    let agentTypes: [AgentType]
+    let agentInfos: [AgentInfo]
+    /// The transports available on the active connection.
+    /// If empty, all agents are considered compatible (backward compat).
+    let availableTransports: [AgentType]
     @Binding var selectedAgentType: AgentType?
     @Environment(\.dismiss) private var dismiss
+
+    /// Returns true if this agent has at least one transport matching the available transports.
+    private func isCompatible(_ info: AgentInfo) -> Bool {
+        guard !availableTransports.isEmpty else { return true }
+        return !Set(info.detectedTransports).isDisjoint(with: Set(availableTransports))
+    }
 
     var body: some View {
         NavigationStack {
             ZStack {
                 LitterTheme.backgroundGradient.ignoresSafeArea()
                 List {
-                    ForEach(agentTypes) { agentType in
+                    ForEach(agentInfos, id: \.id) { info in
+                        let compatible = isCompatible(info)
+                        let agentType = info.detectedTransports.first ?? .codex
                         Button {
+                            guard compatible else { return }
                             selectedAgentType = agentType
                             dismiss()
                         } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: agentType.icon)
                                     .font(.system(size: 20, weight: .medium))
-                                    .foregroundColor(agentType.tintColor)
+                                    .foregroundColor(compatible ? agentType.tintColor : LitterTheme.textMuted)
                                     .frame(width: 32)
+                                    .opacity(compatible ? 1.0 : 0.4)
 
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(agentType.displayName)
+                                    Text(info.displayName)
                                         .litterFont(.subheadline)
-                                        .foregroundColor(LitterTheme.textPrimary)
-                                    Text(agentType.transportLabel + " transport")
-                                        .litterFont(.caption)
-                                        .foregroundColor(LitterTheme.textSecondary)
+                                        .foregroundColor(compatible ? LitterTheme.textPrimary : LitterTheme.textMuted)
+                                    if compatible {
+                                        Text(info.detectedTransports.map { $0.transportLabel }.joined(separator: ", ") + " transport")
+                                            .litterFont(.caption)
+                                            .foregroundColor(LitterTheme.textSecondary)
+                                    } else {
+                                        Text("Transport unavailable")
+                                            .litterFont(.caption)
+                                            .foregroundColor(LitterTheme.danger)
+                                    }
                                 }
 
                                 Spacer()
@@ -293,6 +370,7 @@ struct AgentPickerSheet: View {
                             .padding(.vertical, 4)
                         }
                         .listRowBackground(LitterTheme.surface.opacity(0.6))
+                        .disabled(!compatible)
                     }
                 }
                 .scrollContentBackground(.hidden)
@@ -405,8 +483,13 @@ struct DroidAutonomyControl: View {
 #Preview("Agent Picker") {
     VStack(spacing: 16) {
         InlineAgentSelectorView(
-            agentTypes: [.codex, .piNative, .droidNative],
-            selectedAgentType: .constant(.codex)
+            agentInfos: [
+                AgentInfo(id: "codex", displayName: "Codex", description: "Code assistant", detectedTransports: [.codex], capabilities: []),
+                AgentInfo(id: "pi", displayName: "Pi", description: "AI coding agent", detectedTransports: [.piNative], capabilities: []),
+                AgentInfo(id: "droid", displayName: "Droid", description: "Droid agent", detectedTransports: [.droidNative], capabilities: []),
+            ],
+            selectedAgentType: .constant(.codex),
+            availableTransports: [.codex, .piNative, .droidNative]
         )
     }
     .background(Color.black)

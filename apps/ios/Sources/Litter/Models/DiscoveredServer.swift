@@ -43,6 +43,7 @@ struct DiscoveredServer: Identifiable, Hashable {
     let os: String?
     let sshBanner: String?
     let agentTypes: [AgentType]
+    let agentInfos: [AgentInfo]
 
     init(
         id: String,
@@ -60,7 +61,8 @@ struct DiscoveredServer: Identifiable, Hashable {
         preferredCodexPort: UInt16? = nil,
         os: String? = nil,
         sshBanner: String? = nil,
-        agentTypes: [AgentType] = [.codex]
+        agentTypes: [AgentType] = [.codex],
+        agentInfos: [AgentInfo] = []
     ) {
         let normalizedCodexPorts = Self.normalizedPorts(codexPorts, fallback: port)
         let resolvedPreferredMode = Self.resolvedPreferredConnectionMode(
@@ -93,6 +95,7 @@ struct DiscoveredServer: Identifiable, Hashable {
         self.os = os
         self.sshBanner = sshBanner
         self.agentTypes = agentTypes
+        self.agentInfos = agentInfos
     }
 
     var connectionTarget: ConnectionTarget? {
@@ -160,7 +163,8 @@ struct DiscoveredServer: Identifiable, Hashable {
             preferredCodexPort: mode == .directCodex ? (codexPort ?? resolvedDirectCodexPort) : nil,
             os: os,
             sshBanner: sshBanner,
-            agentTypes: agentTypes
+            agentTypes: agentTypes,
+            agentInfos: agentInfos
         )
     }
 
