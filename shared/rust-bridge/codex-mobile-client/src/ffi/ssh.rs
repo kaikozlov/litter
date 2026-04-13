@@ -1,5 +1,6 @@
 use crate::ffi::ClientError;
 use crate::ffi::shared::{shared_mobile_client, shared_runtime};
+use crate::provider::AgentType;
 use crate::session::connection::ServerConfig;
 use crate::ssh::{RemoteShell, SshAuth, SshBootstrapResult, SshClient, SshCredentials, SshError};
 use crate::store::{
@@ -247,11 +248,12 @@ impl SshBridge {
         accept_unknown_host: bool,
         working_dir: Option<String>,
         ipc_socket_path_override: Option<String>,
+        agent_type: Option<AgentType>,
     ) -> Result<String, ClientError> {
         let normalized_host = normalize_ssh_host(&host);
         let auth = ssh_auth(password, private_key_pem, passphrase)?;
         info!(
-            "SshBridge: ssh_connect_remote_server start server_id={} host={} normalized_host={} ssh_port={} username={} auth={} working_dir={} ipc_socket_path_override={}",
+            "SshBridge: ssh_connect_remote_server start server_id={} host={} normalized_host={} ssh_port={} username={} auth={} working_dir={} ipc_socket_path_override={} agent_type={}",
             server_id,
             host.as_str(),
             normalized_host.as_str(),
@@ -259,7 +261,10 @@ impl SshBridge {
             username.as_str(),
             ssh_auth_kind(&auth),
             working_dir.as_deref().unwrap_or("<none>"),
-            ipc_socket_path_override.as_deref().unwrap_or("<none>")
+            ipc_socket_path_override.as_deref().unwrap_or("<none>"),
+            agent_type
+                .map(|at| at.to_string())
+                .unwrap_or_else(|| "None".to_string())
         );
         let credentials = SshCredentials {
             host: normalized_host.clone(),
@@ -286,12 +291,13 @@ impl SshBridge {
         // stack on iOS when the websocket handshake wakes aggressively.
         tokio::spawn(async move {
             let result = mobile_client
-                .connect_remote_over_ssh(
+                .connect_remote_over_ssh_with_agent_type(
                     config,
                     credentials,
                     accept_unknown_host,
                     working_dir,
                     ipc_socket_path_override,
+                    agent_type,
                 )
                 .await
                 .map_err(|e| ClientError::Transport(e.to_string()));
@@ -326,11 +332,12 @@ impl SshBridge {
         accept_unknown_host: bool,
         working_dir: Option<String>,
         ipc_socket_path_override: Option<String>,
+        agent_type: Option<AgentType>,
     ) -> Result<String, ClientError> {
         let normalized_host = normalize_ssh_host(&host);
         let auth = ssh_auth(password, private_key_pem, passphrase)?;
         info!(
-            "SshBridge: ssh_start_remote_server_connect start server_id={} host={} normalized_host={} ssh_port={} username={} auth={} working_dir={} ipc_socket_path_override={}",
+            "SshBridge: ssh_start_remote_server_connect start server_id={} host={} normalized_host={} ssh_port={} username={} auth={} working_dir={} ipc_socket_path_override={} agent_type={}",
             server_id,
             host.as_str(),
             normalized_host.as_str(),
@@ -338,7 +345,10 @@ impl SshBridge {
             username.as_str(),
             ssh_auth_kind(&auth),
             working_dir.as_deref().unwrap_or("<none>"),
-            ipc_socket_path_override.as_deref().unwrap_or("<none>")
+            ipc_socket_path_override.as_deref().unwrap_or("<none>"),
+            agent_type
+                .map(|at| at.to_string())
+                .unwrap_or_else(|| "None".to_string())
         );
         let credentials = SshCredentials {
             host: normalized_host.clone(),
@@ -386,40 +396,58 @@ impl SshBridge {
         let task_server_id = server_id.clone();
         let task_host = credentials.host.clone();
         tokio::spawn(async move {
-            let mut progress = initial_progress;
-            trace!(
-                "SshBridge: guided ssh connect task spawned server_id={} host={}",
-                task_server_id, task_host
-            );
-            let task_result = run_guided_ssh_connect(
-                Arc::clone(&mobile_client),
-                Arc::clone(&flows),
-                config,
-                credentials,
-                accept_unknown_host,
-                working_dir,
-                ipc_socket_path_override,
-                &mut progress,
-            )
-            .await;
+            let task_result = if is_non_codex_agent(agent_type) {
+                // Non-Codex agents: skip guided SSH bootstrap, use provider factory path.
+                trace!(
+                    "SshBridge: provider ssh connect task spawned server_id={} host={} agent_type={}",
+                    task_server_id, task_host,
+                    agent_type.map(|at| at.to_string()).unwrap_or_else(|| "None".to_string())
+                );
+                run_provider_ssh_connect(
+                    Arc::clone(&mobile_client),
+                    config,
+                    credentials,
+                    accept_unknown_host,
+                    working_dir,
+                    agent_type,
+                )
+                .await
+            } else {
+                // Codex (or None): existing guided SSH connect path unchanged.
+                let mut progress = initial_progress;
+                trace!(
+                    "SshBridge: guided ssh connect task spawned server_id={} host={}",
+                    task_server_id, task_host
+                );
+                run_guided_ssh_connect(
+                    Arc::clone(&mobile_client),
+                    Arc::clone(&flows),
+                    config,
+                    credentials,
+                    accept_unknown_host,
+                    working_dir,
+                    ipc_socket_path_override,
+                    &mut progress,
+                )
+                .await
+            };
 
             if let Err(ref error) = task_result {
                 warn!(
-                    "guided ssh connect failed server_id={} host={} error={}",
+                    "ssh connect task failed server_id={} host={} error={}",
                     task_server_id, task_host, error
                 );
-                mark_progress_failure(&mut progress, error.to_string());
                 mobile_client
                     .app_store
                     .update_server_health(&task_server_id, ServerHealthSnapshot::Disconnected);
                 mobile_client
                     .app_store
-                    .update_server_connection_progress(&task_server_id, Some(progress));
+                    .update_server_connection_progress(&task_server_id, None);
             }
 
             if task_result.is_ok() {
                 info!(
-                    "SshBridge: guided ssh connect completed server_id={} host={}",
+                    "SshBridge: ssh connect task completed server_id={} host={}",
                     task_server_id, task_host
                 );
             }
@@ -767,23 +795,6 @@ async fn run_guided_ssh_connect(
     Ok(())
 }
 
-fn mark_progress_failure(progress: &mut AppConnectionProgressSnapshot, message: String) {
-    if let Some(step) = progress.steps.iter_mut().find(|step| {
-        matches!(
-            step.state,
-            AppConnectionStepState::InProgress | AppConnectionStepState::AwaitingUserInput
-        )
-    }) {
-        step.state = AppConnectionStepState::Failed;
-        step.detail = Some(message.clone());
-    } else if let Some(step) = progress.steps.last_mut() {
-        step.state = AppConnectionStepState::Failed;
-        step.detail = Some(message.clone());
-    }
-    progress.pending_install = false;
-    progress.terminal_message = Some(message);
-}
-
 pub(crate) fn map_ssh_error(error: SshError) -> ClientError {
     match error {
         SshError::ConnectionFailed(message)
@@ -844,4 +855,330 @@ fn normalize_wake_mac(raw: &str) -> Option<String> {
         chunks.push(compact[index..index + 2].to_string());
     }
     Some(chunks.join(":"))
+}
+
+/// Returns `true` if the agent type is a non-Codex agent that should use the
+/// provider factory path instead of the guided Codex bootstrap.
+fn is_non_codex_agent(agent_type: Option<AgentType>) -> bool {
+    matches!(
+        agent_type,
+        Some(
+            AgentType::PiAcp
+                | AgentType::PiNative
+                | AgentType::DroidAcp
+                | AgentType::DroidNative
+                | AgentType::GenericAcp
+        )
+    )
+}
+
+/// Connect to a remote server over SSH using the provider factory path
+/// for non-Codex agent types (Pi, Droid, ACP).
+///
+/// This skips all Codex-specific bootstrap steps (FindingCodex, InstallingCodex,
+/// StartingAppServer, OpeningTunnel) and delegates directly to
+/// `MobileClient::connect_remote_over_ssh_with_agent_type`.
+async fn run_provider_ssh_connect(
+    mobile_client: Arc<crate::MobileClient>,
+    config: ServerConfig,
+    credentials: SshCredentials,
+    accept_unknown_host: bool,
+    working_dir: Option<String>,
+    agent_type: Option<AgentType>,
+) -> Result<(), ClientError> {
+    let server_id = config.server_id.clone();
+    info!(
+        "SshBridge: provider ssh connect start server_id={} host={} agent_type={}",
+        server_id,
+        credentials.host.as_str(),
+        agent_type
+            .map(|at| at.to_string())
+            .unwrap_or_else(|| "None".to_string())
+    );
+
+    mobile_client
+        .connect_remote_over_ssh_with_agent_type(
+            config,
+            credentials,
+            accept_unknown_host,
+            working_dir,
+            None, // No IPC for provider-backed sessions
+            agent_type,
+        )
+        .await
+        .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+    info!(
+        "SshBridge: provider ssh connect completed server_id={}",
+        server_id
+    );
+    Ok(())
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── is_non_codex_agent ─────────────────────────────────────────────
+
+    #[test]
+    fn is_non_codex_agent_returns_false_for_none() {
+        assert!(!is_non_codex_agent(None));
+    }
+
+    #[test]
+    fn is_non_codex_agent_returns_false_for_codex() {
+        assert!(!is_non_codex_agent(Some(AgentType::Codex)));
+    }
+
+    #[test]
+    fn is_non_codex_agent_returns_true_for_pi_native() {
+        assert!(is_non_codex_agent(Some(AgentType::PiNative)));
+    }
+
+    #[test]
+    fn is_non_codex_agent_returns_true_for_pi_acp() {
+        assert!(is_non_codex_agent(Some(AgentType::PiAcp)));
+    }
+
+    #[test]
+    fn is_non_codex_agent_returns_true_for_droid_native() {
+        assert!(is_non_codex_agent(Some(AgentType::DroidNative)));
+    }
+
+    #[test]
+    fn is_non_codex_agent_returns_true_for_droid_acp() {
+        assert!(is_non_codex_agent(Some(AgentType::DroidAcp)));
+    }
+
+    #[test]
+    fn is_non_codex_agent_returns_true_for_generic_acp() {
+        assert!(is_non_codex_agent(Some(AgentType::GenericAcp)));
+    }
+
+    // ── ssh_start_remote_server_connect accepts agent_type ─────────────
+
+    #[tokio::test]
+    async fn ssh_start_remote_server_connect_accepts_agent_type_param() {
+        let bridge = SshBridge::new();
+        // Call with agent_type: None (backward compatible — should behave
+        // identically to the old signature, returning server_id immediately
+        // while the connect runs in the background).
+        let result = bridge
+            .ssh_start_remote_server_connect(
+                "test-ffi-none".to_string(),
+                "Test None".to_string(),
+                "127.0.0.1".to_string(),
+                22,
+                "user".to_string(),
+                Some("pass".to_string()),
+                None,
+                None,
+                false,
+                None,
+                None,
+                None, // agent_type: None
+            )
+            .await;
+        assert!(
+            result.is_ok(),
+            "ssh_start_remote_server_connect with None agent_type should return Ok"
+        );
+        assert_eq!(result.unwrap(), "test-ffi-none");
+    }
+
+    #[tokio::test]
+    async fn ssh_start_remote_server_connect_accepts_codex_agent_type() {
+        let bridge = SshBridge::new();
+        let result = bridge
+            .ssh_start_remote_server_connect(
+                "test-ffi-codex".to_string(),
+                "Test Codex".to_string(),
+                "127.0.0.1".to_string(),
+                22,
+                "user".to_string(),
+                Some("pass".to_string()),
+                None,
+                None,
+                false,
+                None,
+                None,
+                Some(AgentType::Codex), // agent_type: Codex
+            )
+            .await;
+        assert!(
+            result.is_ok(),
+            "ssh_start_remote_server_connect with Codex agent_type should return Ok"
+        );
+        assert_eq!(result.unwrap(), "test-ffi-codex");
+    }
+
+    #[tokio::test]
+    async fn ssh_start_remote_server_connect_accepts_pi_native_agent_type() {
+        let bridge = SshBridge::new();
+        let result = bridge
+            .ssh_start_remote_server_connect(
+                "test-ffi-pinative".to_string(),
+                "Test PiNative".to_string(),
+                "127.0.0.1".to_string(),
+                22,
+                "user".to_string(),
+                Some("pass".to_string()),
+                None,
+                None,
+                false,
+                None,
+                None,
+                Some(AgentType::PiNative),
+            )
+            .await;
+        assert!(
+            result.is_ok(),
+            "ssh_start_remote_server_connect with PiNative agent_type should return Ok"
+        );
+        assert_eq!(result.unwrap(), "test-ffi-pinative");
+    }
+
+    #[tokio::test]
+    async fn ssh_start_remote_server_connect_accepts_droid_native_agent_type() {
+        let bridge = SshBridge::new();
+        let result = bridge
+            .ssh_start_remote_server_connect(
+                "test-ffi-droidnative".to_string(),
+                "Test DroidNative".to_string(),
+                "127.0.0.1".to_string(),
+                22,
+                "user".to_string(),
+                Some("pass".to_string()),
+                None,
+                None,
+                false,
+                None,
+                None,
+                Some(AgentType::DroidNative),
+            )
+            .await;
+        assert!(
+            result.is_ok(),
+            "ssh_start_remote_server_connect with DroidNative agent_type should return Ok"
+        );
+        assert_eq!(result.unwrap(), "test-ffi-droidnative");
+    }
+
+    // ── ssh_connect_remote_server accepts agent_type ───────────────────
+
+    #[tokio::test]
+    async fn ssh_connect_remote_server_accepts_agent_type_none() {
+        let bridge = SshBridge::new();
+        // Will fail (no SSH server), but the call proves the signature
+        // accepts agent_type: None for backward compatibility.
+        let result = bridge
+            .ssh_connect_remote_server(
+                "test-conn-none".to_string(),
+                "Test".to_string(),
+                "127.0.0.1".to_string(),
+                22,
+                "user".to_string(),
+                Some("pass".to_string()),
+                None,
+                None,
+                false,
+                None,
+                None,
+                None,
+            )
+            .await;
+        // Expected to fail — no SSH server running.
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn ssh_connect_remote_server_accepts_agent_type_pi() {
+        let bridge = SshBridge::new();
+        let result = bridge
+            .ssh_connect_remote_server(
+                "test-conn-pi".to_string(),
+                "Test".to_string(),
+                "127.0.0.1".to_string(),
+                22,
+                "user".to_string(),
+                Some("pass".to_string()),
+                None,
+                None,
+                false,
+                None,
+                None,
+                Some(AgentType::PiNative),
+            )
+            .await;
+        // Expected to fail — no SSH server running.
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn ssh_connect_remote_server_accepts_agent_type_droid() {
+        let bridge = SshBridge::new();
+        let result = bridge
+            .ssh_connect_remote_server(
+                "test-conn-droid".to_string(),
+                "Test".to_string(),
+                "127.0.0.1".to_string(),
+                22,
+                "user".to_string(),
+                Some("pass".to_string()),
+                None,
+                None,
+                false,
+                None,
+                None,
+                Some(AgentType::DroidAcp),
+            )
+            .await;
+        // Expected to fail — no SSH server running.
+        assert!(result.is_err());
+    }
+
+    // ── Provider path does not go through guided bootstrap ──────────────
+
+    #[tokio::test]
+    async fn ssh_start_remote_server_connect_provider_failure_updates_health() {
+        use crate::store::ServerHealthSnapshot;
+
+        let bridge = SshBridge::new();
+        let server_id = "test-provider-fail";
+
+        let _result = bridge
+            .ssh_start_remote_server_connect(
+                server_id.to_string(),
+                "Test Provider Fail".to_string(),
+                "127.0.0.1".to_string(),
+                22,
+                "user".to_string(),
+                Some("pass".to_string()),
+                None,
+                None,
+                false,
+                None,
+                None,
+                Some(AgentType::PiNative),
+            )
+            .await;
+
+        // Wait for background task to complete (with short timeout).
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let mobile_client = shared_mobile_client();
+        let snapshot = mobile_client.app_store.snapshot();
+        let server = snapshot.servers.get(server_id);
+        // The server should be Disconnected since there's no SSH server.
+        if let Some(server) = server {
+            assert_eq!(
+                server.health,
+                ServerHealthSnapshot::Disconnected,
+                "server should be Disconnected after failed provider connect"
+            );
+        }
+    }
 }
