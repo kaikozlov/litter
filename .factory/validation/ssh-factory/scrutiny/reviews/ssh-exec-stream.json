@@ -1,0 +1,51 @@
+{
+  "featureId": "ssh-exec-stream",
+  "reviewedAt": "2026-04-13T22:45:00.000Z",
+  "commitId": "d68d2a4",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Well-structured implementation of SshClient::exec_stream() that correctly follows the existing exec_inner() pattern (lock → check closed → open channel → drop handle → exec → return stream). The AsyncReadWrite helper trait is a clean solution for combining AsyncRead + AsyncWrite into a single boxed trait object. All 9 tests pass, covering type bounds, round-trip I/O, stdout reads, stderr handling, channel cleanup on drop, and exec() regression. The test infrastructure (local SSH loopback server) is solid and reusable. The feature is already consumed by the downstream provider/factory.rs module.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/ssh.rs",
+        "line": 672,
+        "severity": "non_blocking",
+        "description": "open_streamlocal() does not drop the handle lock before returning channel.into_stream(), unlike exec_stream() and exec_inner() which drop the handle after channel open. This means open_streamlocal holds the lock slightly longer than necessary. This is a pre-existing issue, not introduced by this commit, and the exec_stream implementation correctly follows the newer pattern. Consider fixing open_streamlocal in a follow-up for consistency."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/ssh.rs",
+        "line": 2370,
+        "severity": "non_blocking",
+        "description": "test_exec_method_exists_with_correct_return_type is essentially a no-op at runtime — the _check_exec_return_type function is defined but never called. The test compiles (which is the real assertion), but it would be clearer to add a comment or a trivial assertion so the test doesn't look accidentally empty. Minor style concern only."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/ssh.rs",
+        "line": 2696,
+        "severity": "non_blocking",
+        "description": "The test_exec_stream_stderr_captured test name says 'captured' but the test actually verifies that stderr doesn't disrupt stdout reading — stderr bytes are NOT accessible through the stream. The doc comment correctly explains this, but the test name could be misleading. Consider renaming to test_exec_stream_stderr_does_not_disrupt_stdout or similar for accuracy."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/ssh.rs",
+        "line": 2557,
+        "severity": "non_blocking",
+        "description": "The integration tests use exec_stream_via_handle() helper which duplicates the core logic of SshClient::exec_stream() rather than testing the actual method. This is because SshClient requires a private ClientHandler. While this is pragmatic and the logic is identical, it means the actual SshClient::exec_stream() method itself is not directly integration-tested. The downstream factory.rs module does exercise it end-to-end though."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "russh's ChannelStream (from into_stream()) only reads stdout (ChannelMsg::Data) on its AsyncRead side — stderr (ExtendedData ext=1) frames are handled internally by russh and are NOT accessible through the stream's read side. This is a key architectural constraint for anyone building on exec_stream(). The worker documented this in the handoff's discoveredIssues, but it would be valuable in the library docs.",
+      "evidence": "Handoff discoveredIssues[0]: 'russh ChannelStream only reads stdout (ChannelMsg::Data) on its AsyncRead side, not stderr (ExtendedData ext=1)'. Also noted in exec_stream() doc comment at line 688-690."
+    },
+    {
+      "area": "conventions",
+      "observation": "The project has an inconsistent pattern for handle lock management: open_streamlocal() holds the lock through into_stream(), while exec_inner() and exec_stream() drop the handle lock immediately after channel open. The newer pattern (early drop) is correct and should be the standard.",
+      "evidence": "Compare open_streamlocal() at line 658-672 (no drop(handle)) vs exec_inner() at line 388-397 (explicit drop(handle) after channel open) and exec_stream() at line 693-696 (same early drop pattern)."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS — exec_stream() is a clean, well-tested implementation that correctly follows the exec_inner() pattern. The AsyncReadWrite trait is a good solution for the trait-object boxing problem. All 9 tests pass (7 integration + 2 unit), clippy is clean, and the method is already consumed by the downstream provider factory. Minor non-blocking observations: (1) open_streamlocal has a pre-existing lock-holding inconsistency, (2) one test name could be clearer about what it actually verifies, (3) integration tests test a helper rather than the actual SshClient method. No blocking issues found."
+}

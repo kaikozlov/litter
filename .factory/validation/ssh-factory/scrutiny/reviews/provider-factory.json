@@ -1,0 +1,56 @@
+{
+  "featureId": "provider-factory",
+  "reviewedAt": "2026-04-13T23:15:00Z",
+  "commitId": "114d83d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The provider factory module is well-structured and correctly implements create_provider_over_ssh() for all 6 AgentType variants. Each variant spawns the correct remote binary via SshClient::exec_stream(), constructs the appropriate transport, and handles handshakes for ACP variants. The module is clean, well-documented, and correctly registered in provider/mod.rs. 21 unit tests pass covering command correctness, transport construction, usability, cleanup, and error cases. The implementation compiles cleanly with no clippy warnings. There is one non-blocking issue (redundant double-timeout in create_droid_acp) and one deferral (GenericAcp returns error pending ProviderConfig.remote_command field).",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/factory.rs",
+        "line": 132,
+        "severity": "non_blocking",
+        "description": "Double timeout in create_droid_acp: the outer tokio::time::timeout(Duration::from_secs(30), ...) wraps wait_for_droid_acp_init() which already has an internal 30-second timeout (loop polling at 100ms intervals up to ACP_HANDSHAKE_TIMEOUT_SECS). The outer timeout is redundant — only one of the two can ever fire (the inner one will always fire first since it's strictly shorter due to polling overhead). This is functionally harmless but misleading. Recommend removing the outer tokio::time::timeout wrapper and just calling wait_for_droid_acp_init() directly, or removing the inner timeout from wait_for_droid_acp_init() and relying solely on the outer one."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/factory.rs",
+        "line": 160,
+        "severity": "non_blocking",
+        "description": "GenericAcp is intentionally deferred — returns ConnectionFailed error because ProviderConfig lacks a remote_command field. This is documented in the handoff's 'whatWasLeftUndone' and the code comment, so it's acceptable. The feature description explicitly mentions 'configurable command from config' so this is a known gap that requires a ProviderConfig schema change in a future iteration."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/factory.rs",
+        "line": 231,
+        "severity": "non_blocking",
+        "description": "Tests factory_codex_returns_connection_failed and factory_generic_acp_returns_connection_failed don't actually call create_provider_over_ssh() — they construct TransportError values inline and assert on the string content. These verify that the error *message format* is correct but don't exercise the actual factory function. This is an acceptable approximation given that calling the factory requires a real SshClient, but the tests would be stronger if they tested the factory routing path directly (e.g., via a mock SshClient). The transport construction tests partially compensate by testing the downstream path."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/factory.rs",
+        "line": 298,
+        "severity": "non_blocking",
+        "description": "wait_for_droid_acp_init() polls transport.session_id() at 100ms intervals. This polling approach is simple but incurs lock contention on the DroidAcpTransport inner mutex every 100ms for up to 30 seconds. A more efficient approach would be to subscribe to the event_receiver() and wait for a StreamingStarted event (which is emitted on system/init). However, this is a performance concern, not a correctness issue — the polling interval is reasonable for the expected use case."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The factory module shows that SshClient::exec_stream() returns Pin<Box<dyn AsyncReadWrite>> which is directly compatible with all transport constructors' T: AsyncRead + AsyncWrite + Send + 'static bounds. This type compatibility is a key design contract between the SSH layer and the provider transport layer, but it's not documented anywhere in the library. Future workers implementing new transports need to know that exec_stream() output can be passed directly to Transport::new().",
+      "evidence": "ssh.rs:13 defines AsyncReadWrite trait. factory.rs passes exec_stream() result directly to PiNativeTransport::new(), DroidNativeTransport::new(), etc. — all accept T: AsyncRead + AsyncWrite + Send + 'static. The compatibility works because AsyncReadWrite requires AsyncRead + AsyncWrite + Send, and Pin<Box<dyn X>> implements X via Deref."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The DroidAcpTransport initialization pattern differs from PiAcpTransport. PiAcp uses an explicit handshake() method (initialize + authenticate over ACP protocol), while DroidAcp uses background task polling — the transport's IO loop reads system/init from the stream and sets internal state. The factory needs different initialization code paths for each. This distinction should be documented so future transport implementers know which pattern to follow.",
+      "evidence": "factory.rs: create_pi_acp() calls transport.handshake() explicitly (line 101), while create_droid_acp() calls wait_for_droid_acp_init() which polls transport.session_id() (line 165). The DroidAcpTransport::new() spawns a background IO task that reads lines and sets initialized=true on system/init (acp_transport.rs:399-416)."
+    },
+    {
+      "area": "conventions",
+      "observation": "The factory function signature takes ssh_client as &Arc<SshClient> rather than &SshClient. This matches the existing pattern in the codebase (ssh_bootstrap functions also take &Arc<SshClient>), but is slightly unconventional for Rust — typically one would pass &SshClient directly. Not a problem, but worth noting for consistency.",
+      "evidence": "factory.rs:66 — create_provider_over_ssh takes ssh_client: &Arc<SshClient>. Other functions in ssh.rs that are called on Arc<SshClient> pass the Arc by reference."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS with minor non-blocking observations. The provider factory correctly implements create_provider_over_ssh() for all 6 AgentType variants with proper remote command spawning, ACP handshaking, Codex error rejection, and SSH channel cleanup-on-drop. The 21 unit tests provide good coverage of command correctness, transport construction, usability, and cleanup. One non-blocking concern: redundant double-timeout in create_droid_acp() (outer tokio::time::timeout wrapping an inner polling loop that already times out). GenericAcp is intentionally deferred pending a ProviderConfig schema change. Code is clean, well-documented, compiles without warnings, and all tests pass."
+}

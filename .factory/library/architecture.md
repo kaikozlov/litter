@@ -38,8 +38,10 @@ iOS DiscoveryView tap
 
 ### SshClient::exec_stream()
 - Location: `src/ssh.rs`
-- Pattern: follows existing `open_streamlocal()` — opens SSH channel, calls exec, returns `ChannelStream`
-- Returns: `Pin<Box<dyn AsyncRead + AsyncWrite + Send + 'static>>`
+- Pattern: follows existing `exec_inner()` — opens SSH channel, drops handle lock, calls exec, returns `ChannelStream`
+- Returns: `Pin<Box<dyn AsyncReadWrite>>` where `AsyncReadWrite` is a local trait alias for `AsyncRead + AsyncWrite + Send`
+- **Type compatibility contract**: The returned `Pin<Box<dyn AsyncReadWrite>>` is directly compatible with all transport constructors that accept `T: AsyncRead + AsyncWrite + Send + 'static` (works via `Deref` on `Pin<Box<dyn X>>`). Future transport implementers can pass `exec_stream()` output directly to `Transport::new()`.
+- **Stderr limitation**: russh's `ChannelStream` (from `into_stream()`) only reads stdout (`ChannelMsg::Data`) on its `AsyncRead` side. Stderr (`ExtendedData { ext: 1 }`) frames are handled internally by russh and are **not accessible** through the stream's read side. If stderr access is needed, a different approach (e.g., separate channel or `exec_inner()` with raw channel handling) would be required.
 - Enables: spawning remote agent binaries with bidirectional I/O
 
 ### Provider Factory
@@ -52,6 +54,10 @@ iOS DiscoveryView tap
   - DroidAcp: `droid exec --output-format stream-json --input-format stream-json`
   - GenericAcp: configurable command from ProviderConfig
   - Codex: error (must use standard path)
+- **ACP initialization patterns differ by transport**:
+  - PiAcp uses an explicit `handshake()` method (ACP `initialize` + `authenticate` protocol)
+  - DroidAcp uses background task polling — the transport's IO loop reads `system/init` from the stream and sets internal state; the factory polls `transport.session_id()` until it becomes `Some(...)`
+  - Future transport implementers need to choose the appropriate pattern based on the agent's protocol
 
 ### Agent-Type Routing
 - Location: `src/mobile_client/mod.rs`

@@ -1,0 +1,65 @@
+{
+  "milestone": "ssh-factory",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml -- -D warnings",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Added note about russh ChannelStream stderr limitation: ChannelStream only reads stdout (ChannelMsg::Data) on its AsyncRead side; stderr (ExtendedData ext=1) is handled internally by russh and not accessible through the stream's read side.",
+      "sourceFeature": "ssh-exec-stream"
+    },
+    {
+      "target": "library",
+      "description": "Documented type compatibility contract: exec_stream() returns Pin<Box<dyn AsyncReadWrite>> which is directly compatible with all transport constructors accepting T: AsyncRead + AsyncWrite + Send + 'static. Works via Deref on Pin<Box<dyn X>>.",
+      "sourceFeature": "provider-factory"
+    },
+    {
+      "target": "library",
+      "description": "Documented initialization pattern difference: PiAcpTransport uses explicit handshake() method while DroidAcpTransport uses background task polling (wait_for system/init). Factory needs different init code paths for each.",
+      "sourceFeature": "provider-factory"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add note about SSH handle lock management convention: the preferred pattern is to drop the handle lock immediately after opening a channel (as done in exec_inner() and exec_stream()), not hold it through into_stream() (as in the older open_streamlocal()). New SSH methods should follow the early-drop pattern.",
+      "evidence": "ssh-exec-stream review found open_streamlocal() holds the lock longer than necessary, while the newer exec_stream() correctly drops early. Pre-existing inconsistency across ssh.rs.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Factory takes &Arc<SshClient> rather than &SshClient — slightly unconventional for Rust.",
+      "reason": "This matches the existing pattern throughout the codebase (ssh_bootstrap functions also use &Arc<SshClient>). Not new information, and not a problem worth documenting."
+    },
+    {
+      "observation": "Double timeout in create_droid_acp() — outer tokio::time::timeout wraps inner polling loop that already times out.",
+      "reason": "This is a code quality issue in the implementation, not a knowledge artifact. Already captured as a non-blocking issue in the provider-factory review. Not appropriate for library/services.yaml."
+    }
+  ],
+  "previousRound": null
+}
