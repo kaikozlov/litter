@@ -1,0 +1,58 @@
+{
+  "flowId": "ios-transport-filtering-r2",
+  "assertionIds": ["VAL-UI-002"],
+  "results": {
+    "VAL-UI-002": {
+      "status": "pass",
+      "evidence": "Transport filtering is fully implemented across all relevant iOS views. InlineAgentSelectorView and AgentPickerSheet both accept [AgentInfo] and [AgentType] availableTransports, perform isCompatible() checks using Set intersection on detectedTransports vs availableTransports, and render incompatible agents as grayed out (opacity 0.4) with 'Transport unavailable' subtitle in red (LitterTheme.danger). Incompatible agents are disabled (.disabled(!compatible)). HeaderView computes availableTransportsForServer based on server locality and SSH capability. DiscoveryView applies transport filtering during the connection flow in handleTapAsync, computing compatibleInfos before deciding whether to show the picker or auto-select.",
+      "details": [
+        {
+          "check": "InlineAgentSelectorView uses [AgentInfo] instead of [AgentType]",
+          "file": "apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+          "lines": "244-315",
+          "result": "pass",
+          "note": "InlineAgentSelectorView takes `agentInfos: [AgentInfo]` and `availableTransports: [AgentType]`. Each row is rendered via `agentRow(_:)` which calls `isCompatible(_:)` performing `!Set(info.detectedTransports).isDisjoint(with: Set(availableTransports))`. Compatible agents show transport label; incompatible agents show 'Transport unavailable' in LitterTheme.danger red, opacity 0.4, disabled."
+        },
+        {
+          "check": "AgentPickerSheet also uses transport filtering",
+          "file": "apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+          "lines": "318-395",
+          "result": "pass",
+          "note": "AgentPickerSheet takes `agentInfos: [AgentInfo]` and `availableTransports: [AgentType]`. Same `isCompatible()` logic: Set intersection on detectedTransports. Incompatible rows: opacity 0.4, 'Transport unavailable' in LitterTheme.danger, `.disabled(!compatible)`."
+        },
+        {
+          "check": "HeaderView computes and passes availableTransportsForServer",
+          "file": "apps/ios/Sources/Litter/Views/HeaderView.swift",
+          "lines": "246-270",
+          "result": "pass",
+          "note": "ConversationModelPickerPanel computes `availableTransportsForServer` (lines 246-270): local servers → [.codex] only; remote servers with SSH → all agent types; remote WebSocket-only → [.codex]. This is passed to InlineAgentSelectorView's `availableTransports` parameter (line 284). Also falls back to constructing AgentInfo from agentTypes when agentInfos is empty."
+        },
+        {
+          "check": "DiscoveryView applies transport filtering during connection flow",
+          "file": "apps/ios/Sources/Litter/Views/DiscoveryView.swift",
+          "lines": "596-620",
+          "result": "pass",
+          "note": "`handleTapAsync` computes `serverTransports` via `transportsForServer(server)` (local→[.codex], SSH→all, else→[.codex]). Then filters `compatibleInfos` using `Set(info.detectedTransports).isDisjoint(with: Set(serverTransports))` (line 609). Picker is shown only for >1 compatible types; single compatible agent is auto-selected. AgentPickerSheet also receives `transportsForServer(server)` as `availableTransports` (line 142)."
+        },
+        {
+          "check": "Rust FFI AgentInfo type bridges correctly to Swift",
+          "file": "shared/rust-bridge/codex-mobile-client/src/provider/mod.rs",
+          "lines": "92-105",
+          "result": "pass",
+          "note": "AgentInfo is a `#[derive(uniffi::Record)]` struct with fields: id, display_name, description, detected_transports (Vec<AgentType>), capabilities. In Swift this becomes AgentInfo with detectedTransports: [AgentType]. DiscoveredServer (Models/DiscoveredServer.swift line 46) stores agentInfos: [AgentInfo]. NetworkDiscovery maps rust.agentInfos through directly (line 296). AgentSelectionStore caches agentInfos per server (line 115)."
+        },
+        {
+          "check": "Auto-select works for single-compatible-agent servers",
+          "file": "apps/ios/Sources/Litter/Views/DiscoveryView.swift",
+          "lines": "612-615",
+          "result": "pass",
+          "note": "After filtering compatible agents, if compatibleTypes.count == 1, the agent is auto-selected via `AgentSelectionStore.shared.setSelectedAgentType(compatibleTypes.first, for: server.id)`. If compatibleTypes.count == 0 (all agents filtered out), the flow falls through to the existing connection attempt logic. The multi-agent picker is shown only when compatibleTypes.count > 1."
+        }
+      ]
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": ["code-inspection"],
+  "summary": "PASS: VAL-UI-002 transport filtering is fully implemented. All 6 verification checks pass. InlineAgentSelectorView and AgentPickerSheet both perform Set-based intersection between agent detectedTransports and server availableTransports, rendering incompatible agents as grayed-out with 'Transport unavailable' subtitle. HeaderView computes availableTransportsForServer based on server locality/SSH. DiscoveryView applies the same filtering before showing the agent picker or auto-selecting. Rust AgentInfo.detected_transports bridges correctly via UniFFI. Auto-select works for single-compatible-agent scenarios."
+}

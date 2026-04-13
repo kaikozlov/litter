@@ -1,15 +1,16 @@
 {
   "milestone": "multi-agent-ui",
-  "round": 1,
+  "round": 2,
   "status": "fail",
   "assertionsSummary": {
     "total": 18,
-    "passed": 12,
-    "failed": 1,
+    "passed": 13,
+    "failed": 0,
     "blocked": 5
   },
   "passedAssertions": [
     "VAL-UI-001",
+    "VAL-UI-002",
     "VAL-UI-003",
     "VAL-UI-004",
     "VAL-UI-005",
@@ -24,12 +25,7 @@
     "VAL-UI-017",
     "VAL-UI-018"
   ],
-  "failedAssertions": [
-    {
-      "id": "VAL-UI-002",
-      "reason": "Transport filtering not implemented in iOS agent picker. InlineAgentSelectorView shows all agents as fully selectable regardless of transport compatibility. No grayed-out styling or 'Transport unavailable' subtitle. The Rust AgentInfo.detected_transports field exists but is not consumed by iOS views for filtering purposes. The picker uses [AgentType] directly rather than [AgentInfo] records."
-    }
-  ],
+  "failedAssertions": [],
   "blockedAssertions": [
     {
       "id": "VAL-UI-014",
@@ -45,19 +41,17 @@
     },
     {
       "id": "VAL-UI-017",
-      "blockedBy": "Note: VAL-UI-017 passed for iOS but the cross-platform aspect cannot be verified without Android"
+      "blockedBy": "VAL-UI-017 passed for iOS but the cross-platform parity aspect cannot be verified without Android"
     },
     {
       "id": "VAL-UI-018",
-      "blockedBy": "Note: VAL-UI-018 passed for iOS but the cross-platform aspect cannot be verified without Android"
+      "blockedBy": "VAL-UI-018 passed for iOS but the cross-platform parity aspect cannot be verified without Android"
     }
   ],
   "appliedUpdates": [],
-  "previousRound": null,
-  "testingMethod": "Code inspection via flow validator subagents. iOS app built successfully (make ios-sim-fast), installed in simulator, but agent-browser cannot automate iOS Simulator apps. All verification done through source code analysis of Swift views and Rust FFI types.",
+  "previousRound": ".factory/validation/multi-agent-ui/user-testing/synthesis.json.round1.bak",
+  "testingMethod": "Code inspection via flow validator subagents. iOS app built successfully (make ios-sim-fast). VAL-UI-002 re-tested after fix-ios-transport-filtering feature and now passes. All verification done through source code analysis of Swift views and Rust FFI types.",
   "flowReports": [
-    ".factory/validation/multi-agent-ui/user-testing/flows/ios-agent-picker.json",
-    ".factory/validation/multi-agent-ui/user-testing/flows/ios-sessions-discovery.json",
-    ".factory/validation/multi-agent-ui/user-testing/flows/ios-settings-permissions.json"
+    ".factory/validation/multi-agent-ui/user-testing/flows/ios-transport-filtering-r2.json"
   ]
 }
