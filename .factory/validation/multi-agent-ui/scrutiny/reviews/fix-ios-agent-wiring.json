@@ -1,0 +1,40 @@
+{
+  "featureId": "fix-ios-agent-wiring",
+  "reviewedAt": "2026-04-13T01:15:00Z",
+  "commitId": "958745b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix adequately addresses all 4 blocking issues from the prior review. Agent type data now flows from DiscoveredServer.agentTypes through AgentSelectionStore to HeaderView, ConversationModelPickerPanel, and DiscoveryView. The agentTypeFilter is properly wired from SessionsScreen through SessionsModel to SessionsDerivation.build(). AgentPickerSheet is integrated into the DiscoveryView connection flow with correct multi-agent/single-agent branching. Per-agent settings are keyed by AgentType.persistentKey instead of a flat 'default' key, and transport preference UI has been added for Pi and Droid agents. The build compiles successfully. No new blocking issues introduced.",
+    "issues": [
+      {
+        "file": "apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+        "line": 95,
+        "severity": "non_blocking",
+        "description": "The decoding logic in AgentSelectionStore.init() has a confusing and likely buggy filter: `keys.compactMap { AgentType.fromPersistentKey($0) == .codex && $0 != \"codex\" ? nil : AgentType.fromPersistentKey($0) }`. This double-calls fromPersistentKey for each key. The intent appears to be 'filter out keys that decode to .codex but weren't actually \"codex\"' (unknown variant fallback), but the logic filters out any non-\"codex\" key that maps to .codex (which is none, since only \"codex\" maps to .codex). The condition `AgentType.fromPersistentKey($0) == .codex && $0 != \"codex\"` is always false for known keys and only true for unknown keys (which default to .codex). The effect: unknown keys produce nil (silently dropped) while .codex entries are preserved. This is actually correct behavior but the code is confusing — a simpler approach would be `keys.compactMap { key in let t = AgentType.fromPersistentKey(key); return (t == .codex && key != \"codex\") ? nil : t }` or just filter unknown keys explicitly."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/SessionsDerivation.swift",
+        "line": 68,
+        "severity": "non_blocking",
+        "description": "The agentTypeFilter in SessionsDerivation filters threads by the server's selected agent type (from AgentSelectionStore) or by the server's detected agent types (from discovery cache). However, this means the filter is based on server-level metadata, not on intrinsic per-session agent type data. Sessions created before multi-agent support would still match based on the server's current detected agents rather than the agent type that actually created them. This is a pre-existing limitation noted in the original review (non-blocking issue #1: 'Session badges derive solely from user selection, not from intrinsic session data')."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/DiscoveryView.swift",
+        "line": 536,
+        "severity": "non_blocking",
+        "description": "In handleTapAsync, after the agent picker is shown for a multi-agent server and the user makes a selection, `proceedWithConnection(server)` is called. However, the proceedWithConnection method uses `server.agentTypes` directly but does not pass the selected agent type to the connection logic. The selected agent is persisted in AgentSelectionStore, but connectToServer() and the connection choice dialog don't receive the agent selection as a parameter. The selected agent type is not yet used when creating the actual session — it's stored but not passed through the Rust FFI session creation path. This is consistent with the original non-blocking issue (Pi thinking level / Droid autonomy controls are no-ops that change local state but never communicate to the Rust layer)."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/SettingsView.swift",
+        "line": 151,
+        "severity": "non_blocking",
+        "description": "Per-agent settings rows are hardcoded to [Codex, Pi Native, Droid Native] rather than reflecting the agents the user has actually connected to. This is a pre-existing design choice — showing all possible agent types upfront is reasonable for settings but means unused agents show settings rows. Not a regression from the fix."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": ".factory/validation/multi-agent-ui/scrutiny/reviews/ios-agent-picker-and-badges.json",
+  "summary": "PASS. The fix successfully addresses all 4 blocking issues: (1) agentTypes now flow from DiscoveredServer.agentTypes through AgentSelectionStore to HeaderView, ConversationModelPickerPanel, and DiscoveryView — no more hardcoded [.codex]; (2) agentTypeFilter is wired from SessionsScreen → SessionsModel → SessionsDerivation.build() with correct filtering logic; (3) AgentPickerSheet is integrated into DiscoveryView's connection flow via sheet(item:) binding, with multi-agent detection and single-agent auto-select; (4) Per-agent settings use AgentType.persistentKey for permission policy and include transport preference UI for Pi and Droid. The build compiles successfully. Minor non-blocking concerns include a confusing decoding filter in AgentSelectionStore.init (functionally correct but hard to read), the session filter being based on server-level metadata rather than intrinsic per-session agent data (pre-existing), and the selected agent type not yet flowing through to actual session creation (pre-existing no-op pattern). None of these regress the fix or block the feature."
+}
