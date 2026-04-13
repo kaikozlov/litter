@@ -20,14 +20,7 @@ struct HeaderView: View {
 
     /// The available agent types for the current server from discovery data.
     private var availableAgentTypes: [AgentType] {
-        // Derive from server snapshot or fallback to Codex-only
-        guard let serverId = thread.key.serverId as String? else {
-            return [.codex]
-        }
-        // Check discovered server data for this server
-        let discovered = appModel.snapshot?.servers.first(where: { $0.serverId == serverId })
-        // If the server has agent type information, use it; otherwise default to Codex
-        return [.codex]
+        AgentSelectionStore.shared.agentTypes(for: thread.key.serverId)
     }
 
     /// The currently selected agent type for this server.
@@ -237,7 +230,7 @@ struct ConversationModelPickerPanel: View {
 
     /// Available agent types for the current server.
     private var availableAgentTypes: [AgentType] {
-        [.codex]
+        AgentSelectionStore.shared.agentTypes(for: thread.key.serverId)
     }
 
     var body: some View {

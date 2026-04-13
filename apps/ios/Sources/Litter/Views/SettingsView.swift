@@ -107,67 +107,104 @@ struct SettingsView: View {
     /// agent type the user has connected to.
     private var agentSettingsSection: some View {
         Section {
-            // Permission policy picker
-            Menu {
-                ForEach([
-                    AgentPermissionPolicy.autoApproveAll,
-                    .autoRejectHighRisk,
-                    .promptAlways,
-                ], id: \.displayName) { policy in
-                    Button {
-                        AgentPermissionStore.shared.setPermissionPolicy(
-                            policy, for: "default"
-                        )
-                    } label: {
-                        HStack {
-                            Label(policy.displayName, systemImage: policy.icon)
-                            if currentPermissionPolicy == policy {
-                                Image(systemName: "checkmark")
+            // Per-agent permission policy rows
+            ForEach([
+                AgentType.codex,
+                .piNative,
+                .droidNative,
+            ]) { agentType in
+                let policyKey = agentType.persistentKey
+                let currentPolicy = AgentPermissionStore.shared.permissionPolicy(for: policyKey)
+
+                Menu {
+                    ForEach([
+                        AgentPermissionPolicy.autoApproveAll,
+                        .autoRejectHighRisk,
+                        .promptAlways,
+                    ], id: \.displayName) { policy in
+                        Button {
+                            AgentPermissionStore.shared.setPermissionPolicy(
+                                policy, for: policyKey
+                            )
+                        } label: {
+                            HStack {
+                                Label(policy.displayName, systemImage: policy.icon)
+                                if currentPolicy == policy {
+                                    Image(systemName: "checkmark")
+                                }
                             }
                         }
                     }
-                }
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: currentPermissionPolicy.icon)
-                        .foregroundColor(LitterTheme.accent)
-                        .frame(width: 20)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Permission Policy")
-                            .litterFont(.subheadline)
-                            .foregroundColor(LitterTheme.textPrimary)
-                        Text(currentPermissionPolicy.description)
-                            .litterFont(.caption)
-                            .foregroundColor(LitterTheme.textSecondary)
+                } label: {
+                    HStack(spacing: 10) {
+                        AgentBadgeView(agentType: agentType, size: 14, showsLabel: false)
+                            .frame(width: 20)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(agentType.displayName) Permissions")
+                                .litterFont(.subheadline)
+                                .foregroundColor(LitterTheme.textPrimary)
+                            Text(currentPolicy.shortName)
+                                .litterFont(.caption)
+                                .foregroundColor(LitterTheme.textSecondary)
+                        }
                     }
                 }
+                .listRowBackground(LitterTheme.surface.opacity(0.6))
             }
-            .listRowBackground(LitterTheme.surface.opacity(0.6))
 
-            // Agent type badges summary
-            HStack(spacing: 12) {
-                ForEach([
-                    AgentType.codex,
-                    .piNative,
-                    .droidNative,
-                ]) { agentType in
-                    VStack(spacing: 4) {
-                        AgentBadgeView(agentType: agentType, size: 16, showsLabel: true)
-                        Text(AgentPermissionStore.shared.permissionPolicy(for: agentType.persistentKey).shortName)
-                            .litterFont(.caption2)
-                            .foregroundColor(LitterTheme.textSecondary)
+            // Per-agent transport preference rows
+            ForEach([
+                AgentType.piNative,
+                .droidNative,
+            ]) { agentType in
+                let transportKey = agentType.persistentKey
+                let currentTransport = AgentPermissionStore.shared.transportPreference(for: transportKey)
+
+                Menu {
+                    Button("Auto") {
+                        AgentPermissionStore.shared.setTransportPreference(nil, for: transportKey)
+                    }
+                    if agentType.isPi {
+                        Button("Native (Pi RPC)") {
+                            AgentPermissionStore.shared.setTransportPreference(.piNative, for: transportKey)
+                        }
+                        Button("ACP (via pi-acp)") {
+                            AgentPermissionStore.shared.setTransportPreference(.piAcp, for: transportKey)
+                        }
+                    } else if agentType.isDroid {
+                        Button("Native (Factory API)") {
+                            AgentPermissionStore.shared.setTransportPreference(.droidNative, for: transportKey)
+                        }
+                        Button("ACP (via droid exec)") {
+                            AgentPermissionStore.shared.setTransportPreference(.droidAcp, for: transportKey)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.right.arrow.left")
+                            .foregroundColor(LitterTheme.accent)
+                            .frame(width: 20)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(agentType.displayName) Transport")
+                                .litterFont(.subheadline)
+                                .foregroundColor(LitterTheme.textPrimary)
+                            Text(transportPreferenceLabel(currentTransport))
+                                .litterFont(.caption)
+                                .foregroundColor(LitterTheme.textSecondary)
+                        }
                     }
                 }
+                .listRowBackground(LitterTheme.surface.opacity(0.6))
             }
-            .listRowBackground(LitterTheme.surface.opacity(0.6))
         } header: {
             Text("Agent Settings")
                 .foregroundColor(LitterTheme.textSecondary)
         }
     }
 
-    private var currentPermissionPolicy: AgentPermissionPolicy {
-        AgentPermissionStore.shared.permissionPolicy(for: "default")
+    private func transportPreferenceLabel(_ agentType: AgentType?) -> String {
+        guard let agentType else { return "Auto" }
+        return agentType.displayName + " (" + agentType.transportLabel + ")"
     }
 
     // MARK: - Font Section

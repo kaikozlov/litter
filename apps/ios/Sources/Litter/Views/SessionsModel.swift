@@ -27,6 +27,7 @@ final class SessionsModel {
     @ObservationIgnored private weak var appModel: AppModel?
     @ObservationIgnored private weak var appState: AppState?
     @ObservationIgnored private var searchQuery = ""
+    @ObservationIgnored private var agentTypeFilter: AgentType?
     @ObservationIgnored private var hasInitializedState = false
     @ObservationIgnored private var observationGeneration = 0
     @ObservationIgnored private var frozenMostRecentThreadOrder: [ThreadKey]?
@@ -47,6 +48,12 @@ final class SessionsModel {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed != searchQuery else { return }
         searchQuery = trimmed
+        refreshState()
+    }
+
+    func updateAgentTypeFilter(_ filter: AgentType?) {
+        guard filter != agentTypeFilter else { return }
+        agentTypeFilter = filter
         refreshState()
     }
 
@@ -103,6 +110,7 @@ final class SessionsModel {
                 sessions: appSnapshot?.sessionSummaries ?? [],
                 selectedServerFilterId: selectedServerFilterId,
                 showOnlyForks: showOnlyForks,
+                agentTypeFilter: agentTypeFilter,
                 workspaceSortMode: workspaceSortMode,
                 searchQuery: currentSearchQuery,
                 frozenMostRecentOrder: nextFrozenMostRecentThreadOrder

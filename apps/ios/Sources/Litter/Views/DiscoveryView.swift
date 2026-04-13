@@ -17,6 +17,8 @@ struct DiscoveryView: View {
     @State private var autoSSHStarted = false
     @State private var connectingServer: DiscoveredServer?
     @State private var wakingServer: DiscoveredServer?
+    @State private var agentPickerServer: DiscoveredServer?
+    @State private var agentPickerSelection: AgentType?
     @State private var pendingAutoNavigateServerId: String?
     @State private var pendingAutoNavigateServer: DiscoveredServer?
     @State private var connectError: String?
@@ -112,6 +114,20 @@ struct DiscoveryView: View {
                 sshServer = nil
                 Task { await connectToServer(server, targetOverride: target) }
             }
+        }
+        .sheet(item: $agentPickerServer) { server in
+            AgentPickerSheet(
+                agentTypes: server.agentTypes,
+                selectedAgentType: $agentPickerSelection
+            )
+        }
+        .onChange(of: agentPickerSelection) { _, selected in
+            guard let server = agentPickerServer, let selected else { return }
+            AgentSelectionStore.shared.setSelectedAgentType(selected, for: server.id)
+            agentPickerServer = nil
+            agentPickerSelection = nil
+            // Continue the connection flow with the selected agent
+            Task { await proceedWithConnection(server) }
         }
         .confirmationDialog(
             connectionChoiceServer.map { "Connect to \($0.name)" } ?? "Choose Connection",
@@ -486,12 +502,14 @@ struct DiscoveryView: View {
     }
 
     /// Returns agent types detected for a discovered server.
-    /// Uses the AppDiscoveredServer data from the Rust discovery layer.
+    /// Uses the DiscoveredServer's agentTypes field populated from the Rust FFI
+    /// discovery layer. Updates the shared AgentSelectionStore for use by other views.
     private func discoveryAgentTypes(for server: DiscoveredServer) -> [AgentType] {
-        // Query the Rust discovery bridge for agent type information
-        // For now, default to Codex — agent probing data flows through the
-        // reconcileServers call which populates agentTypes on AppDiscoveredServer
-        return [.codex]
+        let types = server.agentTypes
+        // Keep the shared registry in sync so HeaderView/ConversationModelPickerPanel
+        // can look up agent types without direct access to NetworkDiscovery.
+        AgentSelectionStore.shared.updateAgentTypes(types, for: server.id)
+        return types
     }
 
     // MARK: - Actions
@@ -512,14 +530,59 @@ struct DiscoveryView: View {
         onServerSelected?(server)
     }
 
-    @MainActor
-    private func handleTapAsync(_ server: DiscoveredServer) async {
+    /// Continue connection flow after agent selection (or auto-selected).
+    /// Checks if the server is already connected; if not, initiates connection.
+    private func proceedWithConnection(_ server: DiscoveredServer) async {
         if appModel.snapshot?.servers.first(where: { $0.serverId == server.id })?.health == .connected {
             navigateAfterConnect(server)
             return
         }
 
+        if server.requiresConnectionChoice {
+            connectionChoiceServer = server
+        } else if server.hasCodexServer, server.connectionTarget != nil {
+            await connectToServer(server)
+        } else if server.canConnectViaSSH {
+            sshServer = server.withConnectionPreference(.ssh)
+        } else {
+            connectError = "Server did not respond after wake attempt. Enable Wake for network access on the Mac."
+        }
+    }
+
+    @MainActor
+    private func handleTapAsync(_ server: DiscoveredServer) async {
+        // Ensure the agent types registry is updated for this server.
+        AgentSelectionStore.shared.updateAgentTypes(server.agentTypes, for: server.id)
+
+        if appModel.snapshot?.servers.first(where: { $0.serverId == server.id })?.health == .connected {
+            // Already connected — check if agent picker is needed
+            let needsPicker = server.agentTypes.count > 1
+                && AgentSelectionStore.shared.selectedAgentType(for: server.id) == nil
+            if needsPicker {
+                agentPickerServer = server
+                agentPickerSelection = nil
+            } else {
+                navigateAfterConnect(server)
+            }
+            return
+        }
+
         let prepared = await prepareServerForSelection(server)
+
+        // Check if multi-agent picker should be shown before connecting
+        let needsPicker = server.agentTypes.count > 1
+            && AgentSelectionStore.shared.selectedAgentType(for: server.id) == nil
+        if needsPicker {
+            agentPickerServer = server
+            agentPickerSelection = nil
+            return
+        }
+
+        // Auto-select single agent
+        if server.agentTypes.count == 1 {
+            AgentSelectionStore.shared.setSelectedAgentType(server.agentTypes.first, for: server.id)
+        }
+
         if prepared.server.requiresConnectionChoice {
             connectionChoiceServer = prepared.server
         } else if prepared.server.hasCodexServer, prepared.server.connectionTarget != nil {

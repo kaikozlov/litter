@@ -112,6 +112,7 @@ struct SessionsScreen: View {
             .task {
                 sessionsModel.bind(appModel: appModel, appState: appState)
                 sessionsModel.updateSearchQuery(debouncedSessionSearchQuery)
+                sessionsModel.updateAgentTypeFilter(agentTypeFilter)
                 await loadSessionsIfNeeded()
             }
             .onAppear {
@@ -149,6 +150,9 @@ struct SessionsScreen: View {
             }
             .onChange(of: debouncedSessionSearchQuery) { _, next in
                 sessionsModel.updateSearchQuery(next)
+            }
+            .onChange(of: agentTypeFilter) { _, next in
+                sessionsModel.updateAgentTypeFilter(next)
             }
             .onChange(of: derived.workspaceGroupIDs) { _, ids in
                 let idSet: Set<String> = Set(ids)

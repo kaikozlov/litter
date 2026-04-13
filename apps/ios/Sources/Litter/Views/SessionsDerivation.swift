@@ -13,6 +13,7 @@ enum SessionsDerivation {
         sessions: [AppSessionSummary],
         selectedServerFilterId: String?,
         showOnlyForks: Bool,
+        agentTypeFilter: AgentType?,
         workspaceSortMode: WorkspaceSortMode,
         searchQuery: String,
         frozenMostRecentOrder: [ThreadKey]?
@@ -64,6 +65,19 @@ enum SessionsDerivation {
             }
             if showOnlyForks && !thread.isFork {
                 return false
+            }
+            if let agentTypeFilter {
+                let selectedAgent = AgentSelectionStore.shared.selectedAgentType(for: thread.serverId)
+                let serverAgentTypes = AgentSelectionStore.shared.agentTypes(for: thread.serverId)
+                // Match if the server's selected agent matches the filter, or
+                // if no explicit selection, match when the server's detected types
+                // include the filter type.
+                if let selected = selectedAgent {
+                    if selected != agentTypeFilter { return false }
+                } else {
+                    // No explicit selection: include if the server has this agent type
+                    if !serverAgentTypes.contains(agentTypeFilter) { return false }
+                }
             }
             if searchQuery.isEmpty {
                 return true

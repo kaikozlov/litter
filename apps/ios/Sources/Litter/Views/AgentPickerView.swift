@@ -82,8 +82,43 @@ final class AgentSelectionStore {
 
     private let defaults = UserDefaults.standard
     private static let selectedAgentKey = "litter.selectedAgent"
+    private static let serverAgentTypesKey = "litter.serverAgentTypes"
 
-    private init() {}
+    /// In-memory cache of detected agent types per server, updated from discovery.
+    private var serverAgentTypesCache: [String: [AgentType]] = [:]
+
+    private init() {
+        // Load persisted agent types cache
+        if let data = defaults.data(forKey: Self.serverAgentTypesKey),
+           let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) {
+            serverAgentTypesCache = decoded.mapValues { keys in
+                keys.compactMap { AgentType.fromPersistentKey($0) == .codex && $0 != "codex" ? nil : AgentType.fromPersistentKey($0) }
+            }
+        }
+    }
+
+    /// Update the detected agent types for a server (called from discovery reconciliation).
+    func updateAgentTypes(_ agentTypes: [AgentType], for serverId: String) {
+        let current = serverAgentTypesCache[serverId] ?? []
+        if current != agentTypes {
+            serverAgentTypesCache[serverId] = agentTypes
+            persistAgentTypesCache()
+        }
+    }
+
+    /// Returns the detected agent types for a server, defaulting to [.codex].
+    func agentTypes(for serverId: String) -> [AgentType] {
+        serverAgentTypesCache[serverId] ?? [.codex]
+    }
+
+    private func persistAgentTypesCache() {
+        let encoded = serverAgentTypesCache.mapValues { types in
+            types.map { $0.persistentKey }
+        }
+        if let data = try? JSONEncoder().encode(encoded) {
+            defaults.set(data, forKey: Self.serverAgentTypesKey)
+        }
+    }
 
     /// Returns the selected `AgentType` for the given server, or nil if no selection has been made.
     func selectedAgentType(for serverId: String) -> AgentType? {
