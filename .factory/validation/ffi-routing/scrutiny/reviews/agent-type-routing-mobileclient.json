@@ -1,0 +1,22 @@
+{
+  "featureId": "agent-type-routing-mobileclient",
+  "reviewedAt": "2026-04-13T23:20:00.000Z",
+  "commitId": "e2be830",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation adds `connect_remote_over_ssh_with_agent_type()` to `MobileClient` with clean routing logic: Codex/None delegates to existing `connect_remote_over_ssh()` unchanged, while Pi/Droid/ACP types establish SSH, call the provider factory, then connect via `from_provider()` with the SSH client stored for cleanup. The `ServerSession::from_provider()` signature was updated to accept `Option<Arc<SshClient>>` for cleanup, with all 5 existing call sites updated to pass `None`. Error handling is thorough — each failure point (SSH connect, factory, session) properly cleans up SSH, updates store health, and clears connection progress. Six unit tests cover all VAL-ROUTE assertions. One minor observation: `ipc_socket_path_override` is accepted as a parameter but silently ignored in the provider-backed path (it's only meaningful for Codex WebSocket tunnel sessions), which is correct behavior but could benefit from a code comment explaining why.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/mobile_client/mod.rs",
+        "line": 739,
+        "severity": "non_blocking",
+        "description": "The `ipc_socket_path_override` parameter is accepted but never used in the provider-backed agent type path. When `agent_type` is Pi/Droid/ACP, the value is silently discarded. This is functionally correct — IPC socket bridging is a Codex-specific concept — but a comment explaining why it's intentionally unused would aid future readers. The parameter IS correctly forwarded when the method delegates to `connect_remote_over_ssh()` for Codex/None (line 754), so the actual behavior is correct."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Clean implementation of agent-type routing in MobileClient. The method correctly delegates Codex/None to the existing path and routes Pi/Droid/ACP types through the provider factory with proper SSH lifecycle management. All 4 VAL-ROUTE assertions are covered by 6 tests. The only minor note is that `ipc_socket_path_override` is unused in the provider path (correct behavior, could use a comment). Worker followed the rust-backend-worker skill procedure exactly."
+}

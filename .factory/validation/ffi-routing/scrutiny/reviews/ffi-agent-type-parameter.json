@@ -1,0 +1,28 @@
+{
+  "featureId": "ffi-agent-type-parameter",
+  "reviewedAt": "2026-04-13T23:45:00.000Z",
+  "commitId": "d3af6d5",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation correctly adds `agent_type: Option<AgentType>` to both `SshBridge::ssh_connect_remote_server()` and `SshBridge::ssh_start_remote_server_connect()`. The routing logic is sound: None/Codex follows the existing guided SSH connect path unchanged, while non-Codex agents (Pi/Droid/GenericAcp) route through `run_provider_ssh_connect()` which delegates to `MobileClient::connect_remote_over_ssh_with_agent_type()`. The `is_non_codex_agent()` helper correctly enumerates all non-Codex variants. The `mark_progress_failure()` function was removed since the error path was simplified — the provider failure branch now clears progress with `None` instead of mutating step state, which is appropriate since provider sessions don't have Codex-style step progress. UniFFI bindings were regenerated and both Swift and Kotlin bindings include the `agentType` parameter. Tests cover all routing branches and parameter acceptance.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/ffi/ssh.rs",
+        "line": 294,
+        "severity": "non_blocking",
+        "description": "ssh_connect_remote_server() always calls connect_remote_over_ssh_with_agent_type() regardless of agent_type value. This works because connect_remote_over_ssh_with_agent_type() internally falls back to connect_remote_over_ssh() for None/Codex, but it means the FFI layer delegates all routing to MobileClient rather than making the branching decision at the FFI level (unlike ssh_start_remote_server_connect which branches at FFI level). This is a design inconsistency but not a bug — both approaches produce correct results."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/ffi/ssh.rs",
+        "line": 897,
+        "severity": "non_blocking",
+        "description": "run_provider_ssh_connect() passes None for ipc_socket_path_override. This is correct per the feature description (no IPC for provider sessions) and matches the mission AGENTS.md guidance, but it's worth noting this is hardcoded rather than passed through. If provider sessions ever need IPC, this would need updating."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Clean implementation of agent_type parameter threading through SshBridge FFI. Both ssh_connect_remote_server() and ssh_start_remote_server_connect() now accept Option<AgentType> with backward-compatible defaults. Routing logic correctly branches between Codex guided bootstrap and provider factory path. All 7 is_non_codex_agent unit tests cover every AgentType variant. Integration tests verify parameter acceptance on both methods and health updates on provider failure. UniFFI bindings regenerated successfully — Swift gets agentType: AgentType? and Kotlin gets agentType: AgentType?. The only minor observation is an inconsistency in where the routing decision is made: ssh_start_remote_server_connect branches at the FFI level while ssh_connect_remote_server delegates branching to MobileClient. Both are correct but follow different patterns."
+}

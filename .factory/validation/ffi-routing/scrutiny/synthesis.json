@@ -1,0 +1,28 @@
+{
+  "milestone": "ffi-routing",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib", "exitCode": 0 },
+    "typecheck": { "passed": true, "command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml", "exitCode": 0 },
+    "lint": { "passed": true, "command": "cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml -- -D warnings", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add a note that IPC socket path is intentionally unused for provider-backed agent sessions (Pi/Droid/ACP). Currently ipc_socket_path_override is silently discarded in the provider path, which is correct but not explicitly documented.",
+      "evidence": "Both agent-type-routing-mobileclient and ffi-agent-type-parameter reviews noted ipc_socket_path_override being unused in provider path. Hardcoded None in run_provider_ssh_connect().",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": null
+}
