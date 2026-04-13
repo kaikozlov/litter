@@ -1,0 +1,98 @@
+{
+  "featureId": "ios-agent-picker-and-badges",
+  "reviewedAt": "2026-04-12T23:55:00Z",
+  "commitId": "cd22ddc",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds extensive UI scaffolding for multi-agent support across 10 files (828 insertions). The code quality is generally good — proper use of UniFFI types, SwiftUI patterns, dark theme consistency, and thin Swift layers. However, several critical integration gaps prevent the feature from actually working end-to-end: the agent type data pipeline is stubbed out (always returns [.codex]), the agent type filter doesn't actually filter sessions, and the AgentPickerSheet for connection flow is never invoked. The feature builds and compiles but the core assertions (VAL-UI-001, VAL-UI-003, VAL-UI-004, VAL-UI-005, VAL-UI-010, VAL-UI-012, VAL-UI-013) cannot be verified as functional because the data flows are incomplete.",
+    "issues": [
+      {
+        "file": "apps/ios/Sources/Litter/Views/HeaderView.swift",
+        "line": 30,
+        "severity": "blocking",
+        "description": "availableAgentTypes in HeaderView fetches the discovered server snapshot at line 28 but then ignores it, always returning [.codex] at line 30. This means VAL-UI-001 (agent picker displays available agents) and VAL-UI-010 (agent picker updates on detection changes) cannot work. The discovered server's agentTypes field is available from NetworkDiscovery but never read here. Should be: `return discovered?.agentTypes ?? [.codex]` or similar, using the DiscoveredServer model's agentTypes field."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/HeaderView.swift",
+        "line": 240,
+        "severity": "blocking",
+        "description": "ConversationModelPickerPanel.availableAgentTypes is hardcoded to [.codex], so the inline agent selector is never shown (the `availableAgentTypes.count > 1` guard at line 246 is always false). This blocks VAL-UI-001 and VAL-UI-012."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/DiscoveryView.swift",
+        "line": 490,
+        "severity": "blocking",
+        "description": "discoveryAgentTypes(for:) always returns [.codex] with a comment saying 'for now'. The server.agentTypes field is available from the DiscoveredServer model (populated from Rust FFI via NetworkDiscovery) but is ignored. This blocks VAL-UI-013 (discovery view shows per-server agent availability). Should use `server.agentTypes` directly."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/SessionsScreen.swift",
+        "line": 31,
+        "severity": "blocking",
+        "description": "agentTypeFilter is declared as @State and the filter chip UI exists (lines 503-525), but the filter value is never passed to SessionsDerivation.build() in SessionsModel.swift (line 102-108). The session list is never filtered by agent type. The 'Clear' button clears agentTypeFilter but it had no effect in the first place. This blocks VAL-UI-008 (session history lists past Pi/Droid sessions filtered by agent)."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+        "line": 226,
+        "severity": "blocking",
+        "description": "AgentPickerSheet is defined (for connection flow agent selection) but is never referenced anywhere in the codebase — not in DiscoveryView, SessionsScreen, or any connection flow code. The multi-agent connection flow (connect → select agent → start session, VAL-UI-012) has no integration point. The sheet exists but is dead code."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/SessionsScreen.swift",
+        "line": 1239,
+        "severity": "non_blocking",
+        "description": "agentBadgeType(for:) derives the badge solely from AgentSelectionStore (user's persisted selection for the server). It does not use any intrinsic agent type from the session itself. Sessions created before this feature shipped would show no badge even if they were Pi/Droid sessions. The Rust AppSessionSummary/ThreadSnapshot does not carry an agent type field, so this may be a Rust-side gap rather than a Swift issue."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+        "line": 5,
+        "severity": "non_blocking",
+        "description": "@retroactive Codable conformance on AgentType uses a manual rawValueMap array with linear search. If Rust adds a new AgentType variant, the Swift Codable will silently fall back to .codex on decode instead of failing fast. This is acceptable for now but fragile — consider adding a runtime assertion or at least a log warning on unknown keys."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+        "line": 239,
+        "severity": "non_blocking",
+        "description": "ConversationModelPickerPanel.availableAgentTypes is also hardcoded [.codex], duplicating the same issue as HeaderView line 30. Both should derive from a single source of truth."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/SettingsView.swift",
+        "line": 155,
+        "severity": "non_blocking",
+        "description": "Per-agent settings section always shows the same three agent badges (Codex, Pi, Droid) with hardcoded types, rather than reflecting the agents the user has actually connected to. The permission policy only stores/reads a 'default' key — it's not truly per-agent yet. Transport preference UI is absent from Settings despite AgentPermissionStore having transportPreference methods."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+        "line": 289,
+        "severity": "non_blocking",
+        "description": "PiThinkingLevelPicker stores the thinking level via @AppStorage('piThinkingLevel') but the onLevelChanged callback is a no-op ({ _ in }). The thinking level is never communicated to the Rust layer or used in session creation. Same pattern for DroidAutonomyControl. These controls change local state but have no effect on actual agent behavior."
+      },
+      {
+        "file": "apps/ios/Litter.xcodeproj/project.pbxproj",
+        "line": 1,
+        "severity": "non_blocking",
+        "description": "The project.pbxproj was hand-edited to add the new files instead of regenerating from project.yml via 'make xcgen'. The handoff notes a pre-existing duplicate file reference warning. Per CLAUDE.md: 'project.yml is the source of truth for project generation; regenerate Litter.xcodeproj instead of hand-editing project files.'"
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "UniFFI-generated enums in Swift don't have rawValue — they require custom Codable/Identifiable conformance for ForEach and UserDefaults persistence. The platform-ui-worker skill does not mention this pattern, which the worker had to figure out. The worker's skillFeedback.suggestedChanges confirms this gap.",
+      "evidence": "AgentPickerView.swift lines 5-74 add @retroactive Codable and @retroactive Identifiable conformance with manual rawValueMap for persistence."
+    },
+    {
+      "area": "conventions",
+      "observation": "The AppServerSnapshot (Rust UniFFI record in store/boundary.rs) does not carry agent_types, meaning connected servers cannot report their available agents through the normal snapshot path. iOS code must bridge between DiscoveredServer.agentTypes (discovery-time data) and AppServerSnapshot (runtime data). AGENTS.md doesn't document this split or the pattern for bridging discovery data into runtime views.",
+      "evidence": "HeaderView.swift lines 22-31 show the worker attempting to derive agent types from snapshot servers but falling back to [.codex] because AppServerSnapshot has no agent_types field."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The per-agent permission policy and transport preference are stored locally in UserDefaults via AgentPermissionStore, not in the Rust store. This follows the CLAUDE.md guideline of 'Platform code should only own platform persistence,' but the architecture doc doesn't mention this pattern. If Android needs the same settings, they would need to be moved to Rust.",
+      "evidence": "AgentPickerView.swift AgentPermissionStore class, SettingsView.swift uses AgentPermissionStore.shared"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "The feature adds well-structured UI scaffolding for multi-agent support with proper SwiftUI patterns, dark theme consistency, and correct UniFFI type usage. However, three blocking issues prevent it from being functionally complete: (1) Agent type data is hardcoded to [.codex] in HeaderView, ConversationModelPickerPanel, and DiscoveryView — the Rust discovery pipeline provides agentTypes but the Swift code ignores it; (2) The agent type filter chip in SessionsScreen doesn't actually filter sessions — the filter value is never passed to the session derivation; (3) AgentPickerSheet for the connection flow is dead code, never invoked. These gaps mean VAL-UI-001, VAL-UI-003, VAL-UI-004, VAL-UI-005, VAL-UI-010, VAL-UI-012, and VAL-UI-013 cannot be verified as working. The non-blocking issues include no-op thinking/autonomy controls, per-agent settings not truly per-agent, and project.pbxproj hand-edited instead of regenerated."
+}
