@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  Native iOS + Android client for <a href="https://github.com/openai/codex">Codex</a>. Connect to local or remote servers, manage sessions, and run agentic coding workflows from your phone.
+  Native iOS + Android client for agentic coding. Connect to <a href="https://github.com/openai/codex">Codex</a>, <a href="https://pi.ai">Pi</a>, <a href="https://factory.ai">Factory Droid</a>, or any ACP-compatible agent on local or remote servers. Manage sessions, pick agents, and run agentic coding workflows from your phone.
 </p>
 
 <p align="center">
@@ -51,6 +51,8 @@ tools/scripts/             Cross-platform helper scripts
 ## Architecture
 
 Both platforms share a single Rust core (`codex-mobile-client`) via UniFFI-generated bindings. Platform code (Swift/Kotlin) stays thin: UI, permissions, notifications, and platform APIs only. Session state, streaming, hydration, discovery, and auth logic live in Rust.
+
+The Rust core implements a provider abstraction (`ProviderTransport` trait) supporting multiple agent protocols: Codex (in-process/WebSocket), Pi (native JSONL RPC + ACP), Droid (native Factory API JSON-RPC + ACP), and any generic ACP agent. Auto-detection probes remote SSH hosts for available agents, and the iOS UI shows an agent picker with transport compatibility filtering.
 
 ## Make Targets
 
