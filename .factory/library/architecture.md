@@ -1,49 +1,89 @@
-# Architecture: Multi-Agent Support
+# Architecture: Multi-Agent Connection Routing
 
 ## Overview
 
-Litter connects mobile devices (iOS/Android) to remote coding agents. The shared Rust layer (`codex-mobile-client`) handles all agent communication, state management, and protocol translation. Platform code (Swift/Kotlin) only handles UI rendering and platform-specific services.
+This mission wires the existing provider layer into the connection flow. The provider transports (PiNativeTransport, PiAcpTransport, DroidNativeTransport, DroidAcpTransport) are fully built. The gap is the routing bridge between the user's agent selection and the transport instantiation.
 
-## Provider Architecture
+## Connection Flow (Current — Codex Only)
 
-### Provider Transport Trait
-All agent communication goes through a `ProviderTransport` trait that abstracts:
-- Connection establishment (SSH+PTY, WebSocket, in-process)
-- Request/response RPC
-- Event streaming (server-sent notifications)
-- Session lifecycle (list, load, resume)
-- Disconnection and reconnection
-
-### Provider Event Pipeline
 ```
-Agent Protocol → ProviderTransport → ProviderEvent → UiEvent → AppStoreReducer → HydratedConversationItem → Platform UI
+iOS DiscoveryView tap
+  → connectToServer() → connectViaSSH()
+    → appModel.ssh.sshStartRemoteServerConnect() (FFI)
+      → Rust SshBridge::ssh_start_remote_server_connect()
+        → run_guided_ssh_connect()
+          → ssh_client.bootstrap_codex_server()
+          → finish_connect_remote_over_ssh() (WebSocket tunnel)
+            → ServerSession::connect_remote()
 ```
 
-### Agent Types
-- **Codex**: Existing Codex app-server protocol (JSON-RPC over WebSocket). Two modes: in-process and remote via SSH tunnel.
-- **Pi (ACP)**: Via `pi-acp` adapter — ACP JSON-RPC over SSH PTY
-- **Pi (Native)**: Direct Pi JSONL RPC over SSH PTY (`pi --mode rpc`)
-- **Droid (ACP)**: Via `droid exec --output-format acp` — native ACP over SSH PTY
-- **Droid (Native)**: Via `droid exec --stream-jsonrpc` — Factory API JSON-RPC over SSH PTY
-- **Generic ACP**: Any ACP-compatible agent over SSH PTY
+## Connection Flow (After — Agent-Type Aware)
 
-### Key Modules
-- `src/provider/` — Provider trait, ProviderEvent enum, agent type definitions
-- `src/provider/codex.rs` — Codex provider (wraps existing AppServerClient)
-- `src/provider/mapping.rs` — ServerNotification/ServerRequest → ProviderEvent → UiEvent mapping
-- `src/provider/error_handling.rs` — Error handling tests with ErrorMockProvider
-- `src/provider/acp/` — (Future) Universal ACP client
-- `src/provider/pi/` — (Future) Pi native RPC client
-- `src/provider/droid/` — (Future) Droid native Factory API client
-- `src/transport/` — Transport error types, connection state (unchanged)
-- `src/session/` — ServerSession refactored to use ProviderTransport
-- `src/store/` — AppStoreReducer (unchanged — receives UiEvent regardless of provider)
+```
+iOS DiscoveryView tap
+  → AgentSelectionStore.shared.selectedAgentType(for: serverId)
+  → connectToServer(agentType) → connectViaSSH(agentType)
+    → appModel.ssh.sshStartRemoteServerConnect(agentType) (FFI)
+      → Rust SshBridge::ssh_start_remote_server_connect(agent_type)
+        → if None/Codex: run_guided_ssh_connect() (unchanged)
+        → if Pi/Droid:
+          → connect_remote_over_ssh_with_agent_type()
+            → ssh_client.exec_stream("pi --mode rpc") or equivalent
+            → create_provider_over_ssh(agent_type, ssh_client, config)
+            → MobileClient::connect_with_provider(config, provider)
+              → ServerSession::from_provider()
+```
 
-### Hydration Mapping
-All providers map their protocol-specific events to the same HydratedConversationItem types:
-- Text streaming → AssistantMessageData
-- Thinking → ReasoningData
-- Tool calls → CommandExecutionData / McpToolCallData / DynamicToolCallData
-- Plans → ProposedPlanData
-- File changes → FileChangeData
-- Approvals → UserInputResponseData
+## New Components
+
+### SshClient::exec_stream()
+- Location: `src/ssh.rs`
+- Pattern: follows existing `open_streamlocal()` — opens SSH channel, calls exec, returns `ChannelStream`
+- Returns: `Pin<Box<dyn AsyncRead + AsyncWrite + Send + 'static>>`
+- Enables: spawning remote agent binaries with bidirectional I/O
+
+### Provider Factory
+- Location: `src/provider/factory.rs` (new)
+- Function: `create_provider_over_ssh(agent_type, ssh_client, config) → Result<Box<dyn ProviderTransport>>`
+- Spawns correct binary per agent type:
+  - PiNative: `pi --mode rpc`
+  - PiAcp: `npx pi-acp` (then ACP handshake)
+  - DroidNative: `droid exec --input-format stream-jsonrpc --output-format stream-jsonrpc`
+  - DroidAcp: `droid exec --output-format stream-json --input-format stream-json`
+  - GenericAcp: configurable command from ProviderConfig
+  - Codex: error (must use standard path)
+
+### Agent-Type Routing
+- Location: `src/mobile_client/mod.rs`
+- Method: `connect_remote_over_ssh_with_agent_type()`
+- Routes: Codex → existing path, Pi/Droid → provider factory → connect_with_provider()
+
+### FFI Parameter
+- Location: `src/ffi/ssh.rs`
+- Added: `agent_type: Option<AgentType>` to `ssh_start_remote_server_connect()`
+- Backward compatible: None = existing Codex behavior
+
+### Codex Wire Method Mapping
+- Location: Each transport's `send_request()` method
+- Maps Codex wire methods (thread/start, turn/start, turn/interrupt, thread/list, etc.) to provider-native methods
+- Ensures existing FFI methods (start_thread, list_threads, etc.) work transparently
+
+## Request Routing Chain
+
+```
+AppClient::start_thread() (FFI)
+  → MobileClient::request_typed_for_server(ClientRequest::ThreadStart)
+    → ServerSession::request_client(request)
+      → serialize ClientRequest → extract "method" + "params"
+        → provider.send_request("thread/start", params)
+          → [method mapping layer] → transport.native_method()
+```
+
+## What's NOT Changing
+
+- Store/reducer logic — receives UiEvent regardless of provider
+- Hydration pipeline — ProviderEvent → UiEvent → HydratedConversationItem
+- Codex connection flow — completely unchanged
+- IPC — provider sessions don't use IPC (no IPC socket, no tunnel)
+- Reconnection — deferred (provider sessions won't auto-reconnect)
+- Android — deferred to follow-up mission

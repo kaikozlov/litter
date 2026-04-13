@@ -1,6 +1,6 @@
 ---
 name: platform-ui-worker
-description: Implements iOS and Android UI features for multi-agent support — agent picker, session badges, per-agent settings
+description: Implements iOS UI features for multi-agent connection routing — agent selection wiring, binding updates
 ---
 
 # Platform UI Worker
@@ -10,66 +10,68 @@ NOTE: Startup and cleanup are handled by `worker-base`. This skill defines the W
 ## When to Use This Skill
 
 Features that involve:
-- iOS SwiftUI views for agent selection, badges, settings
-- Android Compose screens for agent selection, badges, settings
-- UniFFI type consumption in Swift/Kotlin
-- Platform-specific state management for multi-agent
+- iOS SwiftUI views for agent selection connection wiring
+- UniFFI binding consumption in Swift
+- Threading agent type parameters through iOS connect flow
+- iOS build verification after Rust FFI changes
+
+**This mission is iOS only — Android is deferred to a follow-up.**
 
 ## Required Skills
 
-None. Work uses standard platform tooling (Xcode/xcodebuild, Gradle).
+None. Work uses standard iOS tooling (xcodebuild, make ios-sim-fast).
 
 ## Work Procedure
 
 ### 1. Understand the Feature
 Read the feature description. Identify:
-- Which platform views/screens need changes (iOS: Views/, Android: ui/)
-- Which Rust UniFFI types are involved (AgentType, AgentInfo, etc.)
-- Whether bindings need regeneration
+- Which iOS views need modification (DiscoveryView, AppModel bridge)
+- Which Rust UniFFI types are involved (AgentType, new FFI parameters)
+- Whether bindings have been regenerated
 
 ### 2. Verify Bindings Are Current
-If the feature depends on new Rust types, verify bindings are generated:
+The Rust backend worker may have already regenerated bindings. Verify:
+```bash
+# Check if bindings include the new agentType parameter
+grep -n "agentType" shared/rust-bridge/generated/swift/*.swift || echo "Bindings not yet regenerated"
+```
+If not regenerated:
 ```bash
 ./shared/rust-bridge/generate-bindings.sh
 ```
 
-### 3. Implement iOS (if in scope)
-- Modify views in `apps/ios/Sources/Litter/Views/`
+### 3. Implement iOS Changes
+- Modify views in `apps/ios/Sources/Litter/Views/` (primarily DiscoveryView.swift)
 - Follow existing patterns: 4-space indent, UpperCamelCase types, lowerCamelCase properties
 - Use `@Observable` / `@State` patterns matching existing code
 - Dark theme: `Color.black` backgrounds, `#00FF9C` accent
 - Keep bridge files thin — logic belongs in Rust
 
-### 4. Implement Android (if in scope)
-- Modify screens in `apps/android/app/src/main/java/com/litter/android/ui/`
-- Follow existing patterns: Compose Material3, 4-space indent
-- Use state from `AppModel.kt` / `AppLaunchState.kt`
-- Keep Kotlin thin — business logic in Rust
+Key changes for this mission:
+- `DiscoveryView.swift`: Read `AgentSelectionStore.shared.selectedAgentType(for: server.id)` in `connectToServer()`
+- Add `agentType: AgentType?` parameter to `connectViaSSH()` and `sshConnectAndConnectServer()`
+- Pass `agentType` to `appModel.ssh.sshStartRemoteServerConnect(... agentType:)` in both credential branches
+- Update `maybeStartSimulatorAutoSSH` if it also calls the connect method
 
-### 5. Verify
+### 4. Verify
 
-**iOS:**
+**iOS build:**
 ```bash
 make ios-sim-fast
 ```
 
-**Android:**
-```bash
-make android-emulator-fast
-```
-
-**Rust (bindings must still compile):**
+**Rust must still compile:**
 ```bash
 cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml
 ```
 
-### 6. Manual UI Verification
-Since mobile UI cannot be fully automated:
-- Launch in simulator/emulator
-- Navigate to affected screens
-- Verify agent picker appears, shows correct agents
-- Verify badges display correctly
-- Verify connection flow works end-to-end
+### 5. Manual UI Verification
+- Launch in simulator
+- Navigate to discovery
+- Tap a multi-agent server → agent picker should appear
+- Select an agent → verify selection persists
+- Connect → verify no crash (actual agent connection requires real server)
+- Verify Codex-only server connects normally (regression)
 
 Document verification steps and observations in the handoff.
 
@@ -77,19 +79,19 @@ Document verification steps and observations in the handoff.
 
 ```json
 {
-  "salientSummary": "Added agent picker to iOS HeaderView (InlineAgentSelectorView alongside model picker) and Android HeaderBar (AgentSelectorDropdown). Agent type badges added to SessionsScreen on both platforms. iOS builds via make ios-sim-fast, Android via make android-emulator-fast.",
-  "whatWasImplemented": "iOS: Views/InlineAgentSelectorView.swift (new), Views/HeaderView.swift (agent picker section), Views/SessionsScreen.swift (agent badges). Android: ui/conversation/AgentSelectorDropdown.kt (new), ui/conversation/HeaderBar.kt (agent selector), ui/sessions/SessionsScreen.kt (agent badges).",
-  "whatWasLeftUndone": "Per-agent settings sheet not yet implemented — deferred to follow-up feature.",
+  "salientSummary": "Wired agent type selection through iOS connection flow. DiscoveryView now reads AgentSelectionStore and passes agentType to sshStartRemoteServerConnect. iOS builds via make ios-sim-fast. Codex regression verified.",
+  "whatWasImplemented": "apps/ios/Sources/Litter/Views/DiscoveryView.swift — added agentType parameter threading in connectToServer(), connectViaSSH(), sshConnectAndConnectServer(). Both .password and .key credential branches updated.",
+  "whatWasLeftUndone": "",
   "verification": {
     "commandsRun": [
+      {"command": "make bindings", "exitCode": 0, "observation": "Bindings regenerated with agentType parameter"},
       {"command": "make ios-sim-fast", "exitCode": 0, "observation": "iOS build succeeded, installed to simulator"},
-      {"command": "make android-emulator-fast", "exitCode": 0, "observation": "Android build succeeded"},
-      {"command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml", "exitCode": 0, "observation": "Rust compiles with new UniFFI types"}
+      {"command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml", "exitCode": 0, "observation": "Rust compiles"}
     ],
     "interactiveChecks": [
-      {"action": "Opened agent picker in HeaderView", "observed": "Shows Codex, Pi Native, Droid Native options with correct icons"},
-      {"action": "Selected Pi agent", "observed": "Agent badge appears on new session in SessionsScreen"},
-      {"action": "Opened Android HeaderBar agent selector", "observed": "Same agents listed, selection persists"}
+      {"action": "Tapped multi-agent server in discovery", "observed": "Agent picker sheet appeared with Codex, Pi Native, Droid Native options"},
+      {"action": "Selected Pi Native and connected", "observed": "Connection attempted with agentType parameter (confirmed via debug log)"},
+      {"action": "Tapped Codex-only server", "observed": "Connected normally without agent picker, same as before"}
     ]
   },
   "tests": {
@@ -101,7 +103,7 @@ Document verification steps and observations in the handoff.
 
 ## When to Return to Orchestrator
 
-- Rust UniFFI types needed by the UI are not yet implemented (need a backend worker to create them first)
+- Rust UniFFI types needed by the UI are not yet implemented (need a backend worker first)
 - Build fails due to missing generated bindings
-- Design ambiguity in how agent picker should work (e.g., where it appears, what happens with single-agent servers)
-- Platform-specific build tool issues (Xcode not configured, Android SDK missing)
+- The sshStartRemoteServerConnect signature in generated Swift doesn't include agentType (bindings not regenerated)
+- Platform-specific build tool issues (Xcode not configured)

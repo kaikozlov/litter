@@ -7,21 +7,26 @@ Environment variables, external dependencies, and setup notes.
 
 ---
 
+## Rust Toolchain
+- `cargo` and `rustc` must come from rustup, not Homebrew. `.factory/init.sh` handles PATH setup.
+- Cross-compilation targets: `aarch64-apple-ios`, `aarch64-apple-ios-sim`, Android NDK targets
+
 ## SSH Test Target
-- **Host**: gvps (100.82.102.84:5132, user: ubuntu)
-- **Pi**: v0.66.1 at `~/.bun/bin/pi` (supports `--mode rpc`)
-- **Droid**: v0.99.0 at `~/.bun/bin/droid` (supports `exec --stream-jsonrpc`)
-- **Node**: v25.3.0, npm 11.6.2
+- **gvps**: 100.82.102.84:5132, user `ubuntu`
+- Pi 0.66.1 at `~/.bun/bin/pi`
+- Droid 0.99.0 at `~/.bun/bin/droid`
+- `ssh gvps` should work directly (configured in ~/.ssh/config)
+- E2E tests marked `#[ignore]` require this target
 
-## Required Environment Variables
-- `FACTORY_API_KEY` — Required for Droid authentication (set on remote host or passed via SSH)
+## UniFFI Binding Regeneration
+- After any Rust UniFFI type changes: `./shared/rust-bridge/generate-bindings.sh`
+- Swift bindings go to `shared/rust-bridge/generated/swift/`
+- Kotlin bindings go to `shared/rust-bridge/generated/kotlin/`
+- iOS build picks up generated Swift directly
+- Android build picks up generated Kotlin from the shared location
 
-## ACP Protocol
-- Uses `agent-client-protocol-schema` crate v0.11.5 (Apache-2.0)
-- Transport: NDJSON over bidirectional stream (SSH PTY for remote agents)
-- Protocol version: V1
-
-## Build Dependencies
-- Rust toolchain via rustup (not Homebrew)
-- `cargo` must resolve to rustup proxy
-- No new system dependencies needed (ACP uses existing russh + serde_json)
+## Key Dependencies
+- `russh` — SSH client library. Supports ChannelStream for bidirectional I/O.
+- `agent-client-protocol-schema` v0.11.5 — ACP protocol types
+- `uniffi` — Rust↔Swift/Kotlin binding generation
+- `tokio` — async runtime
