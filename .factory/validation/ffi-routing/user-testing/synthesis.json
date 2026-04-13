@@ -1,0 +1,25 @@
+{
+  "milestone": "ffi-routing",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 8,
+    "passed": 8,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-ROUTE-001",
+    "VAL-ROUTE-002",
+    "VAL-ROUTE-003",
+    "VAL-ROUTE-004",
+    "VAL-FFI-001",
+    "VAL-FFI-002",
+    "VAL-FFI-003",
+    "VAL-FFI-004"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null
+}
