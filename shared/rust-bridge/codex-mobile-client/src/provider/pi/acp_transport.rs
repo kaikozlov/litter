@@ -325,6 +325,86 @@ impl ProviderTransport for PiAcpTransport {
                 let sessions = self.list_sessions().await?;
                 Ok(serde_json::to_value(sessions).unwrap_or(serde_json::Value::Null))
             }
+            // ── Codex wire method adapters ───────────────────────────────
+            // These map upstream Codex JSON-RPC methods to ACP session operations.
+            //
+            // VAL-PIACP-MAP-001: thread/start → ACP session/new + prompt
+            "thread/start" => {
+                let text = crate::provider::pi::transport::extract_text_from_params(&params)?;
+                // Create a new ACP session.
+                let cwd = params
+                    .get("cwd")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(DEFAULT_PI_CWD);
+                let session_id = self.create_session(cwd).await?;
+                // Send prompt in the new session.
+                let stop_reason = self.send_prompt(&session_id, &text).await?;
+                // Return synthetic ThreadStart result with session ID as thread ID.
+                Ok(serde_json::json!({
+                    "id": session_id,
+                    "thread_id": session_id,
+                    "stop_reason": stop_reason,
+                }))
+            }
+            // VAL-PIACP-MAP-002: turn/start → ACP prompt (no session/new)
+            "turn/start" => {
+                let text = crate::provider::pi::transport::extract_text_from_params(&params)?;
+                let session_id = params
+                    .get("session_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("default");
+                self.send_prompt(session_id, &text).await?;
+                Ok(serde_json::Value::Null)
+            }
+            // VAL-PIACP-MAP-003: turn/interrupt → ACP cancel
+            "turn/interrupt" => {
+                let session_id = params
+                    .get("session_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("default");
+                self.cancel_prompt(session_id).await?;
+                Ok(serde_json::Value::Null)
+            }
+            // VAL-PIACP-MAP-004: thread/list → ACP session/list with format conversion
+            "thread/list" => {
+                let sessions = self.list_sessions().await?;
+                // Convert ACP sessions to Codex ThreadList format.
+                let threads: Vec<serde_json::Value> = sessions
+                    .into_iter()
+                    .map(|s| {
+                        serde_json::json!({
+                            "id": s.id,
+                            "title": s.title,
+                            "created_at": s.created_at,
+                            "updated_at": s.updated_at,
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::json!({"threads": threads}))
+            }
+            // VAL-PIACP-MAP-005: thread/read → ACP session/load
+            "thread/read" => {
+                let session_id = params
+                    .get("thread_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        RpcError::Deserialization("missing 'thread_id' field".to_string())
+                    })?;
+                let cwd = params
+                    .get("cwd")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(DEFAULT_PI_CWD);
+                self.load_session(session_id, cwd).await?;
+                Ok(serde_json::Value::Null)
+            }
+            // VAL-PIACP-MAP-006: no-op methods return success
+            "thread/archive" | "thread/rollback" | "thread/name/set" => {
+                Ok(serde_json::json!({"ok": true}))
+            }
+            // VAL-PIACP-MAP-007: collaborationMode/list returns empty
+            "collaborationMode/list" => {
+                Ok(serde_json::json!({"data": []}))
+            }
             _ => Err(RpcError::Server {
                 code: -32601,
                 message: format!("unknown Pi ACP RPC method: {method}"),
@@ -820,6 +900,447 @@ mod tests {
 
         let result = connect_handle.await.unwrap();
         assert!(result.is_err(), "connect should fail when init returns error");
+    }
+
+    // ── Codex Wire Method Mapping (VAL-PIACP-MAP-*) ──────────────────────
+
+    /// Helper: perform ACP initialize + authenticate handshake on the mock side.
+    /// Reads the initialize and authenticate requests, sends back valid responses.
+    async fn mock_handshake(mock: &mut tokio::io::DuplexStream) {
+        use agent_client_protocol_schema::{AuthMethod, AuthMethodAgent};
+
+        // Read initialize request, respond.
+        let init_line = read_mock_line(mock).await;
+        let init_val: serde_json::Value = serde_json::from_str(&init_line).unwrap();
+        let am = vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))];
+        let amj: Vec<serde_json::Value> = am.iter().map(|m| serde_json::to_value(m).unwrap()).collect();
+        write_mock_line(mock, &serde_json::json!({
+            "jsonrpc": "2.0", "id": init_val["id"],
+            "result": {"protocolVersion": 1, "capabilities": {}, "authMethods": amj}
+        }).to_string()).await;
+
+        // Read authenticate request, respond.
+        let auth_line = read_mock_line(mock).await;
+        let auth_val: serde_json::Value = serde_json::from_str(&auth_line).unwrap();
+        write_mock_line(mock, &serde_json::json!({
+            "jsonrpc": "2.0", "id": auth_val["id"], "result": {}
+        }).to_string()).await;
+    }
+
+    /// Helper: create a fully-authenticated PiAcpTransport + mock stream.
+    /// Performs the full ACP handshake (initialize + authenticate).
+    /// Returns (JoinHandle<PiAcpTransport>, mock_end).
+    /// Caller should `let mut transport = handle.await.unwrap();` to get transport.
+    async fn setup_authenticated_transport() -> (
+        tokio::task::JoinHandle<PiAcpTransport>,
+        tokio::io::DuplexStream,
+    ) {
+        let (client_end, mut mock_end) = test_duplex();
+
+        let handle = tokio::spawn(async move {
+            let config = ProviderConfig {
+                client_name: "litter".to_string(),
+                client_version: "0.1.0".to_string(),
+                ..Default::default()
+            };
+            let mut transport = PiAcpTransport::new(client_end);
+            transport.connect(&config).await.expect("handshake should succeed");
+            transport
+        });
+
+        // Respond to handshake.
+        mock_handshake(&mut mock_end).await;
+
+        (handle, mock_end)
+    }
+
+    /// Helper: create a transport with only `initialized` flag set (no ACP handshake).
+    /// Use for no-op method tests that don't need actual ACP communication.
+    async fn setup_minimal_transport() -> (
+        PiAcpTransport,
+        tokio::io::DuplexStream,
+    ) {
+        let (client_end, mock_end) = test_duplex();
+        let transport = PiAcpTransport::new(client_end);
+        *transport.initialized.lock().await = true;
+        (transport, mock_end)
+    }
+
+    // VAL-PIACP-MAP-001: thread/start → ACP session/new + prompt
+
+    #[tokio::test]
+    async fn pi_acp_codex_thread_start_calls_session_new_then_prompt() {
+        let (transport_handle, mut mock_end) = setup_authenticated_transport().await;
+        let mut transport = transport_handle.await.unwrap();
+
+        let handle = tokio::spawn(async move {
+            transport.send_request(
+                "thread/start",
+                serde_json::json!({
+                    "items": [{"role": "user", "content": "Hello Pi!"}]
+                }),
+            ).await
+        });
+
+        // Read session/new request.
+        let new_line = read_mock_line(&mut mock_end).await;
+        let new_val: serde_json::Value = serde_json::from_str(&new_line).unwrap();
+        assert_eq!(new_val["method"], "session/new");
+
+        // Reply with session ID.
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": new_val["id"],
+            "result": {"sessionId": "acp-sess-001"}
+        }).to_string()).await;
+
+        // Read prompt request.
+        let prompt_line = read_mock_line(&mut mock_end).await;
+        let prompt_val: serde_json::Value = serde_json::from_str(&prompt_line).unwrap();
+        assert_eq!(prompt_val["method"], "session/prompt");
+        // ACP serializes prompt text as: params.prompt[0].text
+        let text = prompt_val["params"]["prompt"][0]["text"]
+            .as_str()
+            .unwrap_or_else(|| {
+                prompt_val["params"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap_or_else(|| {
+                        prompt_val["params"]["text"].as_str().unwrap_or("")
+                    })
+            });
+        assert_eq!(text, "Hello Pi!");
+
+        // Reply with prompt result.
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": prompt_val["id"],
+            "result": {"stopReason": "end_turn"}
+        }).to_string()).await;
+
+        let result = handle.await.unwrap().unwrap();
+        assert!(result["id"].is_string(), "should have 'id' field: {result}");
+        assert_eq!(result["id"], "acp-sess-001");
+        assert_eq!(result["thread_id"], "acp-sess-001");
+    }
+
+    #[tokio::test]
+    async fn pi_acp_codex_thread_start_text_from_content_field() {
+        let (transport_handle, mut mock_end) = setup_authenticated_transport().await;
+        let mut transport = transport_handle.await.unwrap();
+
+        let handle = tokio::spawn(async move {
+            transport.send_request(
+                "thread/start",
+                serde_json::json!({"content": "Direct content"}),
+            ).await
+        });
+
+        let new_line = read_mock_line(&mut mock_end).await;
+        let new_val: serde_json::Value = serde_json::from_str(&new_line).unwrap();
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": new_val["id"],
+            "result": {"sessionId": "sess-c"}
+        }).to_string()).await;
+
+        let prompt_line = read_mock_line(&mut mock_end).await;
+        let prompt_val: serde_json::Value = serde_json::from_str(&prompt_line).unwrap();
+        // ACP serializes prompt text as: params.prompt[0].text
+        let text = prompt_val["params"]["prompt"][0]["text"]
+            .as_str()
+            .unwrap_or_else(|| prompt_val["params"]["text"].as_str().unwrap_or(""));
+        assert_eq!(text, "Direct content");
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": prompt_val["id"],
+            "result": {"stopReason": "end_turn"}
+        }).to_string()).await;
+
+        let result = handle.await.unwrap().unwrap();
+        assert_eq!(result["id"], "sess-c");
+    }
+
+    #[tokio::test]
+    async fn pi_acp_codex_thread_start_no_text_returns_error() {
+        let (mut transport, _) = setup_minimal_transport().await;
+
+        let result = transport
+            .send_request("thread/start", serde_json::json!({}))
+            .await;
+
+        assert!(result.is_err(), "should error when no text in params");
+        match result {
+            Err(RpcError::Deserialization(msg)) => {
+                assert!(msg.contains("no text found"));
+            }
+            other => panic!("expected Deserialization error, got {other:?}"),
+        }
+    }
+
+    // VAL-PIACP-MAP-002: turn/start → ACP prompt (no session/new)
+
+    #[tokio::test]
+    async fn pi_acp_codex_turn_start_calls_prompt_only() {
+        let (transport_handle, mut mock_end) = setup_authenticated_transport().await;
+        let mut transport = transport_handle.await.unwrap();
+
+        let handle = tokio::spawn(async move {
+            transport.send_request(
+                "turn/start",
+                serde_json::json!({
+                    "items": [{"role": "user", "content": "Follow-up"}]
+                }),
+            ).await
+        });
+
+        // Should be prompt, NOT session/new.
+        let first_line = read_mock_line(&mut mock_end).await;
+        let first_val: serde_json::Value = serde_json::from_str(&first_line).unwrap();
+        assert_eq!(
+            first_val["method"], "session/prompt",
+            "turn/start should call prompt, not session/new"
+        );
+        let text = first_val["params"]["prompt"][0]["text"]
+            .as_str()
+            .unwrap_or_else(|| first_val["params"]["text"].as_str().unwrap_or(""));
+        assert_eq!(text, "Follow-up");
+
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": first_val["id"],
+            "result": {"stopReason": "end_turn"}
+        }).to_string()).await;
+
+        let result = handle.await.unwrap().unwrap();
+        assert!(result.is_null(), "turn/start should return null: {result}");
+    }
+
+    #[tokio::test]
+    async fn pi_acp_codex_turn_start_with_session_id() {
+        let (transport_handle, mut mock_end) = setup_authenticated_transport().await;
+        let mut transport = transport_handle.await.unwrap();
+
+        let handle = tokio::spawn(async move {
+            transport.send_request(
+                "turn/start",
+                serde_json::json!({
+                    "items": [{"role": "user", "content": "Next message"}],
+                    "session_id": "existing-sess"
+                }),
+            ).await
+        });
+
+        let line = read_mock_line(&mut mock_end).await;
+        let val: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(val["method"], "session/prompt");
+        let text = val["params"]["prompt"][0]["text"]
+            .as_str()
+            .unwrap_or_else(|| val["params"]["text"].as_str().unwrap_or(""));
+        assert_eq!(text, "Next message");
+
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": val["id"],
+            "result": {"stopReason": "end_turn"}
+        }).to_string()).await;
+
+        handle.await.unwrap().unwrap();
+    }
+
+    // VAL-PIACP-MAP-003: turn/interrupt → ACP cancel
+
+    #[tokio::test]
+    async fn pi_acp_codex_turn_interrupt_calls_cancel() {
+        let (transport_handle, _mock_end) = setup_authenticated_transport().await;
+        let mut transport = transport_handle.await.unwrap();
+
+        // When no prompt is active, session_cancel is a no-op (returns Ok).
+        // The transport still returns Ok(Value::Null).
+        let result = transport
+            .send_request("turn/interrupt", serde_json::json!({}))
+            .await
+            .unwrap();
+        assert!(result.is_null(), "interrupt should return null on idle");
+    }
+
+    #[tokio::test]
+    async fn pi_acp_codex_turn_interrupt_with_session_id() {
+        let (transport_handle, _mock_end) = setup_authenticated_transport().await;
+        let mut transport = transport_handle.await.unwrap();
+
+        // Cancel on idle is a no-op — just Ok(null).
+        let result = transport
+            .send_request(
+                "turn/interrupt",
+                serde_json::json!({"session_id": "sess-42"}),
+            )
+            .await
+            .unwrap();
+        assert!(result.is_null(), "interrupt with session_id should return null on idle");
+    }
+
+    // VAL-PIACP-MAP-004: thread/list → ACP session/list with format conversion
+
+    #[tokio::test]
+    async fn pi_acp_codex_thread_list_calls_session_list() {
+        let (transport_handle, mut mock_end) = setup_authenticated_transport().await;
+        let mut transport = transport_handle.await.unwrap();
+
+        let handle = tokio::spawn(async move {
+            transport.send_request("thread/list", serde_json::json!({})).await
+        });
+
+        let line = read_mock_line(&mut mock_end).await;
+        let val: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(val["method"], "session/list");
+
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": val["id"],
+            "result": {
+                "sessions": [
+                    {"sessionId": "s1", "cwd": "/home", "title": "Session 1"},
+                    {"sessionId": "s2", "cwd": "/tmp", "title": "Session 2"}
+                ]
+            }
+        }).to_string()).await;
+
+        let result = handle.await.unwrap().unwrap();
+        let threads = result["threads"].as_array().expect("should have threads array");
+        assert_eq!(threads.len(), 2);
+        assert_eq!(threads[0]["id"], "s1");
+        assert_eq!(threads[0]["title"], "Session 1");
+        assert_eq!(threads[1]["id"], "s2");
+        assert_eq!(threads[1]["title"], "Session 2");
+    }
+
+    #[tokio::test]
+    async fn pi_acp_codex_thread_list_empty() {
+        let (transport_handle, mut mock_end) = setup_authenticated_transport().await;
+        let mut transport = transport_handle.await.unwrap();
+
+        let handle = tokio::spawn(async move {
+            transport.send_request("thread/list", serde_json::json!({})).await
+        });
+
+        let line = read_mock_line(&mut mock_end).await;
+        let val: serde_json::Value = serde_json::from_str(&line).unwrap();
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": val["id"],
+            "result": {"sessions": []}
+        }).to_string()).await;
+
+        let result = handle.await.unwrap().unwrap();
+        let threads = result["threads"].as_array().expect("should have threads array");
+        assert!(threads.is_empty());
+    }
+
+    // VAL-PIACP-MAP-005: thread/read → ACP session/load
+
+    #[tokio::test]
+    async fn pi_acp_codex_thread_read_calls_session_load() {
+        let (transport_handle, mut mock_end) = setup_authenticated_transport().await;
+        let mut transport = transport_handle.await.unwrap();
+
+        let handle = tokio::spawn(async move {
+            transport.send_request(
+                "thread/read",
+                serde_json::json!({"thread_id": "load-sess-123"}),
+            ).await
+        });
+
+        let line = read_mock_line(&mut mock_end).await;
+        let val: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(val["method"], "session/load");
+        assert_eq!(val["params"]["sessionId"], "load-sess-123");
+
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": val["id"], "result": {}
+        }).to_string()).await;
+
+        let result = handle.await.unwrap().unwrap();
+        assert!(result.is_null(), "thread/read should return null: {result}");
+    }
+
+    #[tokio::test]
+    async fn pi_acp_codex_thread_read_missing_thread_id() {
+        let (mut transport, _) = setup_minimal_transport().await;
+
+        let result = transport
+            .send_request("thread/read", serde_json::json!({}))
+            .await;
+
+        assert!(result.is_err(), "should error without thread_id");
+    }
+
+    // VAL-PIACP-MAP-006: no-op methods return success
+
+    #[tokio::test]
+    async fn pi_acp_codex_thread_archive_noop() {
+        let (mut transport, mut mock_end) = setup_minimal_transport().await;
+
+        let result = transport
+            .send_request("thread/archive", serde_json::json!({"thread_id": "t1"}))
+            .await
+            .unwrap();
+
+        assert_eq!(result["ok"], true);
+
+        // Verify no ACP JSON-RPC was sent.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        use tokio::io::AsyncReadExt;
+        let mut buf = [0u8; 1];
+        let nothing = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            mock_end.read(&mut buf),
+        )
+        .await;
+        assert!(nothing.is_err(), "no ACP message should be sent for thread/archive");
+    }
+
+    #[tokio::test]
+    async fn pi_acp_codex_thread_rollback_noop() {
+        let (mut transport, _) = setup_minimal_transport().await;
+
+        let result = transport
+            .send_request("thread/rollback", serde_json::json!({"thread_id": "t1"}))
+            .await
+            .unwrap();
+
+        assert_eq!(result["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn pi_acp_codex_thread_name_set_noop() {
+        let (mut transport, _) = setup_minimal_transport().await;
+
+        let result = transport
+            .send_request(
+                "thread/name/set",
+                serde_json::json!({"thread_id": "t1", "name": "New Name"}),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result["ok"], true);
+    }
+
+    // VAL-PIACP-MAP-007: collaborationMode/list returns empty
+
+    #[tokio::test]
+    async fn pi_acp_codex_collaboration_mode_list_empty() {
+        let (mut transport, mut mock_end) = setup_minimal_transport().await;
+
+        let result = transport
+            .send_request("collaborationMode/list", serde_json::json!({}))
+            .await
+            .unwrap();
+
+        assert_eq!(result["data"], serde_json::json!([]));
+
+        // Verify no ACP JSON-RPC was sent.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        use tokio::io::AsyncReadExt;
+        let mut buf = [0u8; 1];
+        let nothing = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            mock_end.read(&mut buf),
+        )
+        .await;
+        assert!(nothing.is_err(), "no ACP message should be sent for collaborationMode/list");
     }
 
     /// Test: NDJSON framing is correct — messages exchanged as newline-delimited JSON.

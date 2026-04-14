@@ -53,7 +53,7 @@ use crate::transport::{RpcError, TransportError};
 /// 1. `items` array → first item's `content` field (Codex thread/start format)
 /// 2. `content` field directly
 /// 3. `text` field directly
-fn extract_text_from_params(params: &serde_json::Value) -> Result<String, RpcError> {
+pub fn extract_text_from_params(params: &serde_json::Value) -> Result<String, RpcError> {
     // 1. Try items array: params.items[0].content
     if let Some(items) = params.get("items").and_then(|v| v.as_array()) {
         for item in items {
