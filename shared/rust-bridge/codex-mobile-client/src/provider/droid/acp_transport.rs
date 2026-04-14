@@ -364,6 +364,55 @@ impl ProviderTransport for DroidAcpTransport {
                 let inner = self.inner.lock().await;
                 Ok(serde_json::json!({"policy": inner.permission_policy.to_string()}))
             }
+            // ── Codex wire method adapters ───────────────────────────────
+            // These map upstream Codex JSON-RPC methods to Droid stream-json operations.
+            //
+            // VAL-DROIDACP-MAP-001: thread/start → send user message via prompt,
+            // return synthetic ThreadStart result with session ID from system/init.
+            "thread/start" => {
+                let text = crate::provider::droid::transport::extract_text_from_params(&params)?;
+                self.send_user_message(&text).await.map_err(RpcError::from)?;
+
+                let inner = self.inner.lock().await;
+                let thread_id = inner.session_id
+                    .clone()
+                    .unwrap_or_else(|| format!("droid-acp-{}", uuid::Uuid::new_v4()));
+
+                Ok(serde_json::json!({
+                    "id": thread_id,
+                    "thread_id": thread_id,
+                }))
+            }
+            // VAL-DROIDACP-MAP-002: turn/start → send user message (no re-initialization).
+            "turn/start" => {
+                let text = crate::provider::droid::transport::extract_text_from_params(&params)?;
+                self.send_user_message(&text).await.map_err(RpcError::from)?;
+                Ok(serde_json::Value::Null)
+            }
+            // VAL-DROIDACP-MAP-003: turn/interrupt → Ok(Value::Null).
+            // Stream-json mode has no explicit cancel command; must not return error.
+            "turn/interrupt" => {
+                Ok(serde_json::Value::Null)
+            }
+            // VAL-DROIDACP-MAP-004: thread/list → return current session or empty.
+            "thread/list" => {
+                let inner = self.inner.lock().await;
+                if let Some(ref sid) = inner.session_id {
+                    Ok(serde_json::json!({
+                        "threads": [{"id": sid, "title": "", "created_at": "", "updated_at": ""}]
+                    }))
+                } else {
+                    Ok(serde_json::json!({"threads": []}))
+                }
+            }
+            // VAL-DROIDACP-MAP-005: no-op methods return success.
+            "thread/archive" | "thread/rollback" | "thread/name/set" => {
+                Ok(serde_json::json!({"ok": true}))
+            }
+            // VAL-DROIDACP-MAP-006: collaborationMode/list returns empty.
+            "collaborationMode/list" => {
+                Ok(serde_json::json!({"data": []}))
+            }
             _ => Err(RpcError::Server {
                 code: -32601,
                 message: format!("unknown Droid ACP method: {method}"),
@@ -1234,6 +1283,411 @@ mod tests {
             }
         }
         assert!(got_ok, "should process valid message after malformed JSON");
+    }
+
+    // ── Codex Wire Method Mapping (VAL-DROIDACP-MAP-*) ────────────────────
+
+    // VAL-DROIDACP-MAP-001: thread/start → Droid prompt with session ID
+
+    #[tokio::test]
+    async fn droid_acp_codex_thread_start_sends_prompt_with_session_id() {
+        let (mut transport, mock) = setup();
+        let _rx = transport.subscribe();
+
+        // Queue system/init so session_id is available.
+        mock.queue_line(
+            r#"{"type":"system","subtype":"init","session_id":"droid-acp-sess-42","model":"test"}"#,
+        ).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let result = transport
+            .send_request(
+                "thread/start",
+                serde_json::json!({
+                    "items": [{"role": "user", "content": "Hello Droid!"}]
+                }),
+            )
+            .await
+            .unwrap();
+
+        // Should return synthetic ThreadStart result with session ID.
+        assert!(result["id"].is_string(), "should have 'id' field: {result}");
+        assert_eq!(result["id"], "droid-acp-sess-42");
+        assert_eq!(result["thread_id"], "droid-acp-sess-42");
+
+        // Verify prompt was actually sent to the Droid process.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let output = mock.captured_output_string().await;
+        assert!(output.contains("Hello Droid!"), "output should contain 'Hello Droid!', got: {output}");
+    }
+
+    #[tokio::test]
+    async fn droid_acp_codex_thread_start_text_from_content_field() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_line(
+            r#"{"type":"system","subtype":"init","session_id":"sess-content","model":"test"}"#,
+        ).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let result = transport
+            .send_request(
+                "thread/start",
+                serde_json::json!({"content": "Direct content"}),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result["id"], "sess-content");
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let output = mock.captured_output_string().await;
+        assert!(output.contains("Direct content"), "output should contain 'Direct content', got: {output}");
+    }
+
+    #[tokio::test]
+    async fn droid_acp_codex_thread_start_text_from_text_field() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_line(
+            r#"{"type":"system","subtype":"init","session_id":"sess-text","model":"test"}"#,
+        ).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let result = transport
+            .send_request(
+                "thread/start",
+                serde_json::json!({"text": "Text field content"}),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result["id"], "sess-text");
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let output = mock.captured_output_string().await;
+        assert!(output.contains("Text field content"), "output should contain 'Text field content', got: {output}");
+    }
+
+    #[tokio::test]
+    async fn droid_acp_codex_thread_start_no_text_returns_error() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_line(
+            r#"{"type":"system","subtype":"init","session_id":"sess-notext","model":"test"}"#,
+        ).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let result = transport
+            .send_request("thread/start", serde_json::json!({}))
+            .await;
+
+        assert!(result.is_err(), "should error when no text in params");
+        match result {
+            Err(RpcError::Deserialization(msg)) => {
+                assert!(msg.contains("no text found"), "error should mention text extraction: {msg}");
+            }
+            other => panic!("expected Deserialization error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn droid_acp_codex_thread_start_no_session_returns_synthetic_id() {
+        let (mut transport, _mock) = setup();
+
+        // No system/init queued, so session_id is None.
+        // thread/start should still send the message and return a synthetic ID.
+        let result = transport
+            .send_request(
+                "thread/start",
+                serde_json::json!({"content": "Hello"}),
+            )
+            .await
+            .unwrap();
+
+        // Should still succeed with a generated thread ID.
+        assert!(result["id"].is_string(), "should have 'id' field: {result}");
+        assert!(result["thread_id"].is_string(), "should have 'thread_id' field: {result}");
+    }
+
+    // VAL-DROIDACP-MAP-002: turn/start → Droid prompt (no re-initialization)
+
+    #[tokio::test]
+    async fn droid_acp_codex_turn_start_sends_prompt() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_line(
+            r#"{"type":"system","subtype":"init","session_id":"sess-turn","model":"test"}"#,
+        ).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let result = transport
+            .send_request(
+                "turn/start",
+                serde_json::json!({
+                    "items": [{"role": "user", "content": "Follow-up message"}]
+                }),
+            )
+            .await
+            .unwrap();
+
+        // turn/start returns null (no thread creation).
+        assert!(result.is_null(), "turn/start should return null: {result}");
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let output = mock.captured_output_string().await;
+        assert!(output.contains("Follow-up message"), "output should contain 'Follow-up message', got: {output}");
+    }
+
+    #[tokio::test]
+    async fn droid_acp_codex_turn_start_no_reinitialization() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_line(
+            r#"{"type":"system","subtype":"init","session_id":"sess-noreinit","model":"test"}"#,
+        ).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Send turn/start.
+        transport
+            .send_request(
+                "turn/start",
+                serde_json::json!({"content": "Message"}),
+            )
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // Verify only one message was sent (no init or session creation).
+        let output = mock.captured_output_string().await;
+        let lines: Vec<&str> = output.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(lines.len(), 1, "should send exactly one message, got {lines_len}: {output}", lines_len = lines.len());
+        assert!(output.contains("Message"), "should contain the prompt text");
+    }
+
+    // VAL-DROIDACP-MAP-003: turn/interrupt returns success
+
+    #[tokio::test]
+    async fn droid_acp_codex_turn_interrupt_returns_success() {
+        let (mut transport, _mock) = setup();
+
+        let result = transport
+            .send_request("turn/interrupt", serde_json::json!({}))
+            .await
+            .unwrap();
+
+        assert!(result.is_null(), "turn/interrupt should return Ok(Value::Null): {result}");
+    }
+
+    #[tokio::test]
+    async fn droid_acp_codex_turn_interrupt_no_output_to_transport() {
+        let (mut transport, mock) = setup();
+
+        // Queue init so transport is connected.
+        mock.queue_line(
+            r#"{"type":"system","subtype":"init","session_id":"sess-intr","model":"test"}"#,
+        ).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Clear any captured output from init processing.
+        mock.reset().await;
+
+        // Need to re-init after reset (reset clears everything including the channel).
+        // Actually, reset() clears the mock channel buffers but doesn't affect the transport.
+        // Since we already sent the interrupt, just check captured_output.
+        // But wait, we need to re-queue the init on the mock since reset clears it.
+        // The transport is already initialized from the first init, so we don't need
+        // to re-queue. But reset() clears written buffer. Let's just send the interrupt
+        // and verify no output.
+
+        transport
+            .send_request("turn/interrupt", serde_json::json!({}))
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let output = mock.captured_output_string().await;
+        assert!(
+            output.trim().is_empty(),
+            "turn/interrupt should not write to transport, got: {output}"
+        );
+    }
+
+    // VAL-DROIDACP-MAP-004: thread/list returns current session or empty
+
+    #[tokio::test]
+    async fn droid_acp_codex_thread_list_returns_current_session() {
+        let (mut transport, _mock) = setup();
+
+        // No init queued — no session yet.
+        let result = transport
+            .send_request("thread/list", serde_json::json!({}))
+            .await
+            .unwrap();
+
+        let threads = result["threads"].as_array().expect("should have threads array");
+        assert!(threads.is_empty(), "should be empty before init");
+    }
+
+    #[tokio::test]
+    async fn droid_acp_codex_thread_list_returns_session_after_init() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_line(
+            r#"{"type":"system","subtype":"init","session_id":"sess-list-42","model":"test"}"#,
+        ).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let result = transport
+            .send_request("thread/list", serde_json::json!({}))
+            .await
+            .unwrap();
+
+        let threads = result["threads"].as_array().expect("should have threads array");
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0]["id"], "sess-list-42");
+    }
+
+    #[tokio::test]
+    async fn droid_acp_codex_thread_list_empty_before_init() {
+        let (mut transport, _mock) = setup();
+
+        let result = transport
+            .send_request("thread/list", serde_json::json!({}))
+            .await
+            .unwrap();
+
+        let threads = result["threads"].as_array().expect("should have threads array");
+        assert!(threads.is_empty(), "should return empty threads before init");
+    }
+
+    // VAL-DROIDACP-MAP-005: thread/archive etc return success no-op
+
+    #[tokio::test]
+    async fn droid_acp_codex_thread_archive_noop() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_line(
+            r#"{"type":"system","subtype":"init","session_id":"sess-archive","model":"test"}"#,
+        ).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let result = transport
+            .send_request("thread/archive", serde_json::json!({"thread_id": "t1"}))
+            .await
+            .unwrap();
+
+        assert_eq!(result["ok"], true);
+
+        // Verify no output was sent to Droid transport.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let output = mock.captured_output_string().await;
+        // The output only contains the init line echo processing — no user_message sent.
+        assert!(!output.contains("user_message"), "should not send any message for thread/archive");
+    }
+
+    #[tokio::test]
+    async fn droid_acp_codex_thread_rollback_noop() {
+        let (mut transport, _mock) = setup();
+
+        let result = transport
+            .send_request("thread/rollback", serde_json::json!({"thread_id": "t1"}))
+            .await
+            .unwrap();
+
+        assert_eq!(result["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn droid_acp_codex_thread_name_set_noop() {
+        let (mut transport, _mock) = setup();
+
+        let result = transport
+            .send_request(
+                "thread/name/set",
+                serde_json::json!({"thread_id": "t1", "name": "New Name"}),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result["ok"], true);
+    }
+
+    // VAL-DROIDACP-MAP-006: collaborationMode/list returns empty
+
+    #[tokio::test]
+    async fn droid_acp_codex_collaboration_mode_list_empty() {
+        let (mut transport, _mock) = setup();
+
+        let result = transport
+            .send_request("collaborationMode/list", serde_json::json!({}))
+            .await
+            .unwrap();
+
+        assert_eq!(result["data"], serde_json::json!([]));
+    }
+
+    // ── Regression: existing methods still work ────────────────────────
+
+    #[tokio::test]
+    async fn droid_acp_codex_existing_prompt_method_still_works() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_line(
+            r#"{"type":"system","subtype":"init","session_id":"sess-regression","model":"test"}"#,
+        ).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Existing "prompt" method should still work.
+        transport
+            .send_request("prompt", serde_json::json!({"text": "regression test"}))
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let output = mock.captured_output_string().await;
+        assert!(output.contains("regression test"), "existing prompt method should still work");
+    }
+
+    #[tokio::test]
+    async fn droid_acp_codex_existing_cancel_method_still_works() {
+        let (mut transport, _mock) = setup();
+
+        let result = transport
+            .send_request("cancel", serde_json::json!({}))
+            .await
+            .unwrap();
+
+        assert!(result.is_null(), "existing cancel should still work");
+    }
+
+    #[tokio::test]
+    async fn droid_acp_codex_unknown_method_returns_error() {
+        let (mut transport, _mock) = setup();
+
+        let result = transport
+            .send_request("nonexistent/method", serde_json::json!({}))
+            .await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            RpcError::Server { code, message } => {
+                assert_eq!(code, -32601);
+                assert!(message.contains("nonexistent/method"));
+            }
+            other => panic!("expected Server error, got: {other:?}"),
+        }
     }
 
     // ── E2E Tests (require SSH access to gvps) ──────────────────────────
