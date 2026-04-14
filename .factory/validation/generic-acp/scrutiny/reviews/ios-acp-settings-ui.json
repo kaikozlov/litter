@@ -1,0 +1,51 @@
+{
+  "featureId": "ios-acp-settings-ui",
+  "reviewedAt": "2026-04-14T21:30:00.000Z",
+  "commitId": "046aaa7",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Solid iOS UI implementation adding ACP provider profile management to Settings. ACPProfilesView provides full CRUD (list with empty state, add/edit sheets, delete confirmation). SettingsView gets a new 'Custom Agents' section with NavigationLink showing profile count. Code follows existing patterns (LitterTheme usage, litterFont, Form sections, sheet-based editing), dark theme styling is consistent, and validation (non-empty fields, shell injection protection) is present. Builds pass (make ios-sim-fast), all 97 existing iOS unit tests pass, and 1250 Rust tests pass.",
+    "issues": [
+      {
+        "file": "apps/ios/Sources/Litter/Views/ACPProfilesView.swift",
+        "line": 436,
+        "severity": "non_blocking",
+        "description": "No unit tests added for the new UI views. While existing ACPProfileTests cover the model/store layer (21 cases), the view layer (form validation logic, state management) is untested. The `containsDangerousShellCharacters` validation in particular could benefit from targeted unit tests to ensure edge cases are covered (e.g., commands with pipes in quoted arguments like `my-agent --config \"path|with|pipes\"` would be falsely rejected)."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/ACPProfilesView.swift",
+        "line": 385,
+        "severity": "non_blocking",
+        "description": "The `containsDangerousShellCharacters` validation is overly aggressive — it blocks `|` in all contexts, including potentially valid use cases like `my-agent --config \"path|with|pipes\"` or legitimate pipes in quoted arguments. Additionally, since the command is executed over SSH, the validation may give a false sense of security since the server-side execution environment is not controlled by the client. This is noted as non-blocking since it's a defense-in-depth measure that can be refined later."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/SettingsView.swift",
+        "line": 234,
+        "severity": "non_blocking",
+        "description": "ACPProfileStore.shared.profiles().count is called as a computed property in the view body, which means it reads from UserDefaults on every SettingsView body evaluation. While not a performance issue for a small profile list, it's slightly inconsistent with how other Settings sections work (they typically reference @State or @Observable properties). Could be improved by observing the store reactively, but acceptable for MVP."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/ACPProfilesView.swift",
+        "line": 62,
+        "severity": "non_blocking",
+        "description": "The feature description mentions 'connection status' per profile but this is not implemented. The profile row shows display name, remote command, and permission policy but no connection status indicator. This aligns with the expected behavior list (which doesn't mention connection status) and the validation contract, but diverges from the feature description. Connection status would require runtime state beyond the profile model (which is a static configuration object), so this omission is reasonable."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The platform-ui-worker SKILL.md is narrowly scoped to agent selection/discovery wiring (DiscoveryView, AgentType parameters, SSH connect flow). The worker used it for a Settings UI feature instead, which is a different UI surface entirely. The worker followed the general procedure (understand feature, implement, verify build) but most skill-specific guidance (DiscoveryView, agentType parameter threading, connectViaSSH) was not applicable. The skill could be broadened to cover general iOS UI feature work, or a separate skill for Settings/configuration UI features could be created.",
+      "evidence": "Worker transcript shows skill was loaded but most steps were inapplicable. Worker's handoff.skillFeedback.followedProcedure=true but with a deviation on 'Verify Bindings Are Current' step. The skill's key changes section only mentions DiscoveryView.swift and agentType parameter threading, none of which were needed for this Settings CRUD feature."
+    },
+    {
+      "area": "conventions",
+      "observation": "No iOS UI testing conventions are documented. The project has XCTest conventions for model/logic tests, but there's no documented pattern for testing SwiftUI views (e.g., ViewInspector, snapshot tests, or XCUITest patterns for Settings screens). The worker chose to add no view tests, which is consistent with the rest of the codebase, but this pattern isn't explicitly documented.",
+      "evidence": "ACPProfilesView.swift has 436 lines of UI code with zero test coverage. Existing tests in apps/ios/Tests/LitterTests/ cover only model and store logic. No documentation in AGENTS.md or CLAUDE.md about when/how to test SwiftUI views."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Feature passes review. ACPProfilesView implements complete CRUD for ACP provider profiles with proper dark theme styling, form validation (including shell injection protection), and integration into Settings via a 'Custom Agents' section. All four expected behaviors are met: Settings has the section, users can add profiles with required fields, edit/delete works with confirmation, and the UI follows the dark theme. Minor non-blocking issues: no view-level tests, overly aggressive shell character validation, and the profile count reads UserDefaults on every SettingsView body evaluation. The 'connection status' mentioned in the feature description is not implemented but is also absent from expected behaviors and validation contract, so this is a description gap rather than an implementation gap."
+}

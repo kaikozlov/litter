@@ -1,0 +1,50 @@
+{
+  "featureId": "ios-agent-picker-acp",
+  "reviewedAt": "2026-04-14T22:20:00Z",
+  "commitId": "c3a4339",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation cleanly integrates GenericAcp into the iOS agent picker across 4 files. It adds ACP profile selection in the picker sheet, a custom command text field with shell character validation, ACP badge pills on ACP-type agent rows, persistence via AgentSelectionStore, and wiring of remoteCommand through the SSH connect flow. The code is well-structured, follows project conventions (4-space indent, dark theme, litterFont usage), and includes 9 new unit tests covering the persistence layer. There are two minor non-blocking issues: duplicated shell validation logic and a subtle UX edge case in handleGenericAcpSelection.",
+    "issues": [
+      {
+        "file": "apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+        "line": 725,
+        "severity": "non_blocking",
+        "description": "containsDangerousShellCharacters is duplicated verbatim from ACPProfilesView.swift (line 359). This identical private function exists in two views with the same logic and same dangerous character list. Should be extracted to a shared utility (e.g., an extension on String or a ShellValidation helper) to avoid drift. If one copy is updated, the other may be missed."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+        "line": 683,
+        "severity": "non_blocking",
+        "description": "handleGenericAcpSelection() only auto-selects when there's exactly 1 profile. When there are 0 profiles, clicking a detected GenericAcp agent from agentInfos does nothing — the user clicks and nothing visible happens (the function body is a no-op for 0 profiles). The acpProfilesSection below does show 'No ACP profiles configured' with a dismiss-and-go-to-Settings hint, but tapping the detected GenericAcp row itself gives no feedback. Consider either disabling the detected GenericAcp row when no profiles exist, or showing an alert/feedback when tapped with 0 profiles."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/DiscoveryView.swift",
+        "line": 1087,
+        "severity": "non_blocking",
+        "description": "hasRemoteCommand is passed as a string 'true'/'false' in the metadata dictionary. This is fine for logging/diagnostics, but worth noting that the actual command value is passed separately via the Rust FFI call. The metadata dict entry is only used for tracing, so this is a style note, not a bug."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "Shell character validation logic (containsDangerousShellCharacters) is duplicated across ACPProfilesView.swift and AgentPickerView.swift with identical implementations. AGENTS.md mentions 'provider-agnostic naming' and keeping bridge files thin, but doesn't mention validation utility deduplication patterns. This is a common enough pattern that a shared utility convention would help.",
+      "evidence": "AgentPickerView.swift:725-729 and ACPProfilesView.swift:359-362 — identical private functions with same dangerous character list"
+    },
+    {
+      "area": "conventions",
+      "observation": "The feature uses UserDefaults for persistence of ACP profile selection and remote command via AgentSelectionStore. Other stores in the project (ACPProfileStore, SavedServerStore) use Codable+JSON in UserDefaults as well. AGENTS.md mentions 'Codable migrations must decode BOTH old and new keys' but doesn't establish a convention for when to use UserDefaults vs other persistence. The AgentSelectionStore uses raw string/UUID keys rather than Codable, which is a slightly different pattern.",
+      "evidence": "AgentPickerView.swift:200-240 — new persistence methods use string/UUID UserDefaults keys directly"
+    },
+    {
+      "area": "skills",
+      "observation": "The platform-ui-worker skill was not found at .factory/skills/platform-ui-worker/SKILL.md. The feature's skillName is 'platform-ui-worker' but the skill file doesn't exist in the expected location. The worker's skillFeedback says followedProcedure=true, so the skill may exist at a different path or may have been loaded from a different mechanism.",
+      "evidence": "Glob for .factory/**/platform-ui-worker/** returned no results, yet features.json references skillName 'platform-ui-worker'"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "The ios-agent-picker-acp feature is well-implemented and meets all expected behaviors: ACP profiles appear in the agent picker, custom command field with validation is provided, ACP badge pills distinguish ACP agents, and selection/command persistence works via UserDefaults. The 9 new tests adequately cover the persistence layer. Two non-blocking issues were identified: duplicated shell validation logic that should be extracted to a shared utility, and a minor UX edge case where tapping a detected GenericAcp row with 0 profiles gives no user feedback. Overall the code follows project conventions, is well-structured, and passes all tests (106 iOS, 1250 Rust)."
+}

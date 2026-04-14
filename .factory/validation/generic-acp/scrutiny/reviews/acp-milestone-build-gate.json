@@ -1,0 +1,31 @@
+{
+  "featureId": "acp-milestone-build-gate",
+  "reviewedAt": "2026-04-14T22:30:00.000Z",
+  "commitId": "9c2cb6e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Build gate feature for the generic-acp milestone. The worker fixed two iOS test files (AppSnapshotRuntimeTests.swift, HomeDashboardSupportTests.swift) that were missing the newly-added `agentCapabilities: [String]` parameter on `AppServerSnapshot` initialization. The fix is minimal and correct: passing an empty array `[]` as the default value for test fixtures, which matches the expected semantics (empty capabilities for non-ACP providers). After the fix, all build gate checks pass: 1250 Rust tests, iOS simulator build, UniFFI bindings with all ACP types, and 106 iOS unit tests.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "When a UniFFI-generated Rust struct gains a new required field (like agentCapabilities on AppServerSnapshot), iOS test fixtures using that struct must be updated in the same commit or the tests will fail to compile. This pattern should be documented as a known gotcha — the upstream feature 'ios-acp-capabilities-surfacing' added the Rust field but did not update the iOS test fixtures, leaving it to the build gate worker to discover and fix.",
+      "evidence": "The precondition feature 'ios-acp-capabilities-surfacing' (commit ae83a5b9) added agentCapabilities to AppServerSnapshot in Rust/generated Swift but did not update AppSnapshotRuntimeTests.swift or HomeDashboardSupportTests.swift. The build gate worker (commit 9c2cb6e) had to fix both files."
+    },
+    {
+      "area": "skills",
+      "observation": "The platform-ui-worker skill focuses on implementing iOS UI changes (wiring agent type parameters, modifying views). For a build gate feature, the skill's procedure is largely inapplicable — the worker had to improvise by running build/test commands. A separate build-gate or validation worker skill would better match this feature type.",
+      "evidence": "The skill procedure describes steps 1-5 for implementing iOS views, but the feature is purely a build/test validation gate with no UI changes. The worker correctly adapted but the skill mismatch means the skill feedback ('followedProcedure: true') is somewhat misleading."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The services.yaml ssh.gvps entry has a note saying 'Pi 0.66.1' but the actual Pi version on gvps is 0.67.1. Minor version drift that should be updated.",
+      "evidence": "services.yaml says 'Pi 0.66.1 + Droid 0.99.0' but the transcript shows `ssh gvps 'pi --version'` returns '0.67.1'."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "The acp-milestone-build-gate feature passes review. The worker correctly identified and fixed two iOS test compilation errors caused by a missing `agentCapabilities` parameter (added by a prior feature but not propagated to test fixtures). The fix is minimal, correct, and well-targeted. All verification steps completed successfully: 1250 Rust tests pass, iOS simulator builds, UniFFI bindings contain all ACP types (genericAcp, remoteCommand, AgentType), and 106 iOS unit tests pass. E2E flow assertions (VAL-ACP-140/141/142) were appropriately deferred to user-testing validation since they require interactive simulator testing with remote agent servers."
+}

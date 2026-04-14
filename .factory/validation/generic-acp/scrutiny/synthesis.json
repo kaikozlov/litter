@@ -1,0 +1,61 @@
+{
+  "milestone": "generic-acp",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib", "exitCode": 0 },
+    "typecheck": { "passed": true, "command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml", "exitCode": 0 },
+    "lint": { "passed": true, "command": "cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml -- -D warnings", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 11,
+    "passed": 11,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [
+    {
+      "target": "services.yaml",
+      "description": "Updated Pi version in gvps note from 0.66.1 to 0.67.1 to match actual installed version",
+      "sourceFeature": "acp-milestone-build-gate"
+    },
+    {
+      "target": "library",
+      "description": "Added ACP capability string constants section, iOS UserDefaults key conventions, and UniFFI ServerSnapshot field addition checklist to provider-transport.md",
+      "sourceFeature": "ios-acp-capabilities-surfacing"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add convention: extract shared shell validation logic (containsDangerousShellCharacters) to a utility file instead of duplicating in multiple view files.",
+      "evidence": "AgentPickerView.swift and ACPProfilesView.swift both contain identical private containsDangerousShellCharacters functions (ios-agent-picker-acp, ios-acp-settings-ui).",
+      "isSystemic": false
+    },
+    {
+      "target": "skills/platform-ui-worker",
+      "suggestion": "Expand the skill to cover model/store creation, Settings UI, build-gate validation, and Rust store changes. Currently scoped only to DiscoveryView/agent selection wiring.",
+      "evidence": "4 of 5 iOS features (ios-acp-data-models, ios-acp-settings-ui, ios-acp-capabilities-surfacing, acp-milestone-build-gate) had to deviate significantly from the skill procedure because their work (model creation, Settings UI, Rust store changes, build validation) fell outside the skill's scope.",
+      "isSystemic": true
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Document that when UniFFI Rust structs change (add/remove fields), iOS test fixtures using those structs must also be updated in the same commit to prevent build breakage.",
+      "evidence": "The capabilities-surfacing feature added agentCapabilities to AppServerSnapshot in Rust, but the build-gate feature had to fix iOS test fixtures that were missing the new field (acp-milestone-build-gate).",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    { "observation": "Rust AcpProfile lacks uniffi::Record derive", "reason": "By design — iOS has its own richer ACPProfile model, reviewed and accepted" },
+    { "observation": "No caching of detection results", "reason": "Acceptable for user-triggered discovery, not a documentation gap" },
+    { "observation": "detect_all_agents → detect_all_agents_with_profiles delegation pattern", "reason": "Already evident from reading the code, not novel library knowledge" },
+    { "observation": "GenericAcpTransport initialize_result storage pattern", "reason": "Already documented in provider-transport.md" },
+    { "observation": "droid --output-format acp key integration detail", "reason": "Already documented in provider-transport.md" },
+    { "observation": "Worker followed skill procedure correctly", "reason": "Not actionable guidance" },
+    { "observation": "Platform-ui-worker skill not found at expected path", "reason": "Skill exists and was loaded successfully by workers — path issue is an artifact of the review agent's search" },
+    { "observation": "Test-only feature doesn't fit Red/Green skill framing", "reason": "Minor skill ergonomics issue, not actionable without broader skill redesign" },
+    { "observation": "Test helper for authenticated session setup to reduce boilerplate", "reason": "Suggestion for test refactoring, not a documentation/guidance gap" }
+  ],
+  "previousRound": null
+}

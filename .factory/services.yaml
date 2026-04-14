@@ -14,4 +14,4 @@ ssh:
     port: 5132
     user: ubuntu
     alias: gvps
-    note: Pi 0.66.1 + Droid 0.99.0 installed via bun (PATH includes ~/.bun/bin)
+    note: Pi 0.67.1 + Droid 0.99.0 installed via bun (PATH includes ~/.bun/bin)

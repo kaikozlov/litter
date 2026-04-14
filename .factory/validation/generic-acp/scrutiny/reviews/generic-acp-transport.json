@@ -1,0 +1,50 @@
+{
+  "featureId": "generic-acp-transport",
+  "reviewedAt": "2026-04-14T20:15:00Z",
+  "commitId": "e924d94",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "GenericAcpTransport is a well-structured, configurable ACP transport that wraps AcpClient and implements the full ProviderTransport trait. The implementation closely mirrors PiAcpTransport (the existing reference) with one key enhancement: it stores the InitializeResult (capabilities, auth methods, agent info) after handshake for later querying. The factory wiring is correct — create_generic_acp() reads remote_command from ProviderConfig, spawns via SSH, completes handshake with timeout, then boxes. All 31 new tests pass, plus 1148 existing tests remain green. Clippy clean.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/generic_transport.rs",
+        "line": 790,
+        "severity": "non_blocking",
+        "description": "generic_acp_send_request_prompt test: After creating a session via send_request, the transport is consumed by the spawned task, so the test cannot actually verify the prompt dispatch. The comment acknowledges this ('The transport was moved into the spawned task above, so we verify prompt indirectly'). This is a weak test — it only validates session/new as a prerequisite, not the prompt method itself. However, prompt is thoroughly tested through other tests (thread_start_creates_session_and_prompts, streaming_events_through_receiver, etc.), so this is a quality gap rather than a correctness issue."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/generic_transport.rs",
+        "line": 1120,
+        "severity": "non_blocking",
+        "description": "generic_acp_capabilities_populated_after_connect test: The test performs connect() by spawning a task that moves the transport, then notes 'We can't query the transport after moving it into the spawned task'. The test doesn't actually assert anything about capabilities — it just verifies connect() succeeds. The actual capabilities querying is tested in generic_acp_capabilities_accessible_via_arc, making this test partially redundant. Not a bug, but the test name is slightly misleading."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/generic_transport.rs",
+        "line": 159,
+        "severity": "non_blocking",
+        "description": "The GenericAcpTransport struct uses Arc<Mutex<bool>> for initialized and disconnected flags, which means concurrent calls to send_request from multiple tasks could interleave the lock acquisition in unexpected ways (e.g., one task checks initialized=true, another disconnects, then the first proceeds). This is the same pattern used by PiAcpTransport, so it's consistent. The Mutex on AcpClient's inner state serializes actual wire operations, so this is safe in practice."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The provider-transport.md library doc describes GenericAcpTransport location as 'src/provider/generic_acp.rs' but the actual location is 'src/provider/acp/generic_transport.rs'. The library doc should be updated to match the actual file location.",
+      "evidence": ".factory/library/provider-transport.md references 'src/provider/generic_acp.rs' but the actual file is at shared/rust-bridge/codex-mobile-client/src/provider/acp/generic_transport.rs"
+    },
+    {
+      "area": "conventions",
+      "observation": "GenericAcpTransport adds initialize_result storage (Arc<Mutex<Option<InitializeResult>>>) beyond what PiAcpTransport has. This is a capability querying feature (VAL-ACP-036) that PiAcpTransport doesn't support. The pattern of storing handshake results for later querying could be a useful convention to document for future transport implementations.",
+      "evidence": "GenericAcpTransport::initialize_result() and GenericAcpTransport::capabilities() methods (lines 192-218) provide post-handshake capability querying not present in PiAcpTransport"
+    },
+    {
+      "area": "skills",
+      "observation": "Worker followed the rust-backend-worker skill procedure correctly: wrote tests first (though there were compilation issues fixed iteratively), implemented to match existing patterns, ran cargo check/test/clippy, and reported no UniFFI type changes needed.",
+      "evidence": "Transcript shows worker ran baseline tests (1148 passed), created implementation, fixed compilation errors iteratively (3 fix rounds), then verified all 1179 tests pass and clippy is clean. skillFeedback.followedProcedure = true."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS. GenericAcpTransport is a clean, well-tested implementation that correctly mirrors PiAcpTransport's architecture while adding InitializeResult storage for post-handshake capability querying. The factory wiring is correct — it reads remote_command from ProviderConfig, constructs GenericAcpTransport, performs handshake with timeout, and boxes as dyn ProviderTransport. All 31 new tests cover lifecycle, handshake, disconnect semantics, error handling, Codex wire method adapters, type bounds, capabilities querying, and concurrent operation serialization. The implementation is consistent with project conventions (same struct layout, error types, and send_request match structure as PiAcpTransport). The only non-blocking issues are a weak prompt test (compensated by other tests) and a misleading capabilities test name. The worker followed the skill procedure correctly."
+}

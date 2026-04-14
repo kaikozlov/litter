@@ -1,0 +1,34 @@
+{
+  "featureId": "acp-handshake-protocol",
+  "reviewedAt": "2026-04-14T22:15:00.000Z",
+  "commitId": "6f95e3d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation comprehensively covers the ACP handshake protocol across both the AcpClient and GenericAcpTransport layers. 20 new tests were added (14 in client.rs, 6 in generic_transport.rs) covering all 7 VAL-ACP assertions (030-036). The production code changes are minimal and well-scoped: storing InitializeResult in GenericAcpTransport with accessor methods, and fixing JSON field names from 'capabilities' to 'agentCapabilities' to match the ACP spec. The handshake sequencing guards properly enforce the lifecycle: Uninitialized → Initialized → Authenticated, blocking session operations until the full handshake completes.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/client.rs",
+        "line": 539,
+        "severity": "non_blocking",
+        "description": "session_list() only checks for Uninitialized state, not Authenticated. This means session/list is accessible after initialize() but before authenticate(). While this may be intentional (listing sessions might not require auth), it's inconsistent with other session operations (session_new, session_prompt, session_load) which all require Authenticated state. The test acp_handshake_session_operations_blocked_before_initialize verifies session/list returns NotInitialized when called before init, but there's no test verifying what happens when session/list is called after init but before auth — the current implementation would allow it."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/client.rs",
+        "line": 2767,
+        "severity": "non_blocking",
+        "description": "In acp_handshake_auth_permanent_failure_no_retry test, the comment acknowledges that verifying 'no retry was sent' is not fully robust: 'We can't easily assert this without more infrastructure'. The test relies on checking that state is NOT Authenticated after a 50ms sleep, rather than verifying only one request was sent. This is adequate for now but could be fragile."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/acp/generic_transport.rs",
+        "line": 1420,
+        "severity": "non_blocking",
+        "description": "In generic_acp_capabilities_populated_after_connect test, the comment notes 'We can't query the transport after moving it into the spawned task'. The test verifies connect succeeds but doesn't actually assert capabilities are populated. This gap is addressed by the separate generic_acp_capabilities_accessible_via_arc test which uses Arc<Mutex<>> to work around ownership, providing the actual coverage."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "PASS — The ACP handshake protocol implementation is thorough and well-tested. All 7 VAL-ACP assertions (030-036) are covered by the 20 new tests. The production code changes are minimal and correct: InitializeResult storage in GenericAcpTransport with initialize_result() and capabilities() accessors, and a spec-compliant JSON field name fix (agentCapabilities). The handshake sequencing guards (Uninitialized → Initialized → Authenticated lifecycle state machine) properly block session operations before handshake completion. Minor non-blocking observations: session_list has a weaker guard than other session operations (only checks Uninitialized, not Authenticated), one test has a soft assertion on retry count, and one generic_transport test relies on a companion test for full coverage. All 1200 Rust tests pass with zero failures."
+}

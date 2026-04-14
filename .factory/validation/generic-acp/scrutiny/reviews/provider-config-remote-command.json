@@ -1,0 +1,33 @@
+{
+  "featureId": "provider-config-remote-command",
+  "reviewedAt": "2026-04-14T19:30:00.000Z",
+  "commitId": "0cf6cfca28c0244a665321e8ed3f73f46650a20d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation correctly adds a `remote_command: Option<String>` field to `ProviderConfig`, wires it through the factory's `create_generic_acp` (which now spawns the configured command over SSH via exec_stream and completes ACP handshake), and threads it through MobileClient's SSH connect path and both SshBridge FFI methods. The field defaults to None, and GenericAcp returns a clear error when no command is configured. All 5 new tests cover the expected behavior (VAL-ACP-001 and VAL-ACP-002), all 1143 existing tests pass, clippy is clean, and bindings were regenerated with remoteCommand appearing in both Swift and Kotlin. The iOS caller (DiscoveryView.swift) already passes remoteCommand through to the bridge.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/mod.rs",
+        "line": 357,
+        "severity": "non_blocking",
+        "description": "Doc comment on `remote_command` says 'Used by GenericAcp and DroidAcp transports' but DroidAcp's create_droid_acp() hardcodes 'droid exec --output-format acp' and does NOT read remote_command. The comment is slightly misleading — only GenericAcp actually reads this field currently. Low impact since the doc's intent is clear enough and a future iteration may wire DroidAcp to use it."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The library doc (provider-transport.md) was updated by this commit to document the new remote_command field on ProviderConfig, including its type, purpose, and FFI bridge wiring. This is good practice and the observation is just that the worker did the right thing.",
+      "evidence": ".factory/library/provider-transport.md lines 30-33 updated in commit 0cf6cfc"
+    },
+    {
+      "area": "conventions",
+      "observation": "The factory.rs doc table had a minor inaccuracy in this commit — it listed `PiAcpTransport` as the transport for GenericAcp, but the actual code used `PiAcpTransport` at this point (later corrected to `GenericAcpTransport` in commit e924d94). Not a blocker since it was self-corrected, but workers should verify doc tables match actual code.",
+      "evidence": "factory.rs line 17 in commit 0cf6cfc shows `PiAcpTransport` in the table; the code on line 198 also uses `PiAcpTransport::new(stream)` at this commit point. The table was accurate at commit time — it was a subsequent commit that introduced GenericAcpTransport and updated the table."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Solid implementation. The remote_command field is correctly added to ProviderConfig, wired through the factory (create_generic_acp reads it, returns error when None, spawns command via exec_stream when Some), threaded through MobileClient and SshBridge FFI with all callers updated. Bindings regenerated. 5 new tests cover both validation assertions (VAL-ACP-001, VAL-ACP-002). One non-blocking issue: the ProviderConfig doc comment claims DroidAcp uses remote_command but it doesn't actually. All verification commands pass (1143 tests, clippy clean, bindings regenerated). Worker followed the skill procedure faithfully."
+}

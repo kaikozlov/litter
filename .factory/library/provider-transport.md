@@ -479,4 +479,37 @@ Droid sends `droid_working_state_changed(idle)` *before* the `complete` notifica
 - Several `#[ignore]` tests (e.g., `droid_e2e_gvps_*`, `pi_e2e_gvps_*`) are placeholder functions with `println!` statements that document expected real E2E flows against gvps. Running `cargo test -- --ignored` will show these pass without testing anything. These should be replaced with real SSH-based E2E tests or removed.
 
 ### Test Count
-- Full suite: 868 passed; 0 failed; 9 ignored
+- Full suite: 1250 passed; 0 failed; 9 ignored
+
+## ACP Capability Strings
+
+The following capability string constants are used across both Rust (`capabilities_for_agent_type` in `mobile_client/mod.rs`) and iOS (`AppServerSnapshot+UI.swift`) to render agent capability badges:
+- `"streaming"` — supports streaming response deltas
+- `"tools"` — supports tool/command execution
+- `"plans"` — supports planning mode
+- `"reasoning"` — supports reasoning/thinking output
+- `"thinking-levels"` — supports configurable thinking depth
+- `"multimodal"` — supports multimodal input (images, files)
+- `"approvals"` — supports approval workflows
+- `"autonomy-levels"` — supports configurable autonomy levels
+
+These are currently hardcoded per agent type in `capabilities_for_agent_type()`. For GenericAcp agents with dynamic capabilities, the actual handshake `initialize` response may differ from the hardcoded list.
+
+## iOS UserDefaults Key Conventions
+
+The iOS app uses UserDefaults with a `litter.*` prefix for persistence:
+- `litter.acpProfiles` — serialized ACPProfile array
+- `litter.selectedAgent` — selected agent type string
+- `litter.serverAgentTypes` — per-server agent type dictionary
+- `litter.selectedACPProfileId` — selected ACP profile UUID
+
+## Adding New Fields to UniFFI ServerSnapshot
+
+When adding a new field to `ServerSnapshot` (Rust), the following files must be updated:
+1. `snapshot.rs` — struct definition
+2. `boundary.rs` — `AppServerSnapshot` UniFFI record + mapping
+3. `reducer.rs` — upsert/merge logic
+4. `app_store.rs` — if the field affects store-level operations
+5. `reconnect.rs` test fixtures — update test `AppServerSnapshot` constructors
+6. iOS Swift `PreviewSupport.swift` — update preview fixtures
+7. iOS test files — update any test `AppServerSnapshot` constructors

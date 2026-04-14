@@ -1,0 +1,56 @@
+{
+  "featureId": "ios-acp-capabilities-surfacing",
+  "reviewedAt": "2026-04-14T22:15:00.000Z",
+  "commitId": "6660f3c",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation adds ACP agent capabilities to the Rust store (ServerSnapshot.agent_capabilities), exposes them via UniFFI (AppServerSnapshot.agentCapabilities), and renders capability badges (Stream, Tools, Plans, Think, etc.) in the agent picker UI. Both InlineAgentSelectorView and AgentPickerSheet now display capability badges alongside transport labels. The Rust reducer correctly preserves agent_capabilities across server upserts. The approach is architecturally sound and follows the project's Rust-first conventions.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/mobile_client/mod.rs",
+        "line": 888,
+        "severity": "non_blocking",
+        "description": "capabilities_for_agent_type() uses hardcoded capability lists per agent type rather than reading actual capabilities from the ACP handshake response (InitializeResult.agent_capabilities). For GenericAcp, the handshake already returns dynamic agentCapabilities — the comment says 'GenericAcp capabilities are discovered at runtime from the initialize handshake' but then hardcodes [streaming, tools, plans]. This means if a GenericAcp agent advertises different capabilities than the hardcoded defaults, the UI will show incorrect badges. This is an acceptable initial implementation but should be followed up to feed actual handshake capabilities into update_server_agent_capabilities."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Models/AppServerSnapshot+UI.swift",
+        "line": 32,
+        "severity": "non_blocking",
+        "description": "Capability string matching uses plain string contains checks (e.g., agentCapabilities.contains(\"streaming\")). This is fragile — if the ACP spec changes capability names or adds namespaced capabilities like 'streaming.v2', the matching would break. A more robust approach would be to normalize/parse capabilities in Rust and expose typed enum flags across UniFFI. However, for the current ACP spec this is acceptable."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/DiscoveryView.swift",
+        "line": 693,
+        "severity": "non_blocking",
+        "description": "Capability lookup in the fallback path (when server.agentInfos.isEmpty) searches AgentSelectionStore.shared.agentInfos for matching agent type, which relies on the in-memory cache being populated by a prior discovery. If the app restarts, the cache is empty and capabilities won't be shown for servers that don't have agentInfos yet. This is an edge case that only affects the brief window before discovery completes."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/store/reducer.rs",
+        "line": 1037,
+        "severity": "non_blocking",
+        "description": "update_server_agent_capabilities acquires the write lock, updates a single server, then emits ServerChanged. This is correct but could be optimized later to batch if multiple servers update simultaneously. Not a real concern currently."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The capability string constants (\"streaming\", \"tools\", \"plans\", \"reasoning\", \"thinking-levels\", \"multimodal\", \"approvals\", \"autonomy-levels\") are used across Rust (capabilities_for_agent_type, detection.rs) and Swift (AppServerSnapshot+UI.swift, AgentBadgeView.swift) as magic strings. These should be documented as the canonical capability vocabulary in the library so future workers know the valid set.",
+      "evidence": "mobile_client/mod.rs:2391-2420 defines capabilities_for_agent_type; AppServerSnapshot+UI.swift:25-73 maps them; detection.rs:76-127 constructs AgentInfo with them"
+    },
+    {
+      "area": "conventions",
+      "observation": "The pattern of adding a new field to ServerSnapshot requires changes in 5+ files: snapshot.rs (struct), boundary.rs (AppServerSnapshot record + mapping), reducer.rs (preserve-existing logic + setter method), app_store.rs (FFI method), and test fixtures. This is not documented in AGENTS.md as a checklist for adding snapshot fields.",
+      "evidence": "This commit touches snapshot.rs, boundary.rs, reducer.rs, app_store.rs, reconnect.rs test fixtures, and PreviewSupport.swift — all to add one Vec<String> field"
+    },
+    {
+      "area": "skills",
+      "observation": "The platform-ui-worker skill describes wiring agentType parameters through the iOS connect flow, but this feature primarily involved Rust store changes + new SwiftUI views (AgentCapabilityBadge, AgentCapabilitiesRow). The skill's work procedure doesn't mention adding new Rust store fields or creating new view components — it focuses on parameter threading. The worker followed the spirit of the skill but the skill could be more general about iOS UI work scope.",
+      "evidence": "Skill says 'Modify views in apps/ios/Sources/Litter/Views/' and 'Keep bridge files thin — logic belongs in Rust' but doesn't address the Rust store expansion pattern that 60% of this commit involved"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "The implementation successfully surfaces ACP agent capabilities in the iOS UI. The Rust store correctly stores capabilities as Vec<String> on ServerSnapshot, the reducer preserves them across upserts, and the iOS UI renders them as compact capability badges in both agent picker contexts (inline and sheet). The code follows project conventions (Rust-first, thin Swift). One architectural note: capabilities are currently hardcoded per agent type rather than read from the actual ACP initialize handshake response, which is acceptable as a v1 but should be improved for GenericAcp agents that may advertise different capabilities. Four non-blocking issues identified, none of which prevent the feature from functioning correctly."
+}

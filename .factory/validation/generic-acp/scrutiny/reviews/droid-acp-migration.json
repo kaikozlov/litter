@@ -1,0 +1,28 @@
+{
+  "featureId": "droid-acp-migration",
+  "reviewedAt": "2026-04-14T19:45:00.000Z",
+  "commitId": "3af3fdc",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The migration correctly replaces DroidAcpTransport with PiAcpTransport for the DroidAcp agent type. The factory now spawns 'droid exec --output-format acp' and uses the standard ACP initialize+authenticate handshake, sharing the same PiAcpTransport/AcpClient pipeline as PiAcp and GenericAcp. The deprecated DroidAcpTransport and stream_json modules are properly marked with #[deprecated] attributes and #[allow(deprecated)] in consuming test code. The import of DroidAcpTransport was removed from factory.rs. 5 new migration tests cover command correctness, transport type, ACP handshake protocol, factory routing, and session lifecycle. One test (droid_acp_migration_factory_no_droid_acp_transport) is an empty body that relies on a companion test for coverage — non-blocking.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/factory.rs",
+        "line": 674,
+        "severity": "non_blocking",
+        "description": "droid_acp_migration_factory_no_droid_acp_transport is an empty test body with no assertions. The comment explains it relies on droid_acp_migration_uses_pi_acp_transport for coverage, but the test itself doesn't verify anything at runtime. Consider adding a compile-time or runtime assertion (e.g., checking that the factory function signature only references PiAcpTransport types) or removing the test and consolidating the coverage claim into the companion test."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The droid binary's --output-format acp flag enables standard ACP JSON-RPC over NDJSON. This is a key integration detail that was not documented in the library before this change. The provider-transport.md was updated but could benefit from noting the minimum droid version that supports --output-format acp.",
+      "evidence": "factory.rs:147 — 'droid exec --output-format acp'; provider-transport.md updated with migration notes but no version requirement"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Clean, well-structured migration of DroidAcp from proprietary stream-json to standard ACP transport. The factory correctly uses PiAcpTransport for DroidAcp, the deprecated code is properly annotated, imports are cleaned up, and 5 new tests verify the migration. The provider-transport.md library doc was updated with migration notes. One non-blocking issue: an empty test body for VAL-ACP-012. The worker followed the rust-backend-worker skill procedure correctly."
+}
