@@ -5,6 +5,8 @@ commands:
   test: cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib
   lint: cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml -- -D warnings
   bindings: ./shared/rust-bridge/generate-bindings.sh
+  ios-build: make ios-sim-fast
+  ios-test: make test-ios
 
 ssh:
   gvps:
