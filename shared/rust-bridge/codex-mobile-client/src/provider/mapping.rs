@@ -451,6 +451,9 @@ pub fn server_notification_to_provider_event(
 /// internally and return `None`.
 ///
 /// Returns `None` for events that do not correspond to any `UiEvent`.
+///
+/// TODO: Will be called from `ServerSession::from_provider` event bridge
+/// once that feature is implemented. Currently used only in tests.
 #[allow(dead_code)]
 pub(crate) fn provider_event_to_ui_event(
     server_id: &str,
@@ -2011,6 +2014,824 @@ mod tests {
             let result = provider_event_to_ui_event("srv1", event);
             // Just verify it doesn't panic. The result is checked in individual tests.
             let _ = result;
+        }
+    }
+
+    // ── Additional per-variant UiEvent mapping tests ──────────────────
+
+    #[test]
+    fn provider_event_thread_started_to_ui_event() {
+        let event = ProviderEvent::ThreadStarted {
+            thread_id: "t1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::ConnectionStateChanged { server_id, health } => {
+                assert_eq!(server_id, "srv1");
+                assert_eq!(health, "thread_started");
+            }
+            other => panic!("expected ConnectionStateChanged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_thread_archived_to_ui_event() {
+        let event = ProviderEvent::ThreadArchived {
+            thread_id: "t1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::ThreadArchived { key } => {
+                assert_eq!(key.server_id, "srv1");
+                assert_eq!(key.thread_id, "t1");
+            }
+            other => panic!("expected ThreadArchived, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_thread_name_updated_to_ui_event() {
+        let event = ProviderEvent::ThreadNameUpdated {
+            thread_id: "t1".into(),
+            name: "My Thread".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::ThreadNameUpdated { key, thread_name } => {
+                assert_eq!(key.thread_id, "t1");
+                assert_eq!(thread_name.as_deref(), Some("My Thread"));
+            }
+            other => panic!("expected ThreadNameUpdated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_thread_name_updated_empty_name_maps_to_none() {
+        let event = ProviderEvent::ThreadNameUpdated {
+            thread_id: "t1".into(),
+            name: String::new(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::ThreadNameUpdated { thread_name, .. } => {
+                assert!(thread_name.is_none(), "empty name should map to None");
+            }
+            other => panic!("expected ThreadNameUpdated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_thread_status_changed_to_ui_event() {
+        let event = ProviderEvent::ThreadStatusChanged {
+            thread_id: "t1".into(),
+            status: "active".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "thread/status/changed");
+                assert_eq!(params["threadId"], "t1");
+                assert_eq!(params["status"], "active");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_model_rerouted_to_ui_event() {
+        let event = ProviderEvent::ModelRerouted {
+            thread_id: "t1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "model/rerouted");
+                assert_eq!(params["threadId"], "t1");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_turn_diff_updated_to_ui_event() {
+        let event = ProviderEvent::TurnDiffUpdated {
+            thread_id: "t1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "turn/diff/updated");
+                assert_eq!(params["threadId"], "t1");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_turn_plan_updated_to_ui_event() {
+        let event = ProviderEvent::TurnPlanUpdated {
+            thread_id: "t1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "turn/plan/updated");
+                assert_eq!(params["threadId"], "t1");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_item_started_to_ui_event() {
+        let event = ProviderEvent::ItemStarted {
+            thread_id: "t1".into(),
+            turn_id: "turn1".into(),
+            item_id: "item1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "item/started");
+                assert_eq!(params["threadId"], "t1");
+                assert_eq!(params["turnId"], "turn1");
+                assert_eq!(params["itemId"], "item1");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_item_completed_to_ui_event() {
+        let event = ProviderEvent::ItemCompleted {
+            thread_id: "t1".into(),
+            turn_id: "turn1".into(),
+            item_id: "item1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "item/completed");
+                assert_eq!(params["threadId"], "t1");
+                assert_eq!(params["turnId"], "turn1");
+                assert_eq!(params["itemId"], "item1");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_plan_delta_to_ui_event() {
+        let event = ProviderEvent::PlanDelta {
+            thread_id: "t1".into(),
+            item_id: "item1".into(),
+            delta: "step 1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::PlanDelta { key, item_id, delta } => {
+                assert_eq!(key.thread_id, "t1");
+                assert_eq!(key.server_id, "srv1");
+                assert_eq!(item_id, "item1");
+                assert_eq!(delta, "step 1");
+            }
+            other => panic!("expected PlanDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_tool_call_started_to_ui_event() {
+        let event = ProviderEvent::ToolCallStarted {
+            thread_id: "t1".into(),
+            item_id: "item1".into(),
+            tool_name: "read_file".into(),
+            call_id: "call1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "item/started");
+                // ProviderEvent uses camelCase serde: "threadId" → "thread_id" in JSON
+                assert!(params.is_object(), "params should be a JSON object");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_tool_call_update_to_ui_event() {
+        let event = ProviderEvent::ToolCallUpdate {
+            thread_id: "t1".into(),
+            item_id: "item1".into(),
+            call_id: "call1".into(),
+            output_delta: "result text".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "toolCall/update");
+                assert!(params.is_object(), "params should be a JSON object");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_mcp_tool_call_progress_to_ui_event() {
+        let event = ProviderEvent::McpToolCallProgress {
+            thread_id: "t1".into(),
+            item_id: "item1".into(),
+            message: "halfway".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "item/mcpToolCall/progress");
+                assert_eq!(params["threadId"], "t1");
+                assert_eq!(params["itemId"], "item1");
+                assert_eq!(params["message"], "halfway");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_plan_updated_to_ui_event() {
+        let event = ProviderEvent::PlanUpdated {
+            thread_id: "t1".into(),
+            item_id: "item1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "plan/updated");
+                assert!(params.is_object(), "params should be a JSON object");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_approval_requested_to_ui_event() {
+        let event = ProviderEvent::ApprovalRequested {
+            thread_id: "t1".into(),
+            request_id: "req1".into(),
+            kind: "command".into(),
+            reason: Some("needs approval".into()),
+            command: Some("rm -rf /".into()),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "approval/requested");
+                assert!(params.is_object(), "params should be a JSON object");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_user_input_requested_to_ui_event() {
+        let event = ProviderEvent::UserInputRequested {
+            thread_id: "t1".into(),
+            request_id: "req1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "userInput/requested");
+                assert!(params.is_object(), "params should be a JSON object");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_server_request_resolved_to_ui_event() {
+        let event = ProviderEvent::ServerRequestResolved {
+            thread_id: "t1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "serverRequest/resolved");
+                assert_eq!(params["threadId"], "t1");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_account_rate_limits_to_ui_event() {
+        let event = ProviderEvent::AccountRateLimitsUpdated {
+            server_id: "srv1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { server_id, method, .. } => {
+                assert_eq!(server_id, "srv1");
+                assert_eq!(method, "account/rateLimits/updated");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_account_login_completed_to_ui_event() {
+        let event = ProviderEvent::AccountLoginCompleted {
+            server_id: "srv1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { server_id, method, .. } => {
+                assert_eq!(server_id, "srv1");
+                assert_eq!(method, "account/login/completed");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_realtime_started_to_ui_event() {
+        let event = ProviderEvent::RealtimeStarted {
+            thread_id: "t1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "thread/realtime/started");
+                assert_eq!(params["threadId"], "t1");
+            }
+            other => panic!("expected RawNotification for realtime started, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_realtime_closed_to_ui_event() {
+        let event = ProviderEvent::RealtimeClosed {
+            thread_id: "t1".into(),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "thread/realtime/closed");
+                assert_eq!(params["threadId"], "t1");
+            }
+            other => panic!("expected RawNotification for realtime closed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_event_error_without_code() {
+        let event = ProviderEvent::Error {
+            message: "unknown error".into(),
+            code: None,
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::Error { key, message, code } => {
+                assert!(key.is_none());
+                assert_eq!(message, "unknown error");
+                assert!(code.is_none());
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    // ── Round-trip: all streaming delta types preserve data ────────────
+
+    #[test]
+    fn round_trip_reasoning_delta() {
+        let notification =
+            ServerNotification::ReasoningTextDelta(proto::ReasoningTextDeltaNotification {
+                thread_id: "t1".to_string(),
+                turn_id: "turn1".to_string(),
+                item_id: "item1".to_string(),
+                delta: "thinking hard".to_string(),
+                content_index: 0,
+            });
+        let pe = server_notification_to_provider_event("srv1", &notification);
+        let ui = provider_event_to_ui_event("srv1", &pe).expect("should map");
+        match ui {
+            UiEvent::ReasoningDelta { key, item_id, delta } => {
+                assert_eq!(key.server_id, "srv1");
+                assert_eq!(key.thread_id, "t1");
+                assert_eq!(item_id, "item1");
+                assert_eq!(delta, "thinking hard");
+            }
+            other => panic!("expected ReasoningDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn round_trip_command_output_delta() {
+        let notification =
+            ServerNotification::CommandExecutionOutputDelta(
+                proto::CommandExecutionOutputDeltaNotification {
+                    thread_id: "t1".to_string(),
+                    turn_id: "turn1".to_string(),
+                    item_id: "item1".to_string(),
+                    delta: "ls output".to_string(),
+                },
+            );
+        let pe = server_notification_to_provider_event("srv1", &notification);
+        let ui = provider_event_to_ui_event("srv1", &pe).expect("should map");
+        match ui {
+            UiEvent::CommandOutputDelta { key, item_id, delta } => {
+                assert_eq!(key.server_id, "srv1");
+                assert_eq!(key.thread_id, "t1");
+                assert_eq!(item_id, "item1");
+                assert_eq!(delta, "ls output");
+            }
+            other => panic!("expected CommandOutputDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn round_trip_file_change_delta_to_command_output() {
+        let notification =
+            ServerNotification::FileChangeOutputDelta(proto::FileChangeOutputDeltaNotification {
+                thread_id: "t1".to_string(),
+                turn_id: "turn1".to_string(),
+                item_id: "item1".to_string(),
+                delta: "+new line".to_string(),
+            });
+        let pe = server_notification_to_provider_event("srv1", &notification);
+        let ui = provider_event_to_ui_event("srv1", &pe).expect("should map");
+        match ui {
+            UiEvent::CommandOutputDelta { key, delta, .. } => {
+                assert_eq!(key.thread_id, "t1");
+                assert_eq!(delta, "+new line");
+            }
+            other => panic!("expected CommandOutputDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn round_trip_plan_delta() {
+        let notification = ServerNotification::PlanDelta(proto::PlanDeltaNotification {
+            thread_id: "t1".to_string(),
+            turn_id: "turn1".to_string(),
+            item_id: "item1".to_string(),
+            delta: "step 1: read file".to_string(),
+        });
+        let pe = server_notification_to_provider_event("srv1", &notification);
+        let ui = provider_event_to_ui_event("srv1", &pe).expect("should map");
+        match ui {
+            UiEvent::PlanDelta { key, item_id, delta } => {
+                assert_eq!(key.thread_id, "t1");
+                assert_eq!(key.server_id, "srv1");
+                assert_eq!(item_id, "item1");
+                assert_eq!(delta, "step 1: read file");
+            }
+            other => panic!("expected PlanDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn round_trip_reasoning_summary_delta() {
+        let notification = ServerNotification::ReasoningSummaryTextDelta(
+            proto::ReasoningSummaryTextDeltaNotification {
+                thread_id: "t1".to_string(),
+                turn_id: "turn1".to_string(),
+                item_id: "item1".to_string(),
+                delta: "summarizing...".to_string(),
+                summary_index: 0,
+            },
+        );
+        let pe = server_notification_to_provider_event("srv1", &notification);
+        let ui = provider_event_to_ui_event("srv1", &pe).expect("should map");
+        match ui {
+            UiEvent::ReasoningDelta { key, delta, .. } => {
+                assert_eq!(key.thread_id, "t1");
+                assert_eq!(delta, "summarizing...");
+            }
+            other => panic!("expected ReasoningDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn round_trip_error_notification() {
+        let notification = ServerNotification::Error(proto::ErrorNotification {
+            error: proto::TurnError {
+                message: "rate limited".to_string(),
+                codex_error_info: None,
+                additional_details: None,
+            },
+            will_retry: false,
+            thread_id: "t1".to_string(),
+            turn_id: String::new(),
+        });
+        let pe = server_notification_to_provider_event("srv1", &notification);
+        let ui = provider_event_to_ui_event("srv1", &pe).expect("should map");
+        match ui {
+            UiEvent::Error { message, .. } => {
+                assert_eq!(message, "rate limited");
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    // ── Token accounting (VAL-ABS-050) ────────────────────────────────
+
+    #[test]
+    fn token_accounting_used_equals_input_plus_output() {
+        // Verify `used = input_tokens + output_tokens` from the last turn.
+        let notification = ServerNotification::ThreadTokenUsageUpdated(
+            proto::ThreadTokenUsageUpdatedNotification {
+                thread_id: "t1".to_string(),
+                turn_id: "turn1".to_string(),
+                token_usage: proto::ThreadTokenUsage {
+                    total: proto::TokenUsageBreakdown {
+                        total_tokens: 10000,
+                        input_tokens: 7000,
+                        cached_input_tokens: 500,
+                        output_tokens: 3000,
+                        reasoning_output_tokens: 100,
+                    },
+                    last: proto::TokenUsageBreakdown {
+                        total_tokens: 500,
+                        input_tokens: 300,
+                        cached_input_tokens: 0,
+                        output_tokens: 200,
+                        reasoning_output_tokens: 0,
+                    },
+                    model_context_window: Some(200000),
+                },
+            },
+        );
+
+        // Stage 1: ServerNotification → ProviderEvent
+        let pe = server_notification_to_provider_event("srv1", &notification);
+        match &pe {
+            ProviderEvent::ContextTokensUpdated { thread_id, used, limit } => {
+                assert_eq!(thread_id, "t1");
+                assert_eq!(*used, 300 + 200, "used must be last.input_tokens + last.output_tokens");
+                assert_eq!(*limit, 200000, "limit must be model_context_window");
+            }
+            other => panic!("expected ContextTokensUpdated, got {other:?}"),
+        }
+
+        // Stage 2: ProviderEvent → UiEvent
+        let ui = provider_event_to_ui_event("srv1", &pe).expect("should map");
+        match ui {
+            UiEvent::ContextTokensUpdated { key, used, limit } => {
+                assert_eq!(key.thread_id, "t1");
+                assert_eq!(key.server_id, "srv1");
+                assert_eq!(used, 500);
+                assert_eq!(limit, 200000);
+            }
+            other => panic!("expected ContextTokensUpdated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn token_accounting_zero_tokens() {
+        let notification = ServerNotification::ThreadTokenUsageUpdated(
+            proto::ThreadTokenUsageUpdatedNotification {
+                thread_id: "t1".to_string(),
+                turn_id: "turn1".to_string(),
+                token_usage: proto::ThreadTokenUsage {
+                    total: proto::TokenUsageBreakdown {
+                        total_tokens: 0,
+                        input_tokens: 0,
+                        cached_input_tokens: 0,
+                        output_tokens: 0,
+                        reasoning_output_tokens: 0,
+                    },
+                    last: proto::TokenUsageBreakdown {
+                        total_tokens: 0,
+                        input_tokens: 0,
+                        cached_input_tokens: 0,
+                        output_tokens: 0,
+                        reasoning_output_tokens: 0,
+                    },
+                    model_context_window: Some(128000),
+                },
+            },
+        );
+        let pe = server_notification_to_provider_event("srv1", &notification);
+        let ui = provider_event_to_ui_event("srv1", &pe).expect("should map");
+        match ui {
+            UiEvent::ContextTokensUpdated { used, limit, .. } => {
+                assert_eq!(used, 0);
+                assert_eq!(limit, 128000);
+            }
+            other => panic!("expected ContextTokensUpdated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn token_accounting_no_context_window_defaults_to_zero() {
+        let notification = ServerNotification::ThreadTokenUsageUpdated(
+            proto::ThreadTokenUsageUpdatedNotification {
+                thread_id: "t1".to_string(),
+                turn_id: "turn1".to_string(),
+                token_usage: proto::ThreadTokenUsage {
+                    total: proto::TokenUsageBreakdown {
+                        total_tokens: 500,
+                        input_tokens: 300,
+                        cached_input_tokens: 0,
+                        output_tokens: 200,
+                        reasoning_output_tokens: 0,
+                    },
+                    last: proto::TokenUsageBreakdown {
+                        total_tokens: 500,
+                        input_tokens: 300,
+                        cached_input_tokens: 0,
+                        output_tokens: 200,
+                        reasoning_output_tokens: 0,
+                    },
+                    model_context_window: None,
+                },
+            },
+        );
+        let pe = server_notification_to_provider_event("srv1", &notification);
+        match &pe {
+            ProviderEvent::ContextTokensUpdated { limit, .. } => {
+                assert_eq!(*limit, 0, "no context window should default to 0");
+            }
+            other => panic!("expected ContextTokensUpdated, got {other:?}"),
+        }
+    }
+
+    // ── Pipeline-level tests (VAL-ABS-013 exhaustive) ─────────────────
+
+    /// Verify that every ProviderEvent variant that should produce a UiEvent
+    /// actually does, and that the ThreadKey is correct.
+    #[test]
+    fn ui_event_pipeline_all_variants_produce_correct_key() {
+        let server_id = "test-server";
+
+        // Events that carry thread_id and should produce ThreadKey with server_id
+        let thread_events: Vec<ProviderEvent> = vec![
+            ProviderEvent::ThreadArchived { thread_id: "t1".into() },
+            ProviderEvent::ThreadNameUpdated { thread_id: "t1".into(), name: "N".into() },
+            ProviderEvent::TurnStarted { thread_id: "t1".into(), turn_id: "turn1".into() },
+            ProviderEvent::TurnCompleted { thread_id: "t1".into(), turn_id: "turn1".into() },
+            ProviderEvent::MessageDelta { thread_id: "t1".into(), item_id: "i1".into(), delta: "d".into() },
+            ProviderEvent::ReasoningDelta { thread_id: "t1".into(), item_id: "i1".into(), delta: "d".into() },
+            ProviderEvent::PlanDelta { thread_id: "t1".into(), item_id: "i1".into(), delta: "d".into() },
+            ProviderEvent::CommandOutputDelta { thread_id: "t1".into(), item_id: "i1".into(), delta: "d".into() },
+            ProviderEvent::FileChangeDelta { thread_id: "t1".into(), item_id: "i1".into(), delta: "d".into() },
+            ProviderEvent::ContextTokensUpdated { thread_id: "t1".into(), used: 100, limit: 128000 },
+        ];
+
+        for event in &thread_events {
+            let ui = provider_event_to_ui_event(server_id, event)
+                .unwrap_or_else(|| panic!("{event:?} should produce a UiEvent"));
+
+            // Extract the ThreadKey from the UiEvent, whatever variant it is
+            let key = extract_thread_key(&ui)
+                .unwrap_or_else(|| panic!("{event:?} → UiEvent has no ThreadKey: {ui:?}"));
+
+            assert_eq!(
+                key.server_id, server_id,
+                "server_id mismatch for {event:?}"
+            );
+            assert_eq!(
+                key.thread_id, "t1",
+                "thread_id mismatch for {event:?}"
+            );
+        }
+    }
+
+    /// Helper to extract a ThreadKey reference from any UiEvent that contains one.
+    fn extract_thread_key(ui: &UiEvent) -> Option<ThreadKey> {
+        match ui {
+            UiEvent::ThreadArchived { key } => Some(key.clone()),
+            UiEvent::ThreadNameUpdated { key, .. } => Some(key.clone()),
+            UiEvent::TurnStarted { key, .. } => Some(key.clone()),
+            UiEvent::TurnCompleted { key, .. } => Some(key.clone()),
+            UiEvent::MessageDelta { key, .. } => Some(key.clone()),
+            UiEvent::ReasoningDelta { key, .. } => Some(key.clone()),
+            UiEvent::PlanDelta { key, .. } => Some(key.clone()),
+            UiEvent::CommandOutputDelta { key, .. } => Some(key.clone()),
+            UiEvent::ContextTokensUpdated { key, .. } => Some(key.clone()),
+            UiEvent::Error { key: Some(key), .. } => Some(key.clone()),
+            _ => None,
+        }
+    }
+
+    // ── Realtime voice pipeline (VAL-ABS-052) ─────────────────────────
+
+    #[test]
+    fn realtime_voice_started_through_pipeline() {
+        let notification =
+            ServerNotification::ThreadRealtimeStarted(proto::ThreadRealtimeStartedNotification {
+                thread_id: "voice-thread".to_string(),
+                session_id: Some("sess-1".to_string()),
+                version: codex_protocol::protocol::RealtimeConversationVersion::V2,
+            });
+        let pe = server_notification_to_provider_event("srv1", &notification);
+        match &pe {
+            ProviderEvent::RealtimeStarted { thread_id } => {
+                assert_eq!(thread_id, "voice-thread");
+            }
+            other => panic!("expected RealtimeStarted, got {other:?}"),
+        }
+        let ui = provider_event_to_ui_event("srv1", &pe).expect("should map");
+        match &ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "thread/realtime/started");
+                assert_eq!(params["threadId"], "voice-thread");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn realtime_voice_closed_through_pipeline() {
+        let notification =
+            ServerNotification::ThreadRealtimeClosed(proto::ThreadRealtimeClosedNotification {
+                thread_id: "voice-thread".to_string(),
+                reason: None,
+            });
+        let pe = server_notification_to_provider_event("srv1", &notification);
+        match &pe {
+            ProviderEvent::RealtimeClosed { thread_id } => {
+                assert_eq!(thread_id, "voice-thread");
+            }
+            other => panic!("expected RealtimeClosed, got {other:?}"),
+        }
+        let ui = provider_event_to_ui_event("srv1", &pe).expect("should map");
+        match &ui {
+            UiEvent::RawNotification { method, params, .. } => {
+                assert_eq!(method, "thread/realtime/closed");
+                assert_eq!(params["threadId"], "voice-thread");
+            }
+            other => panic!("expected RawNotification, got {other:?}"),
+        }
+    }
+
+    // ── AppServerEvent envelope → ProviderEvent → UiEvent ─────────────
+
+    #[test]
+    fn app_server_event_to_ui_event_disconnected() {
+        let event = AppServerEvent::Disconnected {
+            message: "websocket closed".to_string(),
+        };
+        let pe = app_server_event_to_provider_event("srv1", &event);
+        let ui = provider_event_to_ui_event("srv1", &pe).expect("should map");
+        match ui {
+            UiEvent::ConnectionStateChanged { server_id, health } => {
+                assert_eq!(server_id, "srv1");
+                assert_eq!(health, "disconnected");
+            }
+            other => panic!("expected ConnectionStateChanged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn app_server_event_to_ui_event_lagged_returns_none() {
+        let event = AppServerEvent::Lagged { skipped: 10 };
+        let pe = app_server_event_to_provider_event("srv1", &event);
+        let ui = provider_event_to_ui_event("srv1", &pe);
+        assert!(ui.is_none(), "Lagged should not produce UiEvent");
+    }
+
+    // ── Multi-delta streaming pipeline order preservation ──────────────
+
+    #[test]
+    fn streaming_pipeline_preserves_delta_order() {
+        let deltas = vec!["Hello", " ", "world", "!"];
+        let mut ui_events: Vec<String> = Vec::new();
+
+        for delta in &deltas {
+            let notification =
+                ServerNotification::AgentMessageDelta(proto::AgentMessageDeltaNotification {
+                    thread_id: "t1".to_string(),
+                    turn_id: "turn1".to_string(),
+                    item_id: "item1".to_string(),
+                    delta: delta.to_string(),
+                });
+            let pe = server_notification_to_provider_event("srv1", &notification);
+            let ui = provider_event_to_ui_event("srv1", &pe).expect("should map");
+            match ui {
+                UiEvent::MessageDelta { delta, .. } => ui_events.push(delta),
+                other => panic!("expected MessageDelta, got {other:?}"),
+            }
+        }
+
+        assert_eq!(ui_events, vec!["Hello", " ", "world", "!"]);
+    }
+
+    // ── Error event with actionable message ────────────────────────────
+
+    #[test]
+    fn error_event_preserves_message_for_user_display() {
+        let event = ProviderEvent::Error {
+            message: "Thread t1 not found".into(),
+            code: Some(404),
+        };
+        let ui = provider_event_to_ui_event("srv1", &event).expect("should map");
+        match ui {
+            UiEvent::Error { key, message, code } => {
+                assert!(key.is_none(), "provider-level error has no thread key");
+                assert_eq!(message, "Thread t1 not found");
+                assert_eq!(code, Some(404));
+            }
+            other => panic!("expected Error, got {other:?}"),
         }
     }
 }
