@@ -761,10 +761,25 @@ printf '%s/codex-ipc/ipc-%s.sock' "$tmp" "$uid""#;
     }
 
     // --------------------------------------------------------------------
-    // bootstrap
+    // bootstrap (Codex-specific)
+    //
+    // These methods resolve, install, and launch the Codex app-server on
+    // the remote host.  They are ONLY appropriate when the caller has
+    // already decided to use `AgentType::Codex`.  Non-Codex agents
+    // (Pi, Droid, GenericAcp) should use `exec_stream()` via the
+    // provider factory instead — never these bootstrap helpers.
     // --------------------------------------------------------------------
 
-    /// Bootstrap a remote Codex server and set up a local tunnel.
+    /// Bootstrap a remote **Codex** server and set up a local tunnel.
+    ///
+    /// This is the Codex-specific bootstrap path. It:
+    /// 1. Resolves the Codex binary on the remote host (may install if missing).
+    /// 2. Launches the app-server process.
+    /// 3. Forwards a local port to the remote server.
+    ///
+    /// **Do not call this for non-Codex agent types.** The provider factory
+    /// (`create_provider_over_ssh`) handles Pi/Droid/ACP agents by spawning
+    /// the appropriate binary directly via `exec_stream()`.
     pub async fn bootstrap_codex_server(
         &self,
         working_dir: Option<&str>,
@@ -786,6 +801,12 @@ printf '%s/codex-ipc/ipc-%s.sock' "$tmp" "$uid""#;
             .await
     }
 
+    /// Bootstrap the Codex app-server using a pre-resolved binary.
+    ///
+    /// This is the Codex-specific bootstrap, called only after agent type
+    /// selection has settled on Codex. The `run_guided_ssh_connect` flow
+    /// gates this behind its Codex branch; the provider path
+    /// (`run_provider_ssh_connect`) never reaches this method.
     pub(crate) async fn bootstrap_codex_server_with_binary(
         &self,
         codex_binary: &RemoteCodexBinary,
@@ -1180,6 +1201,10 @@ printf '%s/codex-ipc/ipc-%s.sock' "$tmp" "$uid""#;
         })
     }
 
+    /// Resolve the Codex binary on the remote host (Codex-specific).
+    ///
+    /// This is only used in the Codex bootstrap path. Non-Codex agents
+    /// use `validate_agent_binary_on_host` in `MobileClient` instead.
     async fn resolve_codex_binary(&self) -> Result<RemoteCodexBinary, SshError> {
         match self.resolve_codex_binary_optional().await? {
             Some(binary) => Ok(binary),
@@ -1545,6 +1570,12 @@ fi"#
         }
     }
 
+    /// Install the latest stable Codex release on the remote host.
+    ///
+    /// This is a **Codex-specific** installation step. It is ONLY called
+    /// when the guided SSH connect flow determines the user wants to
+    /// install Codex (after prompting). Non-Codex agents are never
+    /// auto-installed — detection merely surfaces what's available.
     pub(crate) async fn install_latest_stable_codex(
         &self,
         platform: RemotePlatform,

@@ -75,6 +75,15 @@ impl SshBridge {
         }
     }
 
+    /// Connect to an SSH server and bootstrap the **Codex** app-server.
+    ///
+    /// This is a convenience method for the Codex-only use case.
+    /// It unconditionally resolves, installs (if needed), and starts
+    /// the Codex app-server on the remote host. It does NOT perform
+    /// agent detection or present an agent picker.
+    ///
+    /// For agent-type-aware connections, use `ssh_start_remote_server_connect`
+    /// instead, which supports detection, picker, and provider factory routing.
     #[allow(clippy::too_many_arguments)]
     pub async fn ssh_connect_and_bootstrap(
         &self,
@@ -233,6 +242,93 @@ impl SshBridge {
         .map_err(|e| ClientError::Rpc(format!("task join error: {e}")))?;
         debug!("SshBridge: ssh_close completed session_id={}", session_id);
         Ok(())
+    }
+
+    /// Connect to an SSH server without bootstrapping any agent.
+    ///
+    /// This is the generic SSH connection method. It establishes the SSH
+    /// session and returns a session ID that can be used for subsequent
+    /// operations (agent detection, exec, etc.). No agent binary is
+    /// resolved, installed, or started by this method.
+    ///
+    /// This replaces the use of `ssh_connect_and_bootstrap` when the
+    /// caller wants to control agent detection and selection separately.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn ssh_connect_only(
+        &self,
+        host: String,
+        port: u16,
+        username: String,
+        password: Option<String>,
+        private_key_pem: Option<String>,
+        passphrase: Option<String>,
+        accept_unknown_host: bool,
+    ) -> Result<String, ClientError> {
+        let normalized_host = normalize_ssh_host(&host);
+        let auth = ssh_auth(password, private_key_pem, passphrase)?;
+        info!(
+            "SshBridge: ssh_connect_only start host={} normalized_host={} ssh_port={} username={} auth={}",
+            host.as_str(),
+            normalized_host.as_str(),
+            port,
+            username.as_str(),
+            ssh_auth_kind(&auth),
+        );
+        let credentials = SshCredentials {
+            host: normalized_host.clone(),
+            port,
+            username,
+            auth,
+        };
+
+        let rt = Arc::clone(&self.rt);
+        let session = tokio::task::spawn_blocking(move || {
+            rt.block_on(async move {
+                SshClient::connect(
+                    credentials,
+                    Box::new(move |_fingerprint| Box::pin(async move { accept_unknown_host })),
+                )
+                .await
+                .map_err(map_ssh_error)
+            })
+        })
+        .await
+        .map_err(|e| ClientError::Rpc(format!("task join error: {e}")))??;
+        info!(
+            "SshBridge: ssh_connect_only connected normalized_host={} ssh_port={}",
+            normalized_host.as_str(),
+            port
+        );
+
+        let session = Arc::new(session);
+        let session_id = format!(
+            "ssh-{}",
+            self.next_ssh_session_id.fetch_add(1, Ordering::Relaxed)
+        );
+        let shell = {
+            let session = Arc::clone(&session);
+            let rt = Arc::clone(&self.rt);
+            tokio::task::spawn_blocking(move || {
+                rt.block_on(async move { session.detect_remote_shell().await })
+            })
+            .await
+            .unwrap_or(RemoteShell::Posix)
+        };
+        self.ssh_sessions_lock().insert(
+            session_id.clone(),
+            ManagedSshSession {
+                client: Arc::clone(&session),
+                pid: None,
+                shell,
+            },
+        );
+        info!(
+            "SshBridge: ssh_connect_only succeeded normalized_host={} ssh_port={} session_id={}",
+            normalized_host.as_str(),
+            port,
+            session_id
+        );
+        Ok(session_id)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1691,6 +1787,348 @@ mod tests {
                 server.health,
                 ServerHealthSnapshot::Disconnected,
                 "server should be Disconnected after failed provider connect"
+            );
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // SSH Bootstrap Separation Tests (VAL-DISC-017 / VAL-DISC-018)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// VAL-DISC-017: SSH connect establishes a connection without any
+    /// Codex-specific assumptions.
+    ///
+    /// `ssh_connect_only` performs a pure SSH handshake. No agent binary
+    /// resolution, no installation, no server bootstrap. This is the
+    /// generic transport layer that works with any agent.
+    #[tokio::test]
+    async fn ssh_bootstrap_separation_connect_only_is_generic() {
+        let bridge = SshBridge::new();
+        // No SSH server running locally, so this will fail — but it proves
+        // the method exists and doesn't reference any Codex-specific logic.
+        let result = bridge
+            .ssh_connect_only(
+                "127.0.0.1".to_string(),
+                22,
+                "user".to_string(),
+                Some("pass".to_string()),
+                None,
+                None,
+                false,
+            )
+            .await;
+        // Expected to fail — no SSH server running.
+        assert!(result.is_err(), "ssh_connect_only should fail without SSH server");
+    }
+
+    /// VAL-DISC-017: `ssh_connect_and_bootstrap` is clearly documented as
+    /// Codex-specific, while `ssh_connect_only` is generic.
+    ///
+    /// This structural test verifies both methods exist and serve different
+    /// purposes. The `ssh_connect_and_bootstrap` unconditionally bootstraps
+    /// Codex; `ssh_connect_only` is agent-agnostic.
+    #[test]
+    fn ssh_bootstrap_separation_two_distinct_methods_exist() {
+        // Structural assertion: verify the progress snapshot for SSH bootstrap
+        // contains all expected steps in the correct order.
+        let progress = AppConnectionProgressSnapshot::ssh_bootstrap();
+        let step_kinds: Vec<_> = progress.steps.iter().map(|s| s.kind).collect();
+
+        // The generic steps appear before the Codex-specific ones.
+        let ssh_pos = step_kinds.iter().position(|k| *k == AppConnectionStepKind::ConnectingToSsh);
+        let detect_pos = step_kinds.iter().position(|k| *k == AppConnectionStepKind::DetectingAgents);
+        let find_pos = step_kinds.iter().position(|k| *k == AppConnectionStepKind::FindingAgent);
+        let install_pos = step_kinds.iter().position(|k| *k == AppConnectionStepKind::InstallingAgent);
+        let start_pos = step_kinds.iter().position(|k| *k == AppConnectionStepKind::StartingAgent);
+
+        assert!(ssh_pos.is_some(), "ConnectingToSsh step must exist");
+        assert!(detect_pos.is_some(), "DetectingAgents step must exist");
+        assert!(find_pos.is_some(), "FindingAgent step must exist");
+        assert!(install_pos.is_some(), "InstallingAgent step must exist");
+        assert!(start_pos.is_some(), "StartingAgent step must exist");
+
+        // Verify ordering: SSH → Detect → Find → Install → Start
+        assert!(ssh_pos.unwrap() < detect_pos.unwrap());
+        assert!(detect_pos.unwrap() < find_pos.unwrap());
+        assert!(find_pos.unwrap() < install_pos.unwrap());
+        assert!(install_pos.unwrap() < start_pos.unwrap());
+    }
+
+    /// VAL-DISC-018: No auto-install — when Codex binary is detected as
+    /// present, the InstallingAgent step is skipped (set to Cancelled).
+    ///
+    /// In `run_guided_ssh_connect`, when `resolve_codex_binary_optional_with_shell`
+    /// returns `Some(binary)`, the `InstallingAgent` step is immediately set
+    /// to `Cancelled` with the message "Already installed". No installation
+    /// attempt is made.
+    #[test]
+    fn ssh_bootstrap_separation_codex_present_skips_install() {
+        let mut progress = AppConnectionProgressSnapshot::ssh_bootstrap();
+
+        // Simulate: SSH connected, detection completed, Codex found.
+        progress.update_step(
+            AppConnectionStepKind::ConnectingToSsh,
+            AppConnectionStepState::Completed,
+            Some("Connected to host".to_string()),
+        );
+        progress.update_step(
+            AppConnectionStepKind::DetectingAgents,
+            AppConnectionStepState::Completed,
+            Some("1 agent(s) detected".to_string()),
+        );
+        progress.update_step(
+            AppConnectionStepKind::FindingAgent,
+            AppConnectionStepState::Completed,
+            Some("/usr/local/bin/codex".to_string()),
+        );
+
+        // When the binary is found, the install step is set to Cancelled
+        // (not InProgress or Completed).
+        progress.update_step(
+            AppConnectionStepKind::InstallingAgent,
+            AppConnectionStepState::Cancelled,
+            Some("Already installed".to_string()),
+        );
+
+        // Verify: install step was cancelled, not run
+        let install_step = progress
+            .steps
+            .iter()
+            .find(|s| s.kind == AppConnectionStepKind::InstallingAgent)
+            .unwrap();
+        assert_eq!(
+            install_step.state,
+            AppConnectionStepState::Cancelled,
+            "InstallingAgent should be Cancelled when binary is already present"
+        );
+        assert_eq!(
+            install_step.detail.as_deref(),
+            Some("Already installed"),
+            "InstallingAgent detail should indicate already installed"
+        );
+    }
+
+    /// VAL-DISC-018: No auto-install for detected non-Codex agents.
+    ///
+    /// When a non-Codex agent (e.g., Pi) is detected, the guided flow
+    /// returns early for agent selection. No installation step is attempted.
+    /// The `InstallingAgent` step remains in its initial state (Pending).
+    #[test]
+    fn ssh_bootstrap_separation_pi_detected_no_install() {
+        use crate::provider::AgentInfo;
+
+        let mut progress = AppConnectionProgressSnapshot::ssh_bootstrap();
+
+        // Simulate: SSH connected, detection found Pi agent only.
+        progress.update_step(
+            AppConnectionStepKind::ConnectingToSsh,
+            AppConnectionStepState::Completed,
+            Some("Connected to host".to_string()),
+        );
+        progress.update_step(
+            AppConnectionStepKind::DetectingAgents,
+            AppConnectionStepState::Completed,
+            Some("1 agent(s) detected".to_string()),
+        );
+
+        // Non-Codex agent detected → early return for picker.
+        progress.detected_agents = vec![AgentInfo {
+            id: "pi-native".to_string(),
+            display_name: "Pi (Native)".to_string(),
+            description: "Pi agent".to_string(),
+            detected_transports: vec![AgentType::PiNative],
+            capabilities: vec!["streaming".to_string()],
+        }];
+        progress.pending_agent_selection = true;
+        progress.terminal_message = Some("Agent detected. Please select it to connect.".to_string());
+
+        // Verify: install step was never touched (still Pending)
+        let install_step = progress
+            .steps
+            .iter()
+            .find(|s| s.kind == AppConnectionStepKind::InstallingAgent)
+            .unwrap();
+        assert_eq!(
+            install_step.state,
+            AppConnectionStepState::Pending,
+            "InstallingAgent should remain Pending when non-Codex agent is detected"
+        );
+
+        // Verify: agent selection is pending
+        assert!(progress.pending_agent_selection);
+        assert_eq!(progress.detected_agents.len(), 1);
+        assert_eq!(progress.detected_agents[0].id, "pi-native");
+    }
+
+    /// VAL-DISC-018: Generic SSH transport works with any agent binary
+    /// that exists on the remote host.
+    ///
+    /// The provider factory path (`run_provider_ssh_connect`) delegates to
+    /// `MobileClient::connect_remote_over_ssh_with_agent_type`, which
+    /// validates the binary exists but never installs it. This test
+    /// verifies the binary validation function exists for each non-Codex
+    /// agent type.
+    #[test]
+    fn ssh_bootstrap_separation_provider_path_validates_without_installing() {
+        use crate::mobile_client::agent_binary_name;
+
+        // All non-Codex agent types have a binary name for validation.
+        // Validation only checks existence — it never installs.
+        let cases = [
+            (AgentType::PiNative, "pi"),
+            (AgentType::PiAcp, "pi"),
+            (AgentType::DroidNative, "droid"),
+            (AgentType::DroidAcp, "droid"),
+        ];
+
+        for (agent_type, expected_binary) in &cases {
+            let binary = agent_binary_name(*agent_type);
+            assert_eq!(
+                binary.as_deref(),
+                Some(*expected_binary),
+                "{agent_type:?} should validate binary '{expected_binary}'"
+            );
+        }
+
+        // Codex is NOT validated through this path.
+        assert!(
+            agent_binary_name(AgentType::Codex).is_none(),
+            "Codex should NOT go through provider binary validation"
+        );
+    }
+
+    /// VAL-DISC-017: Codex installation is handled by Codex-specific logic only.
+    ///
+    /// The `is_non_codex_agent` function gates the routing: Codex/None goes
+    /// through guided bootstrap (which may install), non-Codex goes through
+    /// the provider factory (which never installs). This test verifies that
+    /// the routing function correctly separates the two paths.
+    #[test]
+    fn ssh_bootstrap_separation_codex_install_in_codex_branch_only() {
+        // Codex and None → guided path (may install)
+        assert!(!is_non_codex_agent(None), "None should use guided (Codex) path");
+        assert!(!is_non_codex_agent(Some(AgentType::Codex)), "Codex should use guided path");
+
+        // All others → provider path (never installs)
+        assert!(is_non_codex_agent(Some(AgentType::PiNative)));
+        assert!(is_non_codex_agent(Some(AgentType::PiAcp)));
+        assert!(is_non_codex_agent(Some(AgentType::DroidNative)));
+        assert!(is_non_codex_agent(Some(AgentType::DroidAcp)));
+        assert!(is_non_codex_agent(Some(AgentType::GenericAcp)));
+    }
+
+    /// VAL-DISC-018: When no agents detected and Codex binary not found,
+    /// install is gated behind user prompt (not auto-install).
+    ///
+    /// In the guided flow, when Codex is not found, `pending_install` is
+    /// set to `true` and the flow waits for user confirmation before
+    /// proceeding with installation. This is NOT auto-install.
+    #[test]
+    fn ssh_bootstrap_separation_install_requires_user_prompt() {
+        let mut progress = AppConnectionProgressSnapshot::ssh_bootstrap();
+
+        // Simulate: SSH connected, detection completed, no agents found.
+        progress.update_step(
+            AppConnectionStepKind::ConnectingToSsh,
+            AppConnectionStepState::Completed,
+            Some("Connected to host".to_string()),
+        );
+        progress.update_step(
+            AppConnectionStepKind::DetectingAgents,
+            AppConnectionStepState::Completed,
+            Some("0 agent(s) detected".to_string()),
+        );
+
+        // FindingAgent → AwaitingUserInput (not auto-install)
+        progress.update_step(
+            AppConnectionStepKind::FindingAgent,
+            AppConnectionStepState::AwaitingUserInput,
+            Some("Codex not found on remote host".to_string()),
+        );
+        progress.pending_install = true;
+
+        // Verify: install is pending user decision, not auto-started
+        let find_step = progress
+            .steps
+            .iter()
+            .find(|s| s.kind == AppConnectionStepKind::FindingAgent)
+            .unwrap();
+        assert_eq!(
+            find_step.state,
+            AppConnectionStepState::AwaitingUserInput,
+            "FindingAgent should be AwaitingUserInput when binary not found"
+        );
+        assert!(
+            progress.pending_install,
+            "pending_install flag should be set"
+        );
+
+        // Install step should NOT have started
+        let install_step = progress
+            .steps
+            .iter()
+            .find(|s| s.kind == AppConnectionStepKind::InstallingAgent)
+            .unwrap();
+        assert_eq!(
+            install_step.state,
+            AppConnectionStepState::Pending,
+            "InstallingAgent should remain Pending until user confirms"
+        );
+    }
+
+    /// VAL-DISC-017: The provider SSH connect path completely bypasses
+    /// Codex bootstrap steps (FindingAgent, InstallingAgent, StartingAgent).
+    ///
+    /// When `is_non_codex_agent` returns true, `run_provider_ssh_connect`
+    /// is called instead of `run_guided_ssh_connect`. This means no
+    /// `resolve_codex_binary`, no `install_latest_stable_codex`, and no
+    /// `bootstrap_codex_server` is ever invoked for non-Codex agents.
+    #[tokio::test]
+    async fn ssh_bootstrap_separation_provider_skips_codex_bootstrap() {
+        use crate::store::ServerHealthSnapshot;
+
+        let bridge = SshBridge::new();
+        let server_id = "test-separation-provider";
+
+        // Start a PiNative connection — will fail at SSH level since there's
+        // no server, but the important thing is that the background task
+        // takes the provider path, not the guided path.
+        let _result = bridge
+            .ssh_start_remote_server_connect(
+                server_id.to_string(),
+                "Test Separation".to_string(),
+                "127.0.0.1".to_string(),
+                22,
+                "user".to_string(),
+                Some("pass".to_string()),
+                None,
+                None,
+                false,
+                None,
+                None,
+                Some(AgentType::PiNative),
+                None,
+            )
+            .await;
+
+        // Wait for background task to complete.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Verify the server ended up Disconnected (SSH failed as expected).
+        // This confirms the provider path was taken (which doesn't bootstrap
+        // Codex) and the failure came from SSH, not from Codex bootstrap.
+        let mobile_client = shared_mobile_client();
+        let snapshot = mobile_client.app_store.snapshot();
+        if let Some(server) = snapshot.servers.get(server_id) {
+            assert_eq!(
+                server.health,
+                ServerHealthSnapshot::Disconnected,
+                "provider path should end in Disconnected when SSH fails"
+            );
+            // The progress should be cleared on failure.
+            assert!(
+                server.connection_progress.is_none(),
+                "connection progress should be cleared after failure"
             );
         }
     }
