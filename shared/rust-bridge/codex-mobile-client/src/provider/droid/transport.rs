@@ -53,6 +53,43 @@ use crate::provider::droid::protocol::{
 use crate::provider::{ProviderConfig, ProviderEvent, ProviderTransport, SessionInfo};
 use crate::transport::{RpcError, TransportError};
 
+/// Extract text from Codex wire method params.
+///
+/// Tries multiple param locations in order:
+/// 1. `items` array → first item's `content` field (Codex thread/start format)
+/// 2. `content` field directly
+/// 3. `text` field directly
+pub fn extract_text_from_params(params: &serde_json::Value) -> Result<String, RpcError> {
+    // 1. Try items array: params.items[0].content
+    if let Some(items) = params.get("items").and_then(|v| v.as_array()) {
+        for item in items {
+            if let Some(content) = item.get("content").and_then(|v| v.as_str())
+                && !content.is_empty()
+            {
+                return Ok(content.to_string());
+            }
+        }
+    }
+
+    // 2. Try content field directly.
+    if let Some(content) = params.get("content").and_then(|v| v.as_str())
+        && !content.is_empty()
+    {
+        return Ok(content.to_string());
+    }
+
+    // 3. Try text field directly.
+    if let Some(text) = params.get("text").and_then(|v| v.as_str())
+        && !text.is_empty()
+    {
+        return Ok(text.to_string());
+    }
+
+    Err(RpcError::Deserialization(
+        "no text found in params (checked items[].content, content, text)".to_string(),
+    ))
+}
+
 /// Channel buffer size for the event broadcast.
 const EVENT_CHANNEL_CAPACITY: usize = 256;
 /// Channel buffer size for outgoing requests.
@@ -573,6 +610,70 @@ impl ProviderTransport for DroidNativeTransport {
                     })?;
                 self.resume_session(session_id).await?;
                 Ok(serde_json::Value::Null)
+            }
+            // ── Codex wire method adapters ───────────────────────────────
+            // These map upstream Codex JSON-RPC methods to Droid native commands.
+            "thread/start" => {
+                let model = params.get("model").and_then(|v| v.as_str());
+                let autonomy = params
+                    .get("autonomyLevel")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok());
+                let effort = params
+                    .get("reasoningEffort")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok());
+                let working_dir = params.get("workingDirectory").and_then(|v| v.as_str());
+
+                let session_id = self
+                    .initialize_session(model, autonomy, effort, None, working_dir)
+                    .await?;
+
+                // If text is present in params, also send add_user_message.
+                if let Ok(text) = extract_text_from_params(&params) {
+                    self.add_user_message(&text).await?;
+                }
+
+                Ok(serde_json::json!({
+                    "id": format!("droid-thread-{session_id}"),
+                    "thread_id": format!("droid-thread-{session_id}"),
+                }))
+            }
+            "turn/start" => {
+                let text = extract_text_from_params(&params)?;
+                self.add_user_message(&text).await?;
+                Ok(serde_json::Value::Null)
+            }
+            "turn/interrupt" => {
+                self.cancel().await?;
+                Ok(serde_json::Value::Null)
+            }
+            "thread/list" => {
+                match self.list_sessions().await {
+                    Ok(sessions) => {
+                        let threads: Vec<serde_json::Value> = sessions
+                            .into_iter()
+                            .map(|s| {
+                                serde_json::json!({
+                                    "id": s.id,
+                                    "title": s.title,
+                                    "created_at": s.created_at,
+                                    "updated_at": s.updated_at,
+                                })
+                            })
+                            .collect();
+                        Ok(serde_json::json!({"threads": threads}))
+                    }
+                    Err(RpcError::Server { code: -32601, .. }) => {
+                        // Method not found — older Droid versions may not support list_sessions.
+                        Ok(serde_json::json!({"threads": []}))
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            "thread/archive" | "thread/rollback" | "thread/name/set" => {
+                Ok(serde_json::json!({"ok": true}))
+            }
+            "collaborationMode/list" => {
+                Ok(serde_json::json!({"data": []}))
             }
             _ => Err(RpcError::Server {
                 code: -32601,
@@ -1934,5 +2035,396 @@ mod tests {
         let sessions = transport.list_sessions().await.unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, "sess-1");
+    }
+
+    // ── Codex Wire Method Mapping (VAL-DROID-MAP-*) ──────────────────
+
+    // VAL-DROID-MAP-001: thread/start → initialize_session + add_user_message
+
+    #[tokio::test]
+    async fn droid_codex_thread_start_calls_initialize_then_add_message() {
+        let (mut transport, mock) = setup();
+
+        // Queue initialize_session response (request ID 1).
+        mock.queue_response(
+            1,
+            serde_json::json!({"sessionId": "droid-sess-thread-1"}),
+        )
+        .await;
+
+        // Queue add_user_message response (request ID 2) asynchronously with a delay
+        // so it arrives after initialize_session completes and frees up the request pipeline.
+        let mock_clone = mock.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            mock_clone.queue_response(2, serde_json::json!({"ok": true})).await;
+        });
+
+        let result = transport
+            .send_request(
+                "thread/start",
+                serde_json::json!({
+                    "items": [{"role": "user", "content": "Hello Droid!"}],
+                    "model": "claude-sonnet-4-20250514",
+                    "autonomyLevel": "normal",
+                    "workingDirectory": "/home/user/project",
+                }),
+            )
+            .await
+            .unwrap();
+
+        // Should return a synthetic ThreadStart result with a thread ID.
+        assert!(result["id"].is_string(), "should have 'id' field");
+        assert!(
+            result["id"].as_str().unwrap().starts_with("droid-thread-"),
+            "thread ID should start with 'droid-thread-'"
+        );
+
+        // Verify two Droid JSON-RPC calls were sent: initialize_session then add_user_message.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let requests = mock.captured_requests().await;
+        assert!(requests.len() >= 2, "should have sent at least 2 requests, got {}", requests.len());
+
+        // First call: initialize_session with model, autonomy, working_dir.
+        assert_eq!(requests[0]["method"], "droid.initialize_session");
+        assert_eq!(requests[0]["params"]["model"], "claude-sonnet-4-20250514");
+        assert_eq!(requests[0]["params"]["autonomyLevel"], "normal");
+        assert_eq!(requests[0]["params"]["workingDirectory"], "/home/user/project");
+
+        // Second call: add_user_message with extracted text.
+        assert_eq!(requests[1]["method"], "droid.add_user_message");
+        assert_eq!(requests[1]["params"]["content"], "Hello Droid!");
+    }
+
+    #[tokio::test]
+    async fn droid_codex_thread_start_no_text_only_initializes() {
+        let (mut transport, mock) = setup();
+
+        // Queue initialize_session response.
+        mock.queue_response(
+            1,
+            serde_json::json!({"sessionId": "droid-sess-empty"}),
+        )
+        .await;
+
+        let result = transport
+            .send_request(
+                "thread/start",
+                serde_json::json!({
+                    "model": "claude-sonnet-4-20250514",
+                }),
+            )
+            .await
+            .unwrap();
+
+        assert!(result["id"].is_string(), "should still have thread ID");
+
+        // Should only have sent initialize_session (no text = no add_user_message).
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let requests = mock.captured_requests().await;
+        assert_eq!(requests.len(), 1, "should only send initialize_session");
+        assert_eq!(requests[0]["method"], "droid.initialize_session");
+    }
+
+    #[tokio::test]
+    async fn droid_codex_thread_start_extracts_text_from_content_field() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_response(1, serde_json::json!({"sessionId": "droid-sess-content"})).await;
+
+        let mock_clone = mock.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            mock_clone.queue_response(2, serde_json::json!({"ok": true})).await;
+        });
+
+        let result = transport
+            .send_request(
+                "thread/start",
+                serde_json::json!({"content": "Direct content text"}),
+            )
+            .await
+            .unwrap();
+
+        assert!(result["id"].is_string());
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let requests = mock.captured_requests().await;
+        assert!(requests.len() >= 2);
+        assert_eq!(requests[1]["method"], "droid.add_user_message");
+        assert_eq!(requests[1]["params"]["content"], "Direct content text");
+    }
+
+    #[tokio::test]
+    async fn droid_codex_thread_start_extracts_text_from_text_field() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_response(1, serde_json::json!({"sessionId": "droid-sess-text"})).await;
+
+        let mock_clone = mock.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            mock_clone.queue_response(2, serde_json::json!({"ok": true})).await;
+        });
+
+        let result = transport
+            .send_request(
+                "thread/start",
+                serde_json::json!({"text": "Text field content"}),
+            )
+            .await
+            .unwrap();
+
+        assert!(result["id"].is_string());
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let requests = mock.captured_requests().await;
+        assert!(requests.len() >= 2);
+        assert_eq!(requests[1]["method"], "droid.add_user_message");
+        assert_eq!(requests[1]["params"]["content"], "Text field content");
+    }
+
+    // VAL-DROID-MAP-002: turn/start → add_user_message only
+
+    #[tokio::test]
+    async fn droid_codex_turn_start_calls_add_user_message() {
+        let (mut transport, mock) = setup();
+
+        // Only queue add_user_message response — NO initialize_session.
+        mock.queue_response(1, serde_json::json!({"ok": true})).await;
+
+        let result = transport
+            .send_request(
+                "turn/start",
+                serde_json::json!({
+                    "items": [{"role": "user", "content": "Follow-up question"}]
+                }),
+            )
+            .await
+            .unwrap();
+
+        // Should return null (no synthetic thread ID for turn/start).
+        assert!(result.is_null());
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let requests = mock.captured_requests().await;
+        assert_eq!(requests.len(), 1, "should only send add_user_message, not initialize_session");
+        assert_eq!(requests[0]["method"], "droid.add_user_message");
+        assert_eq!(requests[0]["params"]["content"], "Follow-up question");
+    }
+
+    #[tokio::test]
+    async fn droid_codex_turn_start_extracts_text_from_content() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_response(1, serde_json::json!({"ok": true})).await;
+
+        transport
+            .send_request(
+                "turn/start",
+                serde_json::json!({"content": "Direct content"}),
+            )
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let requests = mock.captured_requests().await;
+        assert_eq!(requests[0]["method"], "droid.add_user_message");
+        assert_eq!(requests[0]["params"]["content"], "Direct content");
+    }
+
+    // VAL-DROID-MAP-003: turn/interrupt → cancel
+
+    #[tokio::test]
+    async fn droid_codex_turn_interrupt_calls_cancel() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_response(1, serde_json::json!({"ok": true})).await;
+
+        let result = transport
+            .send_request("turn/interrupt", serde_json::Value::Null)
+            .await
+            .unwrap();
+
+        assert!(result.is_null(), "interrupt should return null");
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let requests = mock.captured_requests().await;
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0]["method"], "droid.cancel");
+    }
+
+    #[tokio::test]
+    async fn droid_codex_turn_interrupt_idle_is_noop() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_response(1, serde_json::json!({"ok": true})).await;
+
+        // Calling interrupt when no prompt is active should still succeed.
+        let result = transport
+            .send_request("turn/interrupt", serde_json::Value::Null)
+            .await;
+
+        assert!(result.is_ok(), "cancel on idle should succeed");
+    }
+
+    // VAL-DROID-MAP-004: thread/list → list_sessions with format conversion
+
+    #[tokio::test]
+    async fn droid_codex_thread_list_returns_sessions_as_threads() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_response(
+            1,
+            serde_json::json!([
+                {"id": "sess-1", "title": "Session 1", "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T01:00:00Z"},
+                {"id": "sess-2", "title": "Session 2", "createdAt": "2025-01-02T00:00:00Z", "updatedAt": "2025-01-02T02:00:00Z"}
+            ]),
+        )
+        .await;
+
+        let result = transport
+            .send_request("thread/list", serde_json::Value::Null)
+            .await
+            .unwrap();
+
+        // Response must be compatible with Codex ThreadList format.
+        assert!(result["threads"].is_array(), "should have 'threads' array");
+        let threads = result["threads"].as_array().unwrap();
+        assert_eq!(threads.len(), 2);
+        assert_eq!(threads[0]["id"], "sess-1");
+        assert_eq!(threads[0]["title"], "Session 1");
+        assert_eq!(threads[1]["id"], "sess-2");
+    }
+
+    #[tokio::test]
+    async fn droid_codex_thread_list_fallback_on_method_not_found() {
+        let (mut transport, mock) = setup();
+
+        // Simulate older Droid that doesn't support list_sessions (-32601).
+        mock.queue_error_response(1, -32601, "Method not found").await;
+
+        let result = transport
+            .send_request("thread/list", serde_json::Value::Null)
+            .await
+            .unwrap();
+
+        // Should gracefully fall back to empty list.
+        assert!(result["threads"].is_array());
+        assert_eq!(result["threads"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn droid_codex_thread_list_empty_when_no_sessions() {
+        let (mut transport, mock) = setup();
+
+        mock.queue_response(1, serde_json::json!([])).await;
+
+        let result = transport
+            .send_request("thread/list", serde_json::Value::Null)
+            .await
+            .unwrap();
+
+        assert!(result["threads"].is_array());
+        assert_eq!(result["threads"].as_array().unwrap().len(), 0);
+    }
+
+    // VAL-DROID-MAP-005: thread/archive, rollback, name/set → no-op success
+
+    #[tokio::test]
+    async fn droid_codex_thread_archive_is_noop() {
+        let (mut transport, _mock) = setup();
+
+        let result = transport
+            .send_request("thread/archive", serde_json::json!({"thread_id": "t1"}))
+            .await
+            .unwrap();
+
+        assert_eq!(result, serde_json::json!({"ok": true}));
+    }
+
+    #[tokio::test]
+    async fn droid_codex_thread_rollback_is_noop() {
+        let (mut transport, _mock) = setup();
+
+        let result = transport
+            .send_request("thread/rollback", serde_json::json!({"thread_id": "t1"}))
+            .await
+            .unwrap();
+
+        assert_eq!(result, serde_json::json!({"ok": true}));
+    }
+
+    #[tokio::test]
+    async fn droid_codex_thread_name_set_is_noop() {
+        let (mut transport, _mock) = setup();
+
+        let result = transport
+            .send_request(
+                "thread/name/set",
+                serde_json::json!({"thread_id": "t1", "name": "New Name"}),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result, serde_json::json!({"ok": true}));
+    }
+
+    #[tokio::test]
+    async fn droid_codex_noop_methods_do_not_send_droid_commands() {
+        let (mut transport, _mock) = setup();
+
+        // Call all no-op methods.
+        transport
+            .send_request("thread/archive", serde_json::Value::Null)
+            .await
+            .unwrap();
+        transport
+            .send_request("thread/rollback", serde_json::Value::Null)
+            .await
+            .unwrap();
+        transport
+            .send_request("thread/name/set", serde_json::Value::Null)
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        // Verify no Droid JSON-RPC was sent.
+        let output = _mock.captured_output_string().await;
+        assert!(output.is_empty(), "no-op methods should not send any Droid commands");
+    }
+
+    // VAL-DROID-MAP-006: collaborationMode/list → empty
+
+    #[tokio::test]
+    async fn droid_codex_collaboration_mode_list_returns_empty() {
+        let (mut transport, _mock) = setup();
+
+        let result = transport
+            .send_request("collaborationMode/list", serde_json::Value::Null)
+            .await
+            .unwrap();
+
+        assert_eq!(result, serde_json::json!({"data": []}));
+    }
+
+    // VAL-DROID-MAP-007: unknown methods → -32601
+
+    #[tokio::test]
+    async fn droid_codex_unknown_method_returns_error() {
+        let (mut transport, _mock) = setup();
+
+        let result = transport
+            .send_request("nonexistent/method", serde_json::Value::Null)
+            .await;
+
+        assert!(result.is_err());
+        match result {
+            Err(RpcError::Server { code, message }) => {
+                assert_eq!(code, -32601);
+                assert!(message.contains("nonexistent/method"));
+            }
+            _ => panic!("expected Server error with code -32601"),
+        }
     }
 }
