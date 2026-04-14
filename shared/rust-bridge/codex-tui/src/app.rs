@@ -933,7 +933,7 @@ impl App {
                         id: s.id.clone(),
                         name: s.display_name.clone(),
                         host: s.host.clone(),
-                        port: s.codex_port.unwrap_or(s.port),
+                        port: s.agent_port.unwrap_or(s.port),
                         source: format!("{:?}", s.source),
                         reachable: s.reachable,
                     })

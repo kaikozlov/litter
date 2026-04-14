@@ -17,13 +17,13 @@ pub struct SavedServerRecord {
     pub name: String,
     pub hostname: String,
     pub port: u16,
-    pub codex_ports: Vec<u16>,
+    pub agent_ports: Vec<u16>,
     pub ssh_port: Option<u16>,
     pub source: String,
-    pub has_codex_server: bool,
+    pub has_agent_server: bool,
     pub wake_mac: Option<String>,
     pub preferred_connection_mode: Option<String>,
-    pub preferred_codex_port: Option<u16>,
+    pub preferred_agent_port: Option<u16>,
     pub ssh_port_forwarding_enabled: Option<bool>,
     pub websocket_url: Option<String>,
     pub remembered_by_user: bool,
@@ -112,28 +112,28 @@ pub(crate) fn resolved_preferred_connection_mode(server: &SavedServerRecord) -> 
 /// Resolve the SSH port for a saved server.
 ///
 /// Mirrors Android `resolvedSshPort`:
-///   `sshPort ?: port.takeIf { !hasCodexServer && it > 0 } ?: 22`
+///   `sshPort ?: port.takeIf { !hasAgentServer && it > 0 } ?: 22`
 /// and iOS `SavedServer.toDiscoveredServer()` → `DiscoveredServer.resolvedSSHPort`:
-///   `sshPort ?? (hasCodexServer ? nil : port)` then `?? 22`
+///   `sshPort ?? (hasAgentServer ? nil : port)` then `?? 22`
 pub(crate) fn resolved_ssh_port(server: &SavedServerRecord) -> u16 {
     if let Some(port) = server.ssh_port {
         return port;
     }
-    if !server.has_codex_server && server.port > 0 {
+    if !server.has_agent_server && server.port > 0 {
         return server.port;
     }
     22
 }
 
-/// Build the list of available direct Codex ports (merging port + codex_ports).
+/// Build the list of available direct agent ports (merging port + agent_ports).
 ///
-/// Mirrors Android `availableDirectCodexPorts`.
-fn available_direct_codex_ports(server: &SavedServerRecord) -> Vec<u16> {
+/// Mirrors Android `availableDirectAgentPorts`.
+fn available_direct_agent_ports(server: &SavedServerRecord) -> Vec<u16> {
     let mut ordered = Vec::new();
-    if server.has_codex_server && server.port > 0 {
+    if server.has_agent_server && server.port > 0 {
         ordered.push(server.port);
     }
-    for &p in &server.codex_ports {
+    for &p in &server.agent_ports {
         if p > 0 && !ordered.contains(&p) {
             ordered.push(p);
         }
@@ -156,7 +156,7 @@ fn requires_connection_choice(server: &SavedServerRecord) -> bool {
     if mode.is_some() {
         return false;
     }
-    let ports = available_direct_codex_ports(server);
+    let ports = available_direct_agent_ports(server);
     let can_ssh = can_connect_via_ssh(server);
     ports.len() > 1 || (!ports.is_empty() && can_ssh)
 }
@@ -168,18 +168,18 @@ fn can_connect_via_ssh(server: &SavedServerRecord) -> bool {
     }
     server.ssh_port.is_some()
         || server.source == "ssh"
-        || (!server.has_codex_server && resolved_ssh_port(server) > 0)
+        || (!server.has_agent_server && resolved_ssh_port(server) > 0)
         || server.preferred_connection_mode.as_deref() == Some("ssh")
         || server.ssh_port_forwarding_enabled == Some(true)
 }
 
-/// Resolve the preferred codex port for direct-codex mode.
-fn resolved_preferred_codex_port(server: &SavedServerRecord) -> Option<u16> {
+/// Resolve the preferred agent port for direct mode.
+fn resolved_preferred_agent_port(server: &SavedServerRecord) -> Option<u16> {
     if resolved_preferred_connection_mode(server).as_deref() != Some("directCodex") {
         return None;
     }
-    let ports = available_direct_codex_ports(server);
-    if let Some(pref) = server.preferred_codex_port
+    let ports = available_direct_agent_ports(server);
+    if let Some(pref) = server.preferred_agent_port
         && ports.contains(&pref)
     {
         return Some(pref);
@@ -187,26 +187,26 @@ fn resolved_preferred_codex_port(server: &SavedServerRecord) -> Option<u16> {
     None
 }
 
-/// Resolve the direct Codex port for a saved server.
+/// Resolve the direct agent port for a saved server.
 ///
 /// Returns `None` when SSH is preferred, when the user needs to choose,
 /// or when no direct port is available.
 ///
-/// Mirrors Android `directCodexPort`.
-pub(crate) fn direct_codex_port(server: &SavedServerRecord) -> Option<u16> {
+/// Mirrors Android `directAgentPort`.
+pub(crate) fn direct_agent_port(server: &SavedServerRecord) -> Option<u16> {
     if server.websocket_url.is_some() {
         return None;
     }
     if prefers_ssh(server) {
         return None;
     }
-    if let Some(port) = resolved_preferred_codex_port(server) {
+    if let Some(port) = resolved_preferred_agent_port(server) {
         return Some(port);
     }
     if requires_connection_choice(server) {
         return None;
     }
-    let ports = available_direct_codex_ports(server);
+    let ports = available_direct_agent_ports(server);
     ports.first().copied()
 }
 
@@ -252,8 +252,8 @@ pub(crate) fn compute_reconnect_plan(
         return None;
     }
 
-    // 4. Direct Codex port available → DirectRemote
-    if let Some(port) = direct_codex_port(server) {
+    // 4. Direct agent port available → DirectRemote
+    if let Some(port) = direct_agent_port(server) {
         return Some(ReconnectPlan::DirectRemote {
             server_id: server.id.clone(),
             display_name: server.name.clone(),
@@ -487,13 +487,13 @@ mod tests {
             name: "Test Server".into(),
             hostname: "192.168.1.100".into(),
             port: 8080,
-            codex_ports: vec![],
+            agent_ports: vec![],
             ssh_port: None,
             source: "manual".into(),
-            has_codex_server: true,
+            has_agent_server: true,
             wake_mac: None,
             preferred_connection_mode: None,
-            preferred_codex_port: None,
+            preferred_agent_port: None,
             ssh_port_forwarding_enabled: None,
             websocket_url: None,
             remembered_by_user: true,
@@ -565,15 +565,15 @@ mod tests {
     }
 
     #[test]
-    fn resolved_ssh_port_fallback_to_port_when_no_codex() {
+    fn resolved_ssh_port_fallback_to_port_when_no_agent() {
         let mut s = base_server();
-        s.has_codex_server = false;
+        s.has_agent_server = false;
         s.port = 3333;
         assert_eq!(resolved_ssh_port(&s), 3333);
     }
 
     #[test]
-    fn resolved_ssh_port_default_22_when_has_codex() {
+    fn resolved_ssh_port_default_22_when_has_agent() {
         let s = base_server();
         assert_eq!(resolved_ssh_port(&s), 22);
     }
@@ -581,59 +581,59 @@ mod tests {
     #[test]
     fn resolved_ssh_port_default_22_when_port_zero() {
         let mut s = base_server();
-        s.has_codex_server = false;
+        s.has_agent_server = false;
         s.port = 0;
         assert_eq!(resolved_ssh_port(&s), 22);
     }
 
-    // -- direct_codex_port tests --
+    // -- direct_agent_port tests --
 
     #[test]
-    fn direct_codex_port_returns_port_when_has_codex() {
+    fn direct_agent_port_returns_port_when_has_agent() {
         let s = base_server();
-        // has_codex_server=true, port=8080, no SSH preference → port 8080
-        assert_eq!(direct_codex_port(&s), Some(8080));
+        // has_agent_server=true, port=8080, no SSH preference → port 8080
+        assert_eq!(direct_agent_port(&s), Some(8080));
     }
 
     #[test]
-    fn direct_codex_port_none_when_ssh_preferred() {
+    fn direct_agent_port_none_when_ssh_preferred() {
         let mut s = base_server();
         s.preferred_connection_mode = Some("ssh".into());
-        assert_eq!(direct_codex_port(&s), None);
+        assert_eq!(direct_agent_port(&s), None);
     }
 
     #[test]
-    fn direct_codex_port_preferred_codex_port_in_direct_mode() {
+    fn direct_agent_port_preferred_agent_port_in_direct_mode() {
         let mut s = base_server();
         s.preferred_connection_mode = Some("directCodex".into());
-        s.codex_ports = vec![9090, 9091];
-        s.preferred_codex_port = Some(9091);
-        assert_eq!(direct_codex_port(&s), Some(9091));
+        s.agent_ports = vec![9090, 9091];
+        s.preferred_agent_port = Some(9091);
+        assert_eq!(direct_agent_port(&s), Some(9091));
     }
 
     #[test]
-    fn direct_codex_port_none_when_requires_choice() {
+    fn direct_agent_port_none_when_requires_choice() {
         let mut s = base_server();
         // Two ports + SSH available + no preferred mode → requires choice
-        s.codex_ports = vec![9090, 9091];
+        s.agent_ports = vec![9090, 9091];
         s.ssh_port = Some(22);
-        assert_eq!(direct_codex_port(&s), None);
+        assert_eq!(direct_agent_port(&s), None);
     }
 
     #[test]
-    fn direct_codex_port_none_when_no_codex() {
+    fn direct_agent_port_none_when_no_agent() {
         let mut s = base_server();
-        s.has_codex_server = false;
+        s.has_agent_server = false;
         s.port = 22;
-        s.codex_ports = vec![];
-        assert_eq!(direct_codex_port(&s), None);
+        s.agent_ports = vec![];
+        assert_eq!(direct_agent_port(&s), None);
     }
 
     #[test]
-    fn direct_codex_port_none_when_websocket_url() {
+    fn direct_agent_port_none_when_websocket_url() {
         let mut s = base_server();
         s.websocket_url = Some("wss://example.com/ws".into());
-        assert_eq!(direct_codex_port(&s), None);
+        assert_eq!(direct_agent_port(&s), None);
     }
 
     // -- compute_reconnect_plan tests --
@@ -681,10 +681,10 @@ mod tests {
     #[test]
     fn plan_ssh_legacy_fallback_when_no_mode_but_credential() {
         let mut s = base_server();
-        // No explicit mode, no direct codex port available, but has credential
-        s.has_codex_server = false;
+        // No explicit mode, no direct agent port available, but has credential
+        s.has_agent_server = false;
         s.port = 0;
-        s.codex_ports = vec![];
+        s.agent_ports = vec![];
         let cred = ssh_credential();
         let plan = compute_reconnect_plan(&s, Some(&cred), false);
         assert!(matches!(plan, Some(ReconnectPlan::Ssh { .. })));
@@ -694,9 +694,9 @@ mod tests {
     fn plan_local_when_source_is_local() {
         let mut s = base_server();
         s.source = "local".into();
-        s.has_codex_server = false;
+        s.has_agent_server = false;
         s.port = 0;
-        s.codex_ports = vec![];
+        s.agent_ports = vec![];
         let plan = compute_reconnect_plan(&s, None, false);
         assert!(matches!(plan, Some(ReconnectPlan::Local { .. })));
     }
@@ -704,9 +704,9 @@ mod tests {
     #[test]
     fn plan_none_when_no_viable_transport() {
         let mut s = base_server();
-        s.has_codex_server = false;
+        s.has_agent_server = false;
         s.port = 0;
-        s.codex_ports = vec![];
+        s.agent_ports = vec![];
         s.source = "manual".into();
         assert!(compute_reconnect_plan(&s, None, false).is_none());
     }

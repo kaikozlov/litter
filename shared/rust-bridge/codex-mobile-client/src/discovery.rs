@@ -39,8 +39,8 @@ pub struct DiscoveredServer {
     pub display_name: String,
     pub host: String,
     pub port: u16,
-    pub codex_port: Option<u16>,
-    pub codex_ports: Vec<u16>,
+    pub agent_port: Option<u16>,
+    pub agent_ports: Vec<u16>,
     pub ssh_port: Option<u16>,
     pub source: DiscoverySource,
     pub metadata: HashMap<String, String>,
@@ -518,8 +518,8 @@ impl DiscoveryService {
             display_name: format!("{}:{}", host, port),
             host: host.clone(),
             port,
-            codex_port: Some(port),
-            codex_ports: vec![port],
+            agent_port: Some(port),
+            agent_ports: vec![port],
             ssh_port: None,
             source: DiscoverySource::Manual,
             metadata: HashMap::new(),
@@ -742,7 +742,7 @@ impl DiscoveryService {
             let is_codex_service = seed.service_type.starts_with("_codex.");
             let is_ssh_service = seed.service_type.starts_with("_ssh.");
 
-            let mut codex_port = if is_codex_service { seed.port } else { None };
+            let mut agent_port = if is_codex_service { seed.port } else { None };
             let ssh_port = if is_ssh_service {
                 Some(seed.port.unwrap_or(22))
             } else {
@@ -750,14 +750,14 @@ impl DiscoveryService {
             };
 
             let mut reachable = false;
-            let known_ports: Vec<u16> = [codex_port, ssh_port].into_iter().flatten().collect();
+            let known_ports: Vec<u16> = [agent_port, ssh_port].into_iter().flatten().collect();
             if !known_ports.is_empty() {
                 reachable =
                     any_reachable_port(&host, &known_ports, self.config.probe_timeout).await;
             }
 
-            if codex_port.is_none() {
-                let codex_only_ports: Vec<u16> = self
+            if agent_port.is_none() {
+                let agent_only_ports: Vec<u16> = self
                     .config
                     .scan_ports
                     .iter()
@@ -765,14 +765,14 @@ impl DiscoveryService {
                     .filter(|&p| p != SSH_PORT)
                     .collect();
                 if let Some(port) =
-                    first_reachable_port(&host, &codex_only_ports, self.config.probe_timeout).await
+                    first_reachable_port(&host, &agent_only_ports, self.config.probe_timeout).await
                 {
-                    codex_port = Some(port);
+                    agent_port = Some(port);
                     reachable = true;
                 }
             }
 
-            if codex_port.is_none() && ssh_port.is_none() {
+            if agent_port.is_none() && ssh_port.is_none() {
                 continue;
             }
 
@@ -786,7 +786,7 @@ impl DiscoveryService {
                 }
                 metadata.insert("ssh_banner".to_string(), banner);
             }
-            let port = primary_port(codex_port, ssh_port);
+            let port = primary_port(agent_port, ssh_port);
             if port == 0 {
                 continue;
             }
@@ -800,8 +800,8 @@ impl DiscoveryService {
                 },
                 host,
                 port,
-                codex_port,
-                codex_ports: codex_port.into_iter().collect(),
+                agent_port,
+                agent_ports: agent_port.into_iter().collect(),
                 ssh_port,
                 source: DiscoverySource::Bonjour,
                 metadata,
@@ -875,8 +875,8 @@ impl DiscoveryService {
                     display_name: format!("{}:{}", host, port),
                     host,
                     port,
-                    codex_port: Some(port),
-                    codex_ports: vec![port],
+                    agent_port: Some(port),
+                    agent_ports: vec![port],
                     ssh_port: None,
                     source: DiscoverySource::Manual,
                     metadata: HashMap::new(),
@@ -943,13 +943,13 @@ async fn server_from_reachable_ports(
     probe_timeout: Duration,
 ) -> DiscoveredServer {
     let ssh_port = reachable_ports.contains(&SSH_PORT).then_some(SSH_PORT);
-    let codex_ports: Vec<u16> = reachable_ports
+    let agent_ports: Vec<u16> = reachable_ports
         .iter()
         .copied()
         .filter(|&p| p != SSH_PORT)
         .collect();
-    let codex_port = codex_ports.first().copied();
-    let port = primary_port(codex_port, ssh_port);
+    let agent_port = agent_ports.first().copied();
+    let port = primary_port(agent_port, ssh_port);
 
     let mut metadata = HashMap::new();
     if ssh_port.is_some()
@@ -966,8 +966,8 @@ async fn server_from_reachable_ports(
         display_name: host.to_string(),
         host: host.to_string(),
         port,
-        codex_port,
-        codex_ports,
+        agent_port,
+        agent_ports,
         ssh_port,
         source,
         metadata,
@@ -1043,8 +1043,8 @@ async fn first_reachable_port(host: &str, ports: &[u16], timeout: Duration) -> O
         .find_map(|(port, reachable)| reachable.then_some(port))
 }
 
-fn primary_port(codex_port: Option<u16>, ssh_port: Option<u16>) -> u16 {
-    codex_port.or(ssh_port).unwrap_or_default()
+fn primary_port(agent_port: Option<u16>, ssh_port: Option<u16>) -> u16 {
+    agent_port.or(ssh_port).unwrap_or_default()
 }
 
 fn discovery_identity_key(server: &DiscoveredServer) -> String {
@@ -1080,10 +1080,10 @@ fn merge_server(existing: &mut DiscoveredServer, candidate: DiscoveredServer) {
     if prefer_candidate && !candidate.host.is_empty() {
         existing.host = candidate.host.clone();
     }
-    if candidate.codex_port.is_some() && (existing.codex_port.is_none() || prefer_candidate) {
-        existing.codex_port = candidate.codex_port;
+    if candidate.agent_port.is_some() && (existing.agent_port.is_none() || prefer_candidate) {
+        existing.agent_port = candidate.agent_port;
     }
-    merge_codex_ports(existing, &candidate, prefer_candidate);
+    merge_agent_ports(existing, &candidate, prefer_candidate);
     if candidate.ssh_port.is_some() && (existing.ssh_port.is_none() || prefer_candidate) {
         existing.ssh_port = candidate.ssh_port;
     }
@@ -1092,29 +1092,29 @@ fn merge_server(existing: &mut DiscoveredServer, candidate: DiscoveredServer) {
     if candidate.last_seen > existing.last_seen {
         existing.last_seen = candidate.last_seen;
     }
-    let merged_port = primary_port(existing.codex_port, existing.ssh_port);
+    let merged_port = primary_port(existing.agent_port, existing.ssh_port);
     if merged_port > 0 {
         existing.port = merged_port;
     } else if prefer_candidate && candidate.port > 0 {
         existing.port = candidate.port;
     }
-    existing.codex_port = existing.codex_ports.first().copied();
+    existing.agent_port = existing.agent_ports.first().copied();
 }
 
-fn merge_codex_ports(
+fn merge_agent_ports(
     existing: &mut DiscoveredServer,
     candidate: &DiscoveredServer,
     prefer_candidate: bool,
 ) {
     let mut ports = if prefer_candidate {
-        candidate.codex_ports.clone()
+        candidate.agent_ports.clone()
     } else {
-        existing.codex_ports.clone()
+        existing.agent_ports.clone()
     };
     let incoming = if prefer_candidate {
-        &existing.codex_ports
+        &existing.agent_ports
     } else {
-        &candidate.codex_ports
+        &candidate.agent_ports
     };
     for port in incoming {
         if !ports.contains(port) {
@@ -1122,7 +1122,7 @@ fn merge_codex_ports(
         }
     }
     ports.sort_unstable();
-    existing.codex_ports = ports;
+    existing.agent_ports = ports;
 }
 
 /// Detect the local IPv4 address by binding a UDP socket to a public address.
@@ -1524,8 +1524,8 @@ mod tests {
             display_name: "Test".to_string(),
             host: "10.0.0.1".to_string(),
             port: 8390,
-            codex_port: Some(8390),
-            codex_ports: vec![8390],
+            agent_port: Some(8390),
+            agent_ports: vec![8390],
             ssh_port: None,
             source: DiscoverySource::LanProbe,
             metadata: HashMap::new(),
@@ -1541,14 +1541,14 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_prefers_better_source_and_codex_port() {
+    fn reconcile_prefers_better_source_and_agent_port() {
         let older = DiscoveredServer {
             id: "server-1".to_string(),
             display_name: "10.0.0.2".to_string(),
             host: "10.0.0.2".to_string(),
             port: 22,
-            codex_port: None,
-            codex_ports: vec![],
+            agent_port: None,
+            agent_ports: vec![],
             ssh_port: Some(22),
             source: DiscoverySource::Manual,
             metadata: HashMap::new(),
@@ -1562,8 +1562,8 @@ mod tests {
             display_name: "Studio".to_string(),
             host: "10.0.0.2".to_string(),
             port: 8390,
-            codex_port: Some(8390),
-            codex_ports: vec![8390],
+            agent_port: Some(8390),
+            agent_ports: vec![8390],
             ssh_port: Some(22),
             source: DiscoverySource::Bonjour,
             metadata: HashMap::new(),
@@ -1577,7 +1577,7 @@ mod tests {
         assert_eq!(reconciled.len(), 1);
         assert_eq!(reconciled[0].source, DiscoverySource::Bonjour);
         assert_eq!(reconciled[0].display_name, "Studio");
-        assert_eq!(reconciled[0].codex_port, Some(8390));
+        assert_eq!(reconciled[0].agent_port, Some(8390));
         assert_eq!(reconciled[0].port, 8390);
     }
 
@@ -1636,8 +1636,8 @@ mod tests {
             display_name: "Test".to_string(),
             host: "10.0.0.1".to_string(),
             port: 8390,
-            codex_port: Some(8390),
-            codex_ports: vec![8390],
+            agent_port: Some(8390),
+            agent_ports: vec![8390],
             ssh_port: None,
             source: DiscoverySource::LanProbe,
             metadata: HashMap::new(),
@@ -1656,8 +1656,8 @@ mod tests {
             display_name: "Test".to_string(),
             host: "10.0.0.1".to_string(),
             port: 8390,
-            codex_port: Some(8390),
-            codex_ports: vec![8390],
+            agent_port: Some(8390),
+            agent_ports: vec![8390],
             ssh_port: Some(22),
             source: DiscoverySource::LanProbe,
             metadata: HashMap::new(),
@@ -1684,8 +1684,8 @@ mod tests {
             display_name: "Test".to_string(),
             host: "10.0.0.1".to_string(),
             port: 8390,
-            codex_port: Some(8390),
-            codex_ports: vec![8390],
+            agent_port: Some(8390),
+            agent_ports: vec![8390],
             ssh_port: None,
             source: DiscoverySource::LanProbe,
             metadata: HashMap::new(),
@@ -1711,8 +1711,8 @@ mod tests {
             display_name: "Test".to_string(),
             host: "10.0.0.2".to_string(),
             port: 22,
-            codex_port: None,
-            codex_ports: vec![],
+            agent_port: None,
+            agent_ports: vec![],
             ssh_port: Some(22),
             source: crate::discovery_uniffi::AppDiscoverySource::Manual,
             reachable: true,
