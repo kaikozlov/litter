@@ -1,16 +1,20 @@
 //! Droid ACP transport implementation.
 //!
-//! Implements `ProviderTransport` for Droid's `--output-format stream-json` protocol.
-//! This is NOT the standard ACP (Agent Communication Protocol) — it's Droid's
-//! native streaming JSON format accessed via `droid exec --output-format stream-json
-//! --input-format stream-json`.
+//! **DEPRECATED:** This transport uses Droid's proprietary `--output-format stream-json`
+//! protocol and is no longer the primary Droid ACP path. The factory now uses the
+//! standard ACP protocol via `droid exec --output-format acp` with the shared
+//! `PiAcpTransport` / `AcpClient` pipeline.
 //!
-//! # Architecture
+//! This module is retained for backward compatibility and testing purposes only.
+//! Do not use `DroidAcpTransport` in production code — use `PiAcpTransport` with
+//! the command `droid exec --output-format acp` instead.
+//!
+//! # Architecture (Legacy)
 //!
 //! ```text
 //! ProviderTransport trait
 //!         │
-//!  DroidAcpTransport
+//!  DroidAcpTransport (DEPRECATED)
 //!    ├── Read task: reads JSONL lines → StreamMessage → ProviderEvent (broadcast)
 //!    ├── Write channel: UserMessageInput → JSONL → transport write
 //!    ├── Session ID tracking from system/init message
@@ -18,7 +22,7 @@
 //!    └── Permission auto-handling: maps autonomy level to approval policy
 //! ```
 //!
-//! # Event Mapping
+//! # Event Mapping (Legacy)
 //!
 //! | Droid StreamMessage | ProviderEvent |
 //! |---|---|
@@ -28,18 +32,23 @@
 //! | `tool_result` | ToolCallUpdate (with output) |
 //! | `completion` | StreamingCompleted |
 //!
-//! # MCP Server Config
+//! # MCP Server Config (Legacy)
 //!
 //! Before spawning the Droid process, the transport writes a `.factory/mcp.json`
 //! file to the session's working directory with session-scoped MCP server keys.
 //! On session exit (disconnect), the file is cleaned up.
 //!
-//! # Permission Auto-Handling
+//! # Permission Auto-Handling (Legacy)
 //!
 //! The transport maps Droid autonomy levels to `AgentPermissionPolicy`:
 //! - `suggest` (low autonomy) → `PromptAlways`
 //! - `normal` (medium autonomy) → `PromptAlways`
 //! - `full` (high autonomy) → `AutoApproveAll`
+
+#![deprecated(
+    since = "0.2.0",
+    note = "Use standard ACP transport (PiAcpTransport) with 'droid exec --output-format acp' instead"
+)]
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -129,9 +138,15 @@ pub struct McpServerEntry {
 
 /// Droid ACP transport implementing `ProviderTransport`.
 ///
+/// **DEPRECATED:** Use `PiAcpTransport` with `droid exec --output-format acp` instead.
+///
 /// Communicates with `droid exec --output-format stream-json --input-format stream-json`
 /// over a bidirectional stream (SSH PTY or mock). Parses Droid's streaming JSON
 /// output and maps to `ProviderEvent`s.
+#[deprecated(
+    since = "0.2.0",
+    note = "Use PiAcpTransport with 'droid exec --output-format acp' instead"
+)]
 pub struct DroidAcpTransport {
     inner: Arc<Mutex<DroidAcpTransportInner>>,
     /// Channel to send write requests to the writer task.

@@ -4,7 +4,7 @@
 //! - VAL-CROSS-004: Droid native end-to-end — full lifecycle with permission handling
 //!   (SSH → detect droid → connect native → session → prompt → stream → permission → disconnect)
 //! - VAL-CROSS-005: ACP generic E2E — adapter lifecycle (Droid ACP transport)
-//!   (SSH → spawn droid exec --output-format stream-json → init → message → tool → complete)
+//!   (SSH → spawn droid exec → init → message → tool → complete)
 //! - VAL-CROSS-009: Permission flow parity across providers (Droid-specific)
 //!   (Droid permission handling with configurable policy, compared to Codex pattern)
 //! - VAL-CROSS-011: Discovery detects all agent types on single host (including Droid)
@@ -12,6 +12,12 @@
 //!
 //! All tests use mock transports (MockDroidChannel, MockPiChannel, SequencedMockProvider).
 //! Real E2E tests against gvps are marked `#[ignore]`.
+//!
+//! Note: Some tests reference the deprecated `DroidAcpTransport` for backward
+//! compatibility testing. The production DroidAcp path now uses standard ACP
+//! via `PiAcpTransport`.
+
+#![allow(deprecated)]
 
 #[cfg(test)]
 mod tests {
@@ -22,6 +28,7 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 
 use crate::provider::cross_provider::SequencedMockProvider;
+#[allow(deprecated)]
 use crate::provider::droid::acp_transport::{
     DroidAcpTransport, autonomy_to_permission_policy,
 };
@@ -1498,18 +1505,20 @@ async fn droid_e2e_gvps_native_lifecycle() {
 /// Run with: `cargo test -- --ignored droid_e2e`
 ///
 /// VAL-CROSS-005: Real Droid ACP E2E test against gvps.
+/// Now uses standard ACP protocol via `droid exec --output-format acp`.
 #[tokio::test]
 #[ignore = "requires SSH access to gvps with Droid installed"]
 async fn droid_e2e_gvps_acp_lifecycle() {
     // This test would:
     // 1. SSH to gvps
-    // 2. Spawn `droid exec --output-format stream-json --input-format stream-json`
-    // 3. Receive system/init message
-    // 4. Send a user message
-    // 5. Verify streaming events (messages, tool calls, completion)
-    // 6. Disconnect
+    // 2. Spawn `droid exec --output-format acp` (standard ACP)
+    // 3. Perform ACP initialize + authenticate handshake
+    // 4. Create session via session/new
+    // 5. Send a prompt via session/prompt
+    // 6. Verify streaming events (session/update notifications)
+    // 7. Disconnect
 
-    println!("E2E test: would connect to Droid on gvps via ACP transport");
+    println!("E2E test: would connect to Droid on gvps via standard ACP transport");
 }
 
 /// E2E test: Discovery probes gvps for all agent types.

@@ -1,5 +1,9 @@
 //! Droid `--output-format stream-json` protocol types.
 //!
+//! **DEPRECATED:** This module defines the legacy stream-json protocol types.
+//! The factory now uses standard ACP (`droid exec --output-format acp`) instead.
+//! This module is retained for backward compatibility and testing purposes only.
+//!
 //! Defines the JSONL message types emitted by `droid exec --output-format stream-json`.
 //! This is NOT ACP JSON-RPC — it's Droid's own streaming JSON protocol.
 //!
@@ -11,13 +15,18 @@
 //! - `tool_result` — Tool execution result (output/error)
 //! - `completion` — Session completed with final text and usage stats
 //!
-//! # Usage
+//! # Usage (Legacy)
 //!
 //! ```text
 //! droid exec --output-format stream-json --input-format stream-json --cwd <dir>
 //!   → stdin: JSONL user messages ({"type":"user_message","text":"..."}\n)
 //!   → stdout: JSONL system/message/tool_call/tool_result/completion lines
 //! ```
+
+#![deprecated(
+    since = "0.2.0",
+    note = "Use standard ACP protocol with 'droid exec --output-format acp' instead"
+)]
 
 use serde::{Deserialize, Serialize};
 

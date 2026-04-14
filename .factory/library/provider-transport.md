@@ -316,14 +316,31 @@ Wraps existing `AppServerClient` behind `ProviderTransport`. Creates an internal
 
 ## Droid ACP Transport (Stream-JSON)
 
-### Architecture
+## Droid ACP Transport (Standard ACP — Current)
+
+### Migration Note
+The `DroidAcp` agent type now uses the **standard ACP protocol** via `droid exec --output-format acp`, replacing the old proprietary `stream-json` transport. This means:
+- The factory function `create_droid_acp` now spawns `droid exec --output-format acp` and uses `PiAcpTransport` (the same transport as Pi ACP and GenericAcp)
+- The old `DroidAcpTransport` and `stream_json` modules are **deprecated** but retained for backward compatibility and testing
+- All three ACP-based transports (PiAcp, DroidAcp, GenericAcp) now use the same `PiAcpTransport` / `AcpClient` pipeline, eliminating code duplication
+- The ACP handshake (initialize → authenticate) is the same for all three, ensuring consistent behavior
+
+### Architecture (Current — Standard ACP)
+- `PiAcpTransport` wraps `AcpClient` for Droid via `droid exec --output-format acp`
+- Same lifecycle as Pi ACP: initialize → authenticate → session/new → session/prompt → session/cancel → session/list
+- Events flow through `map_session_update` → `ProviderEvent` pipeline (same as Pi ACP)
+
+## Droid ACP Transport (Legacy Stream-JSON — DEPRECATED)
+
+### Architecture (Legacy)
 - `DroidAcpTransport` implements `ProviderTransport` over Droid's `--output-format stream-json` protocol
 - Connects via SSH → spawns `droid exec --output-format stream-json --input-format stream-json` → streaming JSON over stdin/stdout
 - NOT the same as the standard ACP JSON-RPC protocol — uses Droid's own streaming JSON format
+- **DEPRECATED since v0.2.0** — retained for backward compatibility only
 
-### Module Structure
-- `provider/droid/acp_transport.rs` — `DroidAcpTransport` implementing `ProviderTransport`
-- `provider/droid/stream_json.rs` — Droid stream-json protocol types (`StreamMessage` enum)
+### Module Structure (Legacy)
+- `provider/droid/acp_transport.rs` — `DroidAcpTransport` (DEPRECATED)
+- `provider/droid/stream_json.rs` — Droid stream-json protocol types (DEPRECATED)
 
 ### Stream-JSON Protocol
 Droid's `--output-format stream-json` emits newline-delimited JSON messages:
@@ -368,7 +385,7 @@ Input: `{"type":"user_message","text":"..."}\n` via stdin
 ### Architecture
 - `DroidNativeTransport` implements `ProviderTransport` over Droid's native Factory API
 - Connects via SSH → spawns `droid exec --input-format stream-jsonrpc --output-format stream-jsonrpc` → JSON-RPC 2.0 over NDJSON
-- Distinct from the stream-json protocol (used by `DroidAcpTransport`) — this is full JSON-RPC 2.0 with methods and notifications
+- Distinct from the standard ACP protocol — this is Droid's native Factory API with JSON-RPC 2.0 methods and notifications
 
 ### Module Structure
 - `provider/droid/protocol.rs` — Droid JSON-RPC 2.0 protocol types: `JsonRpcRequest`, `JsonRpcResponse`, `JsonRpcNotification`, Droid-specific notification variants (`WorkingStateChanged`, `CreateMessage`, `ToolResult`, `Error`, `Complete`)
