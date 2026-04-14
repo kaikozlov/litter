@@ -916,7 +916,8 @@ struct DiscoveryView: View {
                 SavedServerStore.remember(server)
             case .sshThenRemote(let host, let credentials):
                 startedAsyncBootstrap = true
-                connectedServerId = try await connectViaSSH(server: server, host: host, credentials: credentials)
+                let agentType = AgentSelectionStore.shared.selectedAgentType(for: server.id)
+                connectedServerId = try await connectViaSSH(server: server, host: host, credentials: credentials, agentType: agentType)
             }
         } catch {
             connectingServer = nil
@@ -941,14 +942,16 @@ struct DiscoveryView: View {
     private func connectViaSSH(
         server: DiscoveredServer,
         host: String,
-        credentials: SSHCredentials
+        credentials: SSHCredentials,
+        agentType: AgentType? = nil
     ) async throws -> String {
         let serverId = try await sshConnectAndConnectServer(
             serverId: server.id,
             displayName: server.name,
             host: host,
             credentials: credentials,
-            port: server.resolvedSSHPort
+            port: server.resolvedSSHPort,
+            agentType: agentType
         )
         SavedServerStore.remember(
             server.withConnectionPreference(.ssh)
@@ -961,7 +964,8 @@ struct DiscoveryView: View {
         displayName: String,
         host: String,
         credentials: SSHCredentials,
-        port: UInt16
+        port: UInt16,
+        agentType: AgentType? = nil
     ) async throws -> String {
         let authMethod: String = switch credentials {
         case .password:
@@ -976,7 +980,8 @@ struct DiscoveryView: View {
                 "serverId": serverId,
                 "host": host,
                 "sshPort": Int(port),
-                "authMethod": authMethod
+                "authMethod": authMethod,
+                "agentType": agentType?.persistentKey ?? "none"
             ]
         )
         let ipcSocketPathOverride = ExperimentalFeatures.shared.ipcSocketPathOverride()
@@ -993,7 +998,8 @@ struct DiscoveryView: View {
                 passphrase: nil,
                 acceptUnknownHost: true,
                 workingDir: nil,
-                ipcSocketPathOverride: ipcSocketPathOverride
+                ipcSocketPathOverride: ipcSocketPathOverride,
+                agentType: agentType
             )
         case .key(let username, let privateKey, let passphrase):
             return try await appModel.ssh.sshStartRemoteServerConnect(
@@ -1007,7 +1013,8 @@ struct DiscoveryView: View {
                 passphrase: passphrase,
                 acceptUnknownHost: true,
                 workingDir: nil,
-                ipcSocketPathOverride: ipcSocketPathOverride
+                ipcSocketPathOverride: ipcSocketPathOverride,
+                agentType: agentType
             )
         }
     }
