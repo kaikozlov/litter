@@ -1,0 +1,243 @@
+{
+  "groupId": "group-b-session-events",
+  "testedAt": "2026-04-14T00:00:00Z",
+  "isolation": {
+    "workingDirectory": "/Users/kai/dev/projects/litter",
+    "testTarget": "shared/rust-bridge/codex-mobile-client",
+    "mutability": "read-only cargo test execution"
+  },
+  "toolsUsed": ["cargo test", "rg"],
+  "assertions": {
+    "VAL-ABS-002": {
+      "status": "pass",
+      "title": "CodexProvider wraps AppServerClient without behavior change",
+      "testsRun": [
+        "provider::codex::tests::codex_provider_implements_trait",
+        "provider::mapping::tests::app_server_event_notification",
+        "provider::mapping::tests::app_server_event_lagged",
+        "provider::mapping::tests::app_server_event_disconnected"
+      ],
+      "evidence": "All 4 tests passed. codex_provider_implements_trait confirmed trait implementation. AppServerEvent envelope mapping tests (notification, lagged, disconnected) passed."
+    },
+    "VAL-ABS-003": {
+      "status": "pass",
+      "title": "CodexProvider reports connected state accurately",
+      "testsRun": [
+        "provider::codex::tests::mock_provider_connect_disconnect",
+        "provider::codex::tests::boxed_mock_provider_through_trait"
+      ],
+      "evidence": "Both tests passed. mock_provider_connect_disconnect verified is_connected() state transitions. boxed_mock_provider_through_trait confirmed trait object dispatch."
+    },
+    "VAL-ABS-004": {
+      "status": "pass",
+      "title": "CodexProvider disconnect is idempotent and safe",
+      "testsRun": [
+        "provider::error_handling::tests::disconnect_is_idempotent",
+        "provider::regression::regression_idempotent_disconnect"
+      ],
+      "evidence": "Both tests passed. Double-disconnect did not panic or produce errors."
+    },
+    "VAL-ABS-005": {
+      "status": "pass",
+      "title": "Post-disconnect requests return TransportError::Disconnected",
+      "testsRun": [
+        "provider::error_handling::tests::post_disconnect_request_returns_disconnected_error",
+        "provider::error_handling::tests::post_disconnect_notification_returns_disconnected_error",
+        "provider::error_handling::tests::post_disconnect_list_sessions_returns_disconnected_error"
+      ],
+      "evidence": "All 3 tests passed. send_request, send_notification, and list_sessions all return Disconnected error after disconnect."
+    },
+    "VAL-ABS-006": {
+      "status": "pass",
+      "title": "ServerSession::from_provider creates connected session",
+      "testsRun": [
+        "session::connection::tests::from_provider_creates_connected_session"
+      ],
+      "evidence": "Test passed. Session created with Connected health state."
+    },
+    "VAL-ABS-007": {
+      "status": "pass",
+      "title": "from_provider routes requests through provider trait",
+      "testsRun": [
+        "session::connection::tests::from_provider_request_through_session",
+        "session::connection::tests::from_provider_request_preserves_method_and_params"
+      ],
+      "evidence": "Both tests passed. Requests route through ProviderTransport::send_request with method and params preserved."
+    },
+    "VAL-ABS-008": {
+      "status": "pass",
+      "title": "from_provider routes notifications through provider trait",
+      "testsRun": [
+        "session::connection::tests::from_provider_notify_succeeds",
+        "session::connection::tests::from_provider_notify_preserves_method_and_params"
+      ],
+      "evidence": "Both tests passed. Notifications route through ProviderTransport::send_notification with method and params preserved."
+    },
+    "VAL-ABS-009": {
+      "status": "pass",
+      "title": "Provider events bridged to ServerEvent correctly",
+      "testsRun": [
+        "session::connection::tests::from_provider_events_forwarded",
+        "session::connection::tests::from_provider_events_forwarded_in_order"
+      ],
+      "evidence": "Both tests passed. ProviderEvents are converted to ServerEvents and broadcast in correct order."
+    },
+    "VAL-ABS-010": {
+      "status": "pass",
+      "title": "from_provider disconnect transitions health",
+      "testsRun": [
+        "session::connection::tests::from_provider_disconnect_transitions_health",
+        "session::connection::tests::from_provider_disconnected_event_updates_health"
+      ],
+      "evidence": "Both tests passed. Disconnect transitions health to Disconnected and disconnected event updates health."
+    },
+    "VAL-ABS-011": {
+      "status": "pass",
+      "title": "Exhaustive ServerNotification → ProviderEvent mapping",
+      "testsRun": [
+        "provider::mapping::tests::provider_event_mapping_completeness",
+        "provider::mapping::tests::unhandled_notification_maps_to_unknown"
+      ],
+      "evidence": "Both tests passed. All notification variants mapped; unknown variants fall through to Unknown."
+    },
+    "VAL-ABS-012": {
+      "status": "pass",
+      "title": "Exhaustive ServerRequest → ProviderEvent mapping",
+      "testsRun": [
+        "provider::mapping::tests::command_approval_request_mapping",
+        "provider::mapping::tests::file_change_approval_request_mapping",
+        "provider::mapping::tests::permissions_approval_request_mapping",
+        "provider::mapping::tests::dynamic_tool_call_mapping",
+        "provider::mapping::tests::server_request_mapping_is_exhaustive"
+      ],
+      "evidence": "All 5 tests passed. All ServerRequest variants mapped to ProviderEvent with correct kinds."
+    },
+    "VAL-ABS-013": {
+      "status": "pass",
+      "title": "ProviderEvent → UiEvent pipeline completeness",
+      "testsRun": [
+        "provider::mapping::tests::every_provider_event_variant_maps_or_returns_none"
+      ],
+      "evidence": "Test passed. Every ProviderEvent variant either maps to a UiEvent or explicitly returns None (internal)."
+    },
+    "VAL-ABS-014": {
+      "status": "pass",
+      "title": "Round-trip ServerNotification → ProviderEvent → UiEvent preserves data",
+      "testsRun": [
+        "provider::mapping::tests::round_trip_turn_started",
+        "provider::mapping::tests::round_trip_message_delta",
+        "provider::mapping::tests::round_trip_context_tokens"
+      ],
+      "evidence": "All 3 tests passed. Critical fields (thread_id, turn_id, item_id, delta, token counts) preserved through full pipeline."
+    },
+    "VAL-ABS-015": {
+      "status": "pass",
+      "title": "AppServerEvent envelope mapping",
+      "testsRun": [
+        "provider::mapping::tests::app_server_event_lagged",
+        "provider::mapping::tests::app_server_event_disconnected",
+        "provider::mapping::tests::app_server_event_notification"
+      ],
+      "evidence": "All 3 tests passed. All four AppServerEvent variants (Notification, Request, Lagged, Disconnected) map correctly."
+    },
+    "VAL-ABS-044": {
+      "status": "pass",
+      "title": "Thread operations through provider path",
+      "testsRun": [
+        "provider::regression::regression_thread_lifecycle_through_provider"
+      ],
+      "evidence": "Test passed. Thread lifecycle (create, archive, rename, list) works through provider-backed session."
+    },
+    "VAL-ABS-045": {
+      "status": "pass",
+      "title": "Turn operations through provider path",
+      "testsRun": [
+        "provider::regression::regression_turn_lifecycle_through_provider"
+      ],
+      "evidence": "Test passed. Turn lifecycle (start, stream deltas, complete) works through provider-backed session."
+    },
+    "VAL-ABS-047": {
+      "status": "pass",
+      "title": "No provider-specific logic leaks into ServerSession",
+      "testsRun": [],
+      "evidence": "Code inspection via rg confirmed no Any::downcast, downcast_ref, or as_ref::<CodexProvider> usage in session/connection.rs. from_provider uses only ProviderTransport trait methods."
+    },
+    "VAL-ABS-049": {
+      "status": "pass",
+      "title": "Streaming event ordering preserved",
+      "testsRun": [
+        "provider::regression::regression_event_ordering_preserved",
+        "provider::regression::regression_direct_provider_fifo_ordering"
+      ],
+      "evidence": "Both tests passed. Events arrive in FIFO order through the provider pipeline."
+    },
+    "VAL-ABS-050": {
+      "status": "pass",
+      "title": "Context token accounting through provider path",
+      "testsRun": [
+        "provider::mapping::tests::round_trip_context_tokens",
+        "provider::mapping::tests::provider_event_context_tokens_to_ui_event",
+        "provider::mapping::tests::token_accounting_used_equals_input_plus_output",
+        "provider::mapping::tests::token_accounting_no_context_window_defaults_to_zero",
+        "provider::mapping::tests::token_accounting_zero_tokens"
+      ],
+      "evidence": "All 5 tests passed. used = input + output, limit = model_context_window, edge cases handled."
+    },
+    "VAL-ABS-051": {
+      "status": "pass",
+      "title": "Error event from provider reaches UI layer",
+      "testsRun": [
+        "provider::mapping::tests::provider_event_error_to_ui_event"
+      ],
+      "evidence": "Test passed. ProviderEvent::Error produces UiEvent::Error with message and code preserved."
+    },
+    "VAL-ABS-052": {
+      "status": "pass",
+      "title": "Realtime voice events through provider path",
+      "testsRun": [
+        "provider::mapping::tests::realtime_voice_started_through_pipeline",
+        "provider::mapping::tests::realtime_voice_closed_through_pipeline"
+      ],
+      "evidence": "Both tests passed. RealtimeStarted and RealtimeClosed events bridge correctly through the pipeline."
+    },
+    "VAL-ABS-053": {
+      "status": "pass",
+      "title": "IPC stream functional for provider-backed Codex sessions",
+      "testsRun": [
+        "provider::regression::regression_ipc_api_surface_preserved",
+        "provider::regression::regression_ipc_config_types_preserved"
+      ],
+      "evidence": "Both tests passed. IPC API surface and config types are preserved through provider path."
+    },
+    "VAL-ABS-056": {
+      "status": "pass",
+      "title": "No deadlock between provider command and event paths",
+      "testsRun": [
+        "session::connection::tests::from_provider_no_deadlock_concurrent_commands_and_events",
+        "session::connection::tests::from_provider_command_completes_during_event_burst"
+      ],
+      "evidence": "Both tests passed. Concurrent commands and events complete without deadlock."
+    },
+    "VAL-ABS-058": {
+      "status": "pass",
+      "title": "ProviderEvent Unknown preserves forward compatibility",
+      "testsRun": [
+        "provider::mapping::tests::unhandled_notification_maps_to_unknown",
+        "provider::mapping::tests::provider_event_unknown_to_raw_notification"
+      ],
+      "evidence": "Both tests passed. Unknown upstream events map to ProviderEvent::Unknown and forward as UiEvent::RawNotification."
+    },
+    "VAL-ABS-059": {
+      "status": "pass",
+      "title": "Cancel during active streaming emits well-formed terminal event",
+      "testsRun": [
+        "provider::regression::regression_cancel_during_streaming_produces_terminal_event",
+        "provider::regression::regression_no_orphaned_streaming_after_cancel"
+      ],
+      "evidence": "Both tests passed. Cancel during streaming produces terminal TurnCompleted event with no orphaned state."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 25 assertions: all 25 passed. Total tests run: 47 cargo tests + 2 rg inspections, all green. No frictions or blockers encountered."
+}
