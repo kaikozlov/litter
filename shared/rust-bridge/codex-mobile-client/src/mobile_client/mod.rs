@@ -738,6 +738,7 @@ impl MobileClient {
         working_dir: Option<String>,
         ipc_socket_path_override: Option<String>,
         agent_type: Option<crate::provider::AgentType>,
+        remote_command: Option<String>,
     ) -> Result<String, TransportError> {
         use crate::provider::factory::create_provider_over_ssh;
         use crate::provider::AgentType;
@@ -825,6 +826,7 @@ impl MobileClient {
             ssh_host: Some(ssh_credentials.host.to_string()),
             ssh_port: Some(ssh_credentials.port),
             working_dir: working_dir.clone(),
+            remote_command,
             ..Default::default()
         };
 

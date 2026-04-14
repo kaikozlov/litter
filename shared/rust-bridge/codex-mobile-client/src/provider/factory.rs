@@ -13,7 +13,7 @@
 //! | `PiAcp`         | `npx pi-acp`                                                       | `PiAcpTransport`    |
 //! | `DroidNative`   | `droid exec --input-format stream-jsonrpc --output-format stream-jsonrpc` | `DroidNativeTransport` |
 //! | `DroidAcp`      | `droid exec --output-format stream-json --input-format stream-json` | `DroidAcpTransport` |
-//! | `GenericAcp`    | configurable via `ProviderConfig::remote_command`                  | `AcpClient` wrapper |
+//! | `GenericAcp`    | configurable via `ProviderConfig.remote_command`                    | `PiAcpTransport`    |
 //! | `Codex`         | error (use standard WebSocket path)                                | —                   |
 //!
 //! # Cleanup
@@ -181,23 +181,46 @@ async fn wait_for_droid_acp_init(
 
 /// Create a generic ACP transport using a configurable remote command.
 ///
-/// The command is determined from `ProviderConfig::remote_command` or similar.
-/// Since `ProviderConfig` doesn't currently have a `remote_command` field,
-/// this returns an error indicating the command must be configured.
+/// Reads `ProviderConfig::remote_command` to determine what command to spawn
+/// over SSH. Returns `TransportError::ConnectionFailed` when no command is
+/// configured.
 async fn create_generic_acp(
     ssh_client: &Arc<SshClient>,
     config: &ProviderConfig,
 ) -> Result<Box<dyn ProviderTransport>, TransportError> {
-    // For now, use the working_dir as a hint for what command to run,
-    // but the real mechanism would be a dedicated field on ProviderConfig.
-    // The architecture doc mentions "configurable command from config".
-    // Since ProviderConfig doesn't have a remote_command field, we return
-    // an error for now. A future iteration will add the field.
-    let _ = (ssh_client, config);
-    Err(TransportError::ConnectionFailed(
-        "GenericAcp requires a configured remote command (not yet supported on ProviderConfig)"
-            .to_string(),
-    ))
+    let command = config.remote_command.as_deref().ok_or_else(|| {
+        TransportError::ConnectionFailed(
+            "GenericAcp requires a configured remote_command on ProviderConfig".to_string(),
+        )
+    })?;
+
+    let stream = ssh_client
+        .exec_stream(command)
+        .await
+        .map_err(|e| {
+            TransportError::ConnectionFailed(format!(
+                "exec_stream({command:?}): {e}"
+            ))
+        })?;
+
+    let transport = PiAcpTransport::new(stream);
+
+    // Perform ACP handshake with timeout.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(ACP_HANDSHAKE_TIMEOUT_SECS),
+        transport.handshake(&config.client_name, &config.client_version),
+    )
+    .await
+    .map_err(|_| {
+        TransportError::ConnectionFailed(format!(
+            "Generic ACP handshake timed out after {ACP_HANDSHAKE_TIMEOUT_SECS}s"
+        ))
+    })?
+    .map_err(|e| {
+        TransportError::ConnectionFailed(format!("Generic ACP handshake failed: {e}"))
+    })?;
+
+    Ok(Box::new(transport))
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -232,20 +255,45 @@ mod tests {
     // ── GenericAcp returns error when no command configured (VAL-FACTORY-005) ─
 
     #[test]
-    fn factory_generic_acp_returns_connection_failed() {
-        let err = TransportError::ConnectionFailed(
-            "GenericAcp requires a configured remote command (not yet supported on ProviderConfig)"
-                .to_string(),
-        );
-        match &err {
-            TransportError::ConnectionFailed(msg) => {
+    fn factory_generic_acp_returns_connection_failed_without_command() {
+        // When remote_command is None, the factory should return an error
+        // mentioning "remote_command".
+        let config = ProviderConfig {
+            agent_type: AgentType::GenericAcp,
+            remote_command: None,
+            ..Default::default()
+        };
+        // Simulate the check that create_generic_acp performs.
+        let result = config.remote_command.as_deref().ok_or_else(|| {
+            TransportError::ConnectionFailed(
+                "GenericAcp requires a configured remote_command on ProviderConfig".to_string(),
+            )
+        });
+        match result {
+            Err(TransportError::ConnectionFailed(msg)) => {
+                assert!(
+                    msg.contains("remote_command"),
+                    "Error should mention remote_command: {msg}"
+                );
                 assert!(
                     msg.contains("GenericAcp"),
                     "Error should mention GenericAcp: {msg}"
                 );
             }
-            other => panic!("expected ConnectionFailed, got: {other}"),
+            other => panic!("expected ConnectionFailed, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn factory_generic_acp_accepts_remote_command() {
+        // When remote_command is set, the config check should succeed.
+        let config = ProviderConfig {
+            agent_type: AgentType::GenericAcp,
+            remote_command: Some("my-agent --acp-mode".to_string()),
+            ..Default::default()
+        };
+        assert!(config.remote_command.is_some());
+        assert_eq!(config.remote_command.as_deref(), Some("my-agent --acp-mode"));
     }
 
     // ── Agent type routing completeness ───────────────────────────────

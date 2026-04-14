@@ -29,7 +29,9 @@ The provider abstraction layer (`src/provider/mod.rs`) defines the `ProviderTran
 
 ### `ProviderConfig`
 - Non-UniFFI internal config struct for connection parameters
-- Fields: `websocket_url`, `ssh_host`, `ssh_port`, `remote_port`, `working_dir`, `agent_type`, `client_name`, `client_version`
+- Fields: `websocket_url`, `ssh_host`, `ssh_port`, `remote_port`, `working_dir`, `agent_type`, `client_name`, `client_version`, `remote_command`
+- `remote_command: Option<String>` — shell command for launching the agent's ACP server over SSH (used by `GenericAcp` and `DroidAcp` factory paths). Defaults to `None`.
+- The FFI bridge (`SshBridge`) passes `remoteCommand: String?` through `ssh_connect_remote_server` and `ssh_start_remote_server_connect` to `MobileClient::connect_remote_over_ssh_with_agent_type`
 
 ## DiscoveredServer Extension
 

@@ -1971,6 +1971,7 @@ mod mobile_client_tests {
                     None,
                     None,
                     agent_type,
+                    None, // remote_command
                 )
                 .await;
 
@@ -2034,6 +2035,7 @@ mod mobile_client_tests {
                     None,
                     None,
                     Some(agent_type),
+                    None, // remote_command
                 )
                 .await;
 
@@ -2093,6 +2095,7 @@ mod mobile_client_tests {
                     None,
                     None,
                     Some(agent_type),
+                    None, // remote_command
                 )
                 .await;
 
@@ -2195,6 +2198,7 @@ mod mobile_client_tests {
                 Some("/home/user/project".to_string()), // working_dir
                 Some("/tmp/custom.sock".to_string()),    // ipc_socket_path_override
                 Some(AgentType::PiNative),
+                None, // remote_command
             )
             .await;
 
@@ -2238,6 +2242,7 @@ mod mobile_client_tests {
                 None,
                 None,
                 Some(AgentType::PiNative),
+                None, // remote_command
             )
             .await;
 
@@ -2662,6 +2667,7 @@ mod mobile_client_tests {
                 None,
                 None,
                 Some(AgentType::PiNative),
+                None, // remote_command
             )
             .await;
 

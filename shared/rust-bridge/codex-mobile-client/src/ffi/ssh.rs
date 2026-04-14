@@ -250,6 +250,7 @@ impl SshBridge {
         working_dir: Option<String>,
         ipc_socket_path_override: Option<String>,
         agent_type: Option<AgentType>,
+        remote_command: Option<String>,
     ) -> Result<String, ClientError> {
         let normalized_host = normalize_ssh_host(&host);
         let auth = ssh_auth(password, private_key_pem, passphrase)?;
@@ -299,6 +300,7 @@ impl SshBridge {
                     working_dir,
                     ipc_socket_path_override,
                     agent_type,
+                    remote_command,
                 )
                 .await
                 .map_err(|e| ClientError::Transport(e.to_string()));
@@ -334,6 +336,7 @@ impl SshBridge {
         working_dir: Option<String>,
         ipc_socket_path_override: Option<String>,
         agent_type: Option<AgentType>,
+        remote_command: Option<String>,
     ) -> Result<String, ClientError> {
         let normalized_host = normalize_ssh_host(&host);
         let auth = ssh_auth(password, private_key_pem, passphrase)?;
@@ -411,6 +414,7 @@ impl SshBridge {
                     accept_unknown_host,
                     working_dir,
                     agent_type,
+                    remote_command,
                 )
                 .await
             } else {
@@ -950,6 +954,7 @@ async fn run_provider_ssh_connect(
     accept_unknown_host: bool,
     working_dir: Option<String>,
     agent_type: Option<AgentType>,
+    remote_command: Option<String>,
 ) -> Result<(), ClientError> {
     let server_id = config.server_id.clone();
     info!(
@@ -969,6 +974,7 @@ async fn run_provider_ssh_connect(
             working_dir,
             None, // No IPC for provider-backed sessions
             agent_type,
+            remote_command,
         )
         .await
         .map_err(|e| ClientError::Transport(e.to_string()))?;
@@ -1045,6 +1051,7 @@ mod tests {
                 None,
                 None,
                 None, // agent_type: None
+                None, // remote_command: None
             )
             .await;
         assert!(
@@ -1071,6 +1078,7 @@ mod tests {
                 None,
                 None,
                 Some(AgentType::Codex), // agent_type: Codex
+                None, // remote_command: None
             )
             .await;
         assert!(
@@ -1097,6 +1105,7 @@ mod tests {
                 None,
                 None,
                 Some(AgentType::PiNative),
+                None, // remote_command: None
             )
             .await;
         assert!(
@@ -1123,6 +1132,7 @@ mod tests {
                 None,
                 None,
                 Some(AgentType::DroidNative),
+                None, // remote_command: None
             )
             .await;
         assert!(
@@ -1152,7 +1162,8 @@ mod tests {
                 false,
                 None,
                 None,
-                None,
+                None, // agent_type: None
+                None, // remote_command: None
             )
             .await;
         // Expected to fail — no SSH server running.
@@ -1176,6 +1187,7 @@ mod tests {
                 None,
                 None,
                 Some(AgentType::PiNative),
+                None, // remote_command: None
             )
             .await;
         // Expected to fail — no SSH server running.
@@ -1199,6 +1211,7 @@ mod tests {
                 None,
                 None,
                 Some(AgentType::DroidAcp),
+                None, // remote_command: None
             )
             .await;
         // Expected to fail — no SSH server running.
@@ -1228,6 +1241,7 @@ mod tests {
                 None,
                 None,
                 Some(AgentType::PiNative),
+                None, // remote_command: None
             )
             .await;
 
@@ -1481,6 +1495,7 @@ mod tests {
                 None,
                 None,
                 None, // agent_type: None → guided path
+                None, // remote_command: None
             )
             .await;
 
@@ -1622,6 +1637,7 @@ mod tests {
                 None,
                 None,
                 Some(AgentType::PiNative),
+                None, // remote_command: None
             )
             .await;
 
@@ -1661,6 +1677,7 @@ mod tests {
                 None,
                 None,
                 Some(AgentType::DroidNative),
+                None, // remote_command: None
             )
             .await;
 

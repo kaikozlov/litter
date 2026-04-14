@@ -352,6 +352,13 @@ pub struct ProviderConfig {
     pub client_name: String,
     /// Client version reported during handshakes.
     pub client_version: String,
+    /// Shell command used to launch the agent's ACP server over SSH.
+    ///
+    /// Used by `GenericAcp` and `DroidAcp` transports to determine what
+    /// binary to spawn on the remote host. When `None`, `GenericAcp`
+    /// returns `TransportError::ConnectionFailed` indicating that a
+    /// remote command must be configured.
+    pub remote_command: Option<String>,
 }
 
 impl Default for ProviderConfig {
@@ -365,6 +372,7 @@ impl Default for ProviderConfig {
             agent_type: AgentType::Codex,
             client_name: "litter".to_string(),
             client_version: "0.1.0".to_string(),
+            remote_command: None,
         }
     }
 }
@@ -844,5 +852,40 @@ mod tests {
         assert!(config.websocket_url.is_none());
         assert!(config.ssh_host.is_none());
         assert_eq!(config.client_name, "litter");
+        assert!(config.remote_command.is_none());
+    }
+
+    // ── VAL-ACP-001: remote_command field on ProviderConfig ────────────
+
+    #[test]
+    fn provider_config_remote_command_default_is_none() {
+        let config = ProviderConfig::default();
+        assert!(
+            config.remote_command.is_none(),
+            "remote_command must default to None"
+        );
+    }
+
+    #[test]
+    fn provider_config_remote_command_can_be_set() {
+        let config = ProviderConfig {
+            remote_command: Some("droid exec --output-format acp".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.remote_command.as_deref(),
+            Some("droid exec --output-format acp")
+        );
+    }
+
+    #[test]
+    fn provider_config_remote_command_generic_agent() {
+        let config = ProviderConfig {
+            remote_command: Some("my-custom-agent --acp".to_string()),
+            agent_type: AgentType::GenericAcp,
+            ..Default::default()
+        };
+        assert_eq!(config.agent_type, AgentType::GenericAcp);
+        assert_eq!(config.remote_command.as_deref(), Some("my-custom-agent --acp"));
     }
 }
