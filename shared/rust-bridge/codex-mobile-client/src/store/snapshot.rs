@@ -14,6 +14,7 @@ use crate::types::{AppVoiceSessionPhase, AppVoiceTranscriptEntry};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum AppConnectionStepKind {
     ConnectingToSsh,
+    DetectingAgents,
     FindingCodex,
     InstallingCodex,
     StartingAppServer,
@@ -43,6 +44,13 @@ pub struct AppConnectionProgressSnapshot {
     pub steps: Vec<AppConnectionStepSnapshot>,
     pub pending_install: bool,
     pub terminal_message: Option<String>,
+    /// When multiple agents are detected, this list is populated so iOS
+    /// can present the agent picker. Empty when only Codex is available.
+    pub detected_agents: Vec<crate::provider::AgentInfo>,
+    /// When `true`, the guided flow is paused waiting for the user to
+    /// select an agent from the picker. The flow will NOT proceed with
+    /// Codex bootstrap until iOS resolves the selection.
+    pub pending_agent_selection: bool,
 }
 
 impl AppConnectionProgressSnapshot {
@@ -52,6 +60,11 @@ impl AppConnectionProgressSnapshot {
                 AppConnectionStepSnapshot {
                     kind: AppConnectionStepKind::ConnectingToSsh,
                     state: AppConnectionStepState::InProgress,
+                    detail: None,
+                },
+                AppConnectionStepSnapshot {
+                    kind: AppConnectionStepKind::DetectingAgents,
+                    state: AppConnectionStepState::Pending,
                     detail: None,
                 },
                 AppConnectionStepSnapshot {
@@ -82,6 +95,8 @@ impl AppConnectionProgressSnapshot {
             ],
             pending_install: false,
             terminal_message: None,
+            detected_agents: Vec::new(),
+            pending_agent_selection: false,
         }
     }
 
