@@ -18,7 +18,9 @@ struct DiscoveryView: View {
     @State private var connectingServer: DiscoveredServer?
     @State private var wakingServer: DiscoveredServer?
     @State private var agentPickerServer: DiscoveredServer?
+    @State private var agentPickerDetectedAgents: [AgentInfo]?
     @State private var agentPickerSelection: AgentType?
+    @State private var pendingSSHCredentials: (host: String, credentials: SSHCredentials, port: UInt16)?
     @State private var pendingAutoNavigateServerId: String?
     @State private var pendingAutoNavigateServer: DiscoveredServer?
     @State private var connectError: String?
@@ -129,16 +131,24 @@ struct DiscoveryView: View {
             }
         }
         .sheet(item: $agentPickerServer) { server in
-            AgentPickerSheet(
-                agentInfos: server.agentInfos.isEmpty
-                    ? server.agentTypes.map { AgentInfo(
-                        id: $0.persistentKey,
-                        displayName: $0.displayName,
-                        description: "",
-                        detectedTransports: [$0],
-                        capabilities: []
-                    )}
-                    : server.agentInfos,
+            // Prefer runtime-detected agents (from guided SSH connect detection),
+            // then fall back to discovery-layer agent infos, then synthesize from agent types.
+            let pickerInfos: [AgentInfo]
+            if let detected = agentPickerDetectedAgents, !detected.isEmpty {
+                pickerInfos = detected
+            } else if !server.agentInfos.isEmpty {
+                pickerInfos = server.agentInfos
+            } else {
+                pickerInfos = server.agentTypes.map { AgentInfo(
+                    id: $0.persistentKey,
+                    displayName: $0.displayName,
+                    description: "",
+                    detectedTransports: [$0],
+                    capabilities: []
+                )}
+            }
+            return AgentPickerSheet(
+                agentInfos: pickerInfos,
                 availableTransports: transportsForServer(server),
                 selectedAgentType: $agentPickerSelection
             )
@@ -146,10 +156,19 @@ struct DiscoveryView: View {
         .onChange(of: agentPickerSelection) { _, selected in
             guard let server = agentPickerServer, let selected else { return }
             AgentSelectionStore.shared.setSelectedAgentType(selected, for: server.id)
+            let wasRuntimeDetection = agentPickerDetectedAgents != nil
             agentPickerServer = nil
+            agentPickerDetectedAgents = nil
             agentPickerSelection = nil
-            // Continue the connection flow with the selected agent
-            Task { await proceedWithConnection(server) }
+            if wasRuntimeDetection {
+                // Re-initiate the connection with the selected agent type.
+                // The guided SSH connect detected multiple agents and paused.
+                // Now we reconnect with the user's choice.
+                Task { await reconnectWithSelectedAgent(server, agentType: selected) }
+            } else {
+                // Pre-connection picker (discovery-based) — continue the connection flow.
+                Task { await proceedWithConnection(server) }
+            }
         }
         .confirmationDialog(
             connectionChoiceServer.map { "Connect to \($0.name)" } ?? "Choose Connection",
@@ -189,6 +208,32 @@ struct DiscoveryView: View {
             self.sshServer = pendingSSHServer
         }
         .onChange(of: appModel.snapshot) { _, _ in
+            // Check for pending agent selection from runtime detection.
+            // When the guided SSH connect detects multiple agents, it signals
+            // via pendingAgentSelection == true and populates detectedAgents.
+            if agentPickerServer == nil,
+               let pendingId = pendingAutoNavigateServerId,
+               let serverSnapshot = appModel.snapshot?.serverSnapshot(for: pendingId),
+               let progress = serverSnapshot.connectionProgress,
+               progress.pendingAgentSelection,
+               !progress.detectedAgents.isEmpty {
+                if let server = pendingAutoNavigateServer
+                    ?? discovery.servers.first(where: { $0.id == pendingId }) {
+                    // Update the server's agent infos from detected agents
+                    let detectedInfos = progress.detectedAgents
+                    AgentSelectionStore.shared.updateAgentInfos(detectedInfos, for: server.id)
+                    let detectedTypes = detectedInfos.map { $0.detectedTransports }.flatMap { $0 }
+                    AgentSelectionStore.shared.updateAgentTypes(Array(Set(detectedTypes)), for: server.id)
+                    // Clear the connecting state and show the picker with
+                    // the runtime-detected agents.
+                    self.connectingServer = nil
+                    self.agentPickerDetectedAgents = detectedInfos
+                    self.agentPickerServer = server
+                    self.agentPickerSelection = nil
+                    return
+                }
+            }
+
             guard let pendingAutoNavigateServerId else { return }
             guard let serverSnapshot = appModel.snapshot?.serverSnapshot(for: pendingAutoNavigateServerId) else {
                 return
@@ -573,6 +618,35 @@ struct DiscoveryView: View {
         }
     }
 
+    /// Re-initiate the SSH connection after runtime agent detection and user selection.
+    /// The guided SSH connect detected multiple agents, paused, and the user chose one.
+    /// Now re-connect with the selected AgentType via the SSH connect path.
+    private func reconnectWithSelectedAgent(_ server: DiscoveredServer, agentType: AgentType) async {
+        guard let stored = pendingSSHCredentials else {
+            connectError = "SSH credentials expired. Please reconnect."
+            return
+        }
+        connectingServer = server
+        connectError = nil
+        do {
+            let serverId = try await connectViaSSH(
+                server: server,
+                host: stored.host,
+                credentials: stored.credentials,
+                agentType: agentType
+            )
+            await appModel.refreshSnapshot()
+            connectingServer = nil
+            pendingSSHCredentials = nil
+            pendingAutoNavigateServerId = serverId
+            pendingAutoNavigateServer = server
+        } catch {
+            connectingServer = nil
+            pendingSSHCredentials = nil
+            connectError = error.localizedDescription
+        }
+    }
+
     @MainActor
     private func handleTapAsync(_ server: DiscoveredServer) async {
         // Ensure the agent types registry is updated for this server.
@@ -917,10 +991,13 @@ struct DiscoveryView: View {
             case .sshThenRemote(let host, let credentials):
                 startedAsyncBootstrap = true
                 let agentType = AgentSelectionStore.shared.selectedAgentType(for: server.id)
+                // Store credentials for potential reconnection after agent picker selection.
+                pendingSSHCredentials = (host: host, credentials: credentials, port: server.resolvedSSHPort)
                 connectedServerId = try await connectViaSSH(server: server, host: host, credentials: credentials, agentType: agentType)
             }
         } catch {
             connectingServer = nil
+            pendingSSHCredentials = nil
             connectError = error.localizedDescription
             return
         }
@@ -932,6 +1009,7 @@ struct DiscoveryView: View {
             pendingAutoNavigateServer = server
             return
         }
+        pendingSSHCredentials = nil
         if appModel.snapshot?.servers.first(where: { $0.serverId == connectedServerId })?.health == .connected {
             navigateAfterConnect(server)
         } else {

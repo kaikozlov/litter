@@ -49,6 +49,8 @@ extension AppServerSnapshot {
         switch step.kind {
         case .connectingToSsh:
             return "connecting"
+        case .detectingAgents:
+            return "detecting agents"
         case .findingCodex:
             return "finding codex"
         case .installingCodex:
