@@ -1094,7 +1094,8 @@ struct DiscoveryView: View {
                 acceptUnknownHost: true,
                 workingDir: nil,
                 ipcSocketPathOverride: ipcSocketPathOverride,
-                agentType: agentType
+                agentType: agentType,
+                remoteCommand: nil
             )
         case .key(let username, let privateKey, let passphrase):
             return try await appModel.ssh.sshStartRemoteServerConnect(
@@ -1109,7 +1110,8 @@ struct DiscoveryView: View {
                 acceptUnknownHost: true,
                 workingDir: nil,
                 ipcSocketPathOverride: ipcSocketPathOverride,
-                agentType: agentType
+                agentType: agentType,
+                remoteCommand: nil
             )
         }
     }
