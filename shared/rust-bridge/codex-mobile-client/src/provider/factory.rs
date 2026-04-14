@@ -13,7 +13,7 @@
 //! | `PiAcp`         | `npx pi-acp`                                                       | `PiAcpTransport`    |
 //! | `DroidNative`   | `droid exec --input-format stream-jsonrpc --output-format stream-jsonrpc` | `DroidNativeTransport` |
 //! | `DroidAcp`      | `droid exec --output-format acp`                                    | `PiAcpTransport`    |
-//! | `GenericAcp`    | configurable via `ProviderConfig.remote_command`                    | `PiAcpTransport`    |
+//! | `GenericAcp`    | configurable via `ProviderConfig.remote_command`                    | `GenericAcpTransport` |
 //! | `Codex`         | error (use standard WebSocket path)                                | —                   |
 //!
 //! # Droid ACP Migration
@@ -33,6 +33,7 @@ use std::sync::Arc;
 
 use crate::ssh::SshClient;
 use crate::provider::droid::transport::DroidNativeTransport;
+use crate::provider::acp::generic_transport::GenericAcpTransport;
 use crate::provider::pi::acp_transport::PiAcpTransport;
 use crate::provider::pi::transport::PiNativeTransport;
 use crate::provider::{AgentType, ProviderConfig, ProviderTransport};
@@ -195,7 +196,7 @@ async fn create_generic_acp(
             ))
         })?;
 
-    let transport = PiAcpTransport::new(stream);
+    let transport = GenericAcpTransport::new(stream);
 
     // Perform ACP handshake with timeout.
     tokio::time::timeout(
