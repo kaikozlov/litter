@@ -1,0 +1,22 @@
+{
+  "featureId": "droid-acp-method-mapping",
+  "reviewedAt": "2026-04-14T01:15:00Z",
+  "commitId": "436ba2a",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Clean, consistent implementation of Codex wire method adapters for DroidAcpTransport::send_request(). All 6 VAL-DROIDACP-MAP assertions are covered by 19 tests (plus 3 regression tests). The implementation follows the established patterns from sibling transports (PiAcpTransport, DroidNativeTransport) and correctly maps Droid stream-json semantics. TDD approach confirmed via transcript — tests written first, failed (red), then implementation added (green).",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/acp_transport.rs",
+        "line": 1520,
+        "severity": "non_blocking",
+        "description": "Test `droid_acp_codex_turn_interrupt_no_output_to_transport` has stale comments from development ('Need to re-init after reset...', 'Actually, reset() clears...'). These are harmless but add noise. The test logic itself is correct — reset() clears written buffer, then interrupt is sent and output is verified empty."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "PASS — DroidAcpTransport Codex wire method mapping is well-implemented with full test coverage. The implementation correctly handles: thread/start (prompt + synthetic ThreadStart with session ID from system/init or generated UUID), turn/start (prompt only, no re-init), turn/interrupt (Ok(Null), no transport write), thread/list (current session or empty), no-op methods (archive/rollback/name/set), and collaborationMode/list (empty). 19 new tests cover all 6 validation assertions plus regression. All 992 tests pass, clippy clean. One minor non-blocking issue: stale development comments in one test."
+}

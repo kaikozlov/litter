@@ -1,0 +1,40 @@
+{
+  "featureId": "pi-acp-method-mapping",
+  "reviewedAt": "2026-04-14T01:15:00.000Z",
+  "commitId": "756aeea",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Solid implementation of all 7 Codex wire method adapters for PiAcpTransport::send_request(). All validation contract assertions (VAL-PIACP-MAP-001 through VAL-PIACP-MAP-007) are covered with 15 well-structured TDD tests. The implementation follows established patterns from the sibling PiNativeTransport and is consistent with the Droid transports. Code is clean, well-commented with VAL markers, and handles edge cases (missing thread_id, no text in params). Minor observations noted below but none are blocking.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/pi/acp_transport.rs",
+        "line": 353,
+        "severity": "non_blocking",
+        "description": "turn/start defaults session_id to \"default\" when not provided. While this matches the existing 'prompt' handler pattern above it, callers that forget to pass session_id will silently send prompts to a session named \"default\" rather than getting an explicit error. This is an inherited design decision, not a regression, but worth noting."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/pi/acp_transport.rs",
+        "line": 370,
+        "severity": "non_blocking",
+        "description": "thread/list format conversion maps SessionInfo fields (id, title, created_at, updated_at) to Codex ThreadList shape. The feature description specifies these fields and the conversion is correct. However, if SessionInfo fields like created_at/updated_at are empty strings (common for ACP sessions that may not track timestamps), the Codex consumer will receive empty strings rather than null or ISO timestamps. This is a minor data quality concern, not a bug — the DroidAcpTransport does the same thing."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/acp_transport.rs",
+        "line": 416,
+        "severity": "non_blocking",
+        "description": "Cross-transport parity observation: DroidAcpTransport is missing a thread/read adapter (it falls through to the error fallback). PiAcpTransport correctly implements thread/read → session/load. This is not a bug in PiAcpTransport's implementation, but represents a parity gap with DroidAcpTransport that should be tracked for follow-up."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The AcpClient checks its own internal LifecycleState::Authenticated before allowing session operations. PiAcpTransport.initialized flag (Arc<Mutex<bool>>) is separate from AcpClient's internal state. Tests that try to bypass handshake by only setting the initialized flag will still fail because AcpClient rejects operations when not authenticated. The worker discovered this during TDD red phase and restructured tests to use full ACP handshake mocks. This AcpClient lifecycle behavior is not documented in architecture.md or provider-transport.md.",
+      "evidence": "Worker handoff skillFeedback.deviations describes restructuring tests from minimal mock to full ACP handshake. Test helpers setup_authenticated_transport() and setup_minimal_transport() encode this knowledge. architecture.md does not mention AcpClient lifecycle constraints."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PiAcpTransport Codex wire method mapping is complete and correct. All 7 validation assertions are implemented with 15 TDD tests that follow proper ACP handshake mocking patterns. Implementation is consistent with sibling transports (PiNativeTransport, DroidNativeTransport, DroidAcpTransport). Minor non-blocking observations: inherited 'default' session_id fallback in turn/start, potential empty-string timestamp fields in thread/list conversion, and a DroidAcpTransport parity gap on thread/read. Clean clippy, 956 tests passing."
+}

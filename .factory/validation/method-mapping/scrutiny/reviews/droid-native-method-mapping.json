@@ -1,0 +1,34 @@
+{
+  "featureId": "droid-native-method-mapping",
+  "reviewedAt": "2026-04-14T01:15:00.000Z",
+  "commitId": "feeaee8",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Implementation correctly adds Codex wire method adapters to DroidNativeTransport::send_request(). All seven VAL-DROID-MAP-* requirements are covered with 17 well-structured TDD tests. The code follows the same pattern established by PiNativeTransport and is consistent with the project's provider architecture. Tests and cargo clippy pass cleanly.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs",
+        "line": 62,
+        "severity": "non_blocking",
+        "description": "extract_text_from_params() is duplicated between pi/transport.rs:56 and droid/transport.rs:62. The ACP transport already imports it via `crate::provider::droid::transport::extract_text_from_params`. Consider extracting to a shared utility module to avoid duplication, though this is a pre-existing pattern (the Pi version was already in place) and not introduced by this feature."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs",
+        "line": 630,
+        "severity": "non_blocking",
+        "description": "The `thread/list` adapter maps `list_sessions()` results to Codex ThreadList format using snake_case keys (created_at, updated_at) from SessionInfo's serde rename_all = \"camelCase\" attribute. Since SessionInfo has `#[serde(rename_all = \"camelCase\")]`, the JSON keys from Droid will be camelCase (createdAt, updatedAt), but the conversion uses `.id`, `.title`, `.created_at`, `.updated_at` from the Rust struct fields. This is correct — the Rust struct fields are snake_case regardless of the JSON key naming — but worth noting for anyone reading the conversion code."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs",
+        "line": 2065,
+        "severity": "non_blocking",
+        "description": "Test droid_codex_thread_start_calls_initialize_then_add_message uses `tokio::time::sleep(100ms)` to wait for async response queuing. This is a common pattern in the existing test suite but introduces timing sensitivity. Not blocking because it's consistent with the rest of the codebase and the delays are generous."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "The droid-native-method-mapping feature passes review. The implementation correctly maps all seven Codex wire methods (thread/start, turn/start, turn/interrupt, thread/list, thread/archive|rollback|name/set, collaborationMode/list, unknown→-32601) to Droid native commands in DroidNativeTransport::send_request(). All 17 TDD tests cover the VAL-DROID-MAP-* assertions, tests pass (973 total), and clippy is clean. The only non-blocking observation is that extract_text_from_params() is duplicated across Pi and Droid transports — a pre-existing pattern that could be refactored to a shared utility later. The implementation is consistent with the Pi transport's method mapping pattern and the project's architecture."
+}

@@ -1,0 +1,28 @@
+{
+  "featureId": "pi-native-method-mapping",
+  "reviewedAt": "2026-04-14T01:15:00.000Z",
+  "commitId": "e015bc6",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Clean, well-structured implementation of Codex wire method adapters for PiNativeTransport. The extract_text_from_params helper is well-designed with correct priority ordering (items[].content → content → text). All 8 VAL-PI-MAP assertions are covered by 22 tests. The worker correctly fixed a pre-existing test in factory.rs that relied on thread/list hitting the error fallback arm — now uses get_state instead, which is methodologically sound since that test's purpose is to verify post-disconnect error behavior.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/pi/transport.rs",
+        "line": 507,
+        "severity": "non_blocking",
+        "description": "No-op methods (thread/list, thread/archive, thread/rollback, thread/name/set, collaborationMode/list) do not check connection state. After disconnect, these methods will still return Ok with hardcoded values instead of an error. This is consistent with the feature spec (which says these methods return success), but it means calling thread/list on a disconnected transport silently succeeds. This is a design choice, not a bug — the alternative would be to check self.is_connected() first for every no-op method. Worth noting for future consideration."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/pi/transport.rs",
+        "line": 498,
+        "severity": "non_blocking",
+        "description": "thread/start and turn/start generate a UUID-based thread ID (pi-thread-{uuid}) for the synthetic response. This is appropriate but the format differs from the DroidNative transport which uses its session ID. Both are valid approaches since Pi doesn't have a native thread concept, but callers that rely on thread_id format should be aware of the provider-specific variation."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Pass. The implementation fully covers all 8 VAL-PI-MAP requirements. 22 new tests cover each Codex wire method mapping plus the extract_text_from_params helper with good edge case coverage (empty values, priority ordering, missing fields). The pre-existing factory test was correctly updated to use get_state instead of thread/list for disconnect verification. Clippy clean, all 941 tests pass. No blocking issues found."
+}

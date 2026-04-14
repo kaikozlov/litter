@@ -1,0 +1,46 @@
+{
+  "milestone": "method-mapping",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml -- -D warnings",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 4,
+    "passed": 4,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Added Codex wire method mapping documentation to architecture.md: method mapping layer description in send_request() chain, extract_text_from_params() helper function location and priority ordering, transport-specific thread ID formats (pi-thread-{uuid} for Pi, Droid session ID for Droid), and DroidAcpTransport thread/read parity gap.",
+      "sourceFeature": "method-mapping milestone (all 4 features)"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add boundary: extract_text_from_params() is duplicated across pi/transport.rs and droid/transport.rs. Future refactors should extract it to a shared utility module (e.g., provider/utils.rs) rather than adding a third copy. The ACP transports already import from droid/transport.",
+      "evidence": "DroidNativeTransport re-implements extract_text_from_params() that was already in PiNativeTransport. DroidAcpTransport imports it from droid/transport.rs. A third provider type would require deciding where to put the function.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": null
+}

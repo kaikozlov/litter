@@ -74,6 +74,14 @@ iOS DiscoveryView tap
 - Maps Codex wire methods (thread/start, turn/start, turn/interrupt, thread/list, etc.) to provider-native methods
 - Ensures existing FFI methods (start_thread, list_threads, etc.) work transparently
 
+#### Method Mapping Details
+- **extract_text_from_params()** — Shared helper (duplicated in pi/transport.rs and droid/transport.rs) that extracts user text from Codex wire params with priority ordering: `items[].content` → `content` field → `text` field. ACP transports import from droid/transport.rs.
+- **Thread ID formats** — PiNativeTransport generates `pi-thread-{uuid}` for synthetic responses; DroidNativeTransport uses the Droid session ID; DroidAcpTransport uses session ID from `system/init` or generates UUID fallback.
+- **No-op methods** — `thread/archive`, `thread/rollback`, `thread/name/set` return `{"ok": true}` without checking connection state. `collaborationMode/list` returns `{"data": []}`. This is intentional per spec.
+- **Unknown methods** — PiNativeTransport and DroidNativeTransport return `-32601` (method not found). DroidAcpTransport and PiAcpTransport rely on the error fallback.
+- **ACP client lifecycle** — AcpClient checks its own internal `LifecycleState::Authenticated` before allowing session operations. The transport's `initialized` flag (Arc<Mutex<bool>>) is separate from AcpClient's internal state. Tests must perform full ACP handshake mocking; simply setting `initialized` is insufficient.
+- **Parity gap** — DroidAcpTransport is missing a `thread/read` adapter (falls through to error fallback). PiAcpTransport correctly implements `thread/read` → `session/load`. This should be addressed in a follow-up.
+
 ## Request Routing Chain
 
 ```
