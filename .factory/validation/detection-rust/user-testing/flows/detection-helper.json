@@ -1,0 +1,147 @@
+{
+  "groupId": "detection-helper",
+  "testedAt": "2026-04-13T00:00:00Z",
+  "isolation": {
+    "type": "pure Rust unit tests with mock transports",
+    "noSharedState": true,
+    "noExternalServices": true
+  },
+  "toolsUsed": ["cargo test", "code review"],
+  "assertions": [
+    {
+      "id": "VAL-DETECT-001",
+      "title": "detect_all_agents returns Codex when no Pi/Droid found",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- val_detect_001",
+          "expected": "Test passes — result contains exactly one entry with Codex",
+          "observed": "test provider::detection::tests::val_detect_001_codex_only_fallback ... ok"
+        },
+        {
+          "action": "Code review: verified empty DetectedPiAgent and DetectedDroidAgent produce no additional entries",
+          "expected": "Only codex_agent_info() is included in agents vec",
+          "observed": "Confirmed: map_pi_agent returns empty vec when no transports detected; map_droid_agent returns empty vec when native_supported=false. Result is exactly 1 agent (Codex)."
+        }
+      ],
+      "evidence": {
+        "testOutput": "1 passed; 0 failed; 0 ignored; 1040 filtered out; finished in 0.00s",
+        "codeReview": "detection.rs lines: codex_agent_info() always added first, map_pi_agent/map_droid_agent return empty vecs for no-find inputs"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DETECT-002",
+      "title": "detect_all_agents returns Pi types when pi binary found",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- val_detect_002",
+          "expected": "Test passes — result contains PiNative in detected_transports",
+          "observed": "test provider::detection::tests::val_detect_002_pi_detected ... ok"
+        },
+        {
+          "action": "Code review: verified DetectedPiAgent with Native transport maps to AgentInfo with PiNative",
+          "expected": "AgentInfo with id=pi-native and detected_transports=[PiNative]",
+          "observed": "Confirmed: map_pi_agent checks PiTransportKind::Native in detected_transports, creates entry with AgentType::PiNative"
+        }
+      ],
+      "evidence": {
+        "testOutput": "1 passed; 0 failed; 0 ignored; 1040 filtered out; finished in 0.00s",
+        "codeReview": "detection.rs map_pi_agent: creates pi-native AgentInfo when PiTransportKind::Native present, includes version in description"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DETECT-003",
+      "title": "detect_all_agents returns Droid types when droid binary found",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- val_detect_003",
+          "expected": "Test passes — result contains DroidNative in detected_transports",
+          "observed": "test provider::detection::tests::val_detect_003_droid_detected ... ok"
+        },
+        {
+          "action": "Code review: verified DetectedDroidAgent with native_supported=true maps to AgentInfo with DroidNative",
+          "expected": "AgentInfo with id=droid-native and detected_transports=[DroidNative]",
+          "observed": "Confirmed: map_droid_agent checks native_supported field, creates entry with AgentType::DroidNative"
+        }
+      ],
+      "evidence": {
+        "testOutput": "1 passed; 0 failed; 0 ignored; 1040 filtered out; finished in 0.00s",
+        "codeReview": "detection.rs map_droid_agent: creates droid-native AgentInfo when native_supported=true, includes version in description"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DETECT-004",
+      "title": "detect_all_agents returns all types when both Pi and Droid found",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- val_detect_004",
+          "expected": "Test passes — result contains Codex + Pi + Droid entries",
+          "observed": "test provider::detection::tests::val_detect_004_both_detected ... ok"
+        },
+        {
+          "action": "Code review: verified both Pi (Native+ACP) and Droid (Native) produce 4 total agents with Codex",
+          "expected": "4 agents: codex, pi-native, pi-acp, droid-native",
+          "observed": "Confirmed: test asserts agents.len()==4, find_agent succeeds for Codex, PiNative, PiAcp, and DroidNative"
+        }
+      ],
+      "evidence": {
+        "testOutput": "1 passed; 0 failed; 0 ignored; 1040 filtered out; finished in 0.00s",
+        "codeReview": "detection.rs: map_pi_agent with both Native+ACP transports produces 2 entries, map_droid_agent produces 1, plus Codex baseline = 4 total"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DETECT-005",
+      "title": "detect_all_agents runs Pi and Droid detection in parallel",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Code review: verify detect_all_agents uses tokio::join! with both detection futures",
+          "expected": "Function body contains tokio::join!(pi_future, droid_future)",
+          "observed": "Confirmed at detection.rs detect_all_agents(): let (pi, droid) = tokio::join!(pi_future, droid_future); — both futures run concurrently"
+        },
+        {
+          "action": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- val_detect_005",
+          "expected": "Test passes — structural verification documented",
+          "observed": "test provider::detection::tests::val_detect_005_parallel_structure_verified ... ok"
+        }
+      ],
+      "evidence": {
+        "testOutput": "1 passed; 0 failed; 0 ignored; 1040 filtered out; finished in 0.00s",
+        "codeReview": "detection.rs lines 119-121: pi_future and droid_future are created, then tokio::join!(pi_future, droid_future) runs both concurrently. Wrapped in tokio::time::timeout(DETECTION_TIMEOUT, ...) for 5s bound."
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DETECT-006",
+      "title": "detect_all_agents completes in <5 seconds",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- val_detect_006",
+          "expected": "Both timeout tests pass — partial results with Codex fallback + 5s duration constant",
+          "observed": "test provider::detection::tests::val_detect_006_timeout_returns_partial_with_codex ... ok\ntest provider::detection::tests::val_detect_006_timeout_duration_is_5_seconds ... ok"
+        },
+        {
+          "action": "Code review: verify timeout wrapping and fallback behavior",
+          "expected": "DETECTION_TIMEOUT = 5s, timeout handler returns empty DetectedPi/DroidAgent, Codex always included",
+          "observed": "Confirmed: DETECTION_TIMEOUT = Duration::from_secs(5). tokio::time::timeout wraps the join!. On timeout, .unwrap_or_else returns empty detected agents, then codex_agent_info() is always prepended."
+        }
+      ],
+      "evidence": {
+        "testOutput": "2 passed; 0 failed; 0 ignored; 1039 filtered out; finished in 0.00s",
+        "codeReview": "detection.rs: DETECTION_TIMEOUT const = 5s. detect_all_agents wraps tokio::join! in tokio::time::timeout(). On Elapsed, logs warning and returns empty Pi/Droid results, but Codex baseline is always added."
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 6 assertions: all 6 passed. All cargo tests (7 test functions total, including 2 for VAL-DETECT-006) pass. Code review confirms tokio::join! parallel execution and 5-second timeout wrapping with Codex fallback."
+}

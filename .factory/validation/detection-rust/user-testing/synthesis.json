@@ -1,0 +1,42 @@
+{
+  "milestone": "detection-rust",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 14,
+    "passed": 14,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-DETECT-001",
+    "VAL-DETECT-002",
+    "VAL-DETECT-003",
+    "VAL-DETECT-004",
+    "VAL-DETECT-005",
+    "VAL-DETECT-006",
+    "VAL-GUIDED-001",
+    "VAL-GUIDED-002",
+    "VAL-GUIDED-003",
+    "VAL-GUIDED-004",
+    "VAL-GUIDED-005",
+    "VAL-PROVIDER-001",
+    "VAL-PROVIDER-002",
+    "VAL-PROVIDER-003"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null,
+  "flowReports": [
+    ".factory/validation/detection-rust/user-testing/flows/detection-helper.json",
+    ".factory/validation/detection-rust/user-testing/flows/guided-ssh.json",
+    ".factory/validation/detection-rust/user-testing/flows/provider-ssh.json"
+  ],
+  "fullSuiteResult": {
+    "total": 1032,
+    "passed": 1032,
+    "failed": 0,
+    "ignored": 9
+  }
+}

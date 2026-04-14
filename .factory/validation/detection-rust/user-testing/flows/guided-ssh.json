@@ -1,0 +1,119 @@
+{
+  "groupId": "guided-ssh",
+  "testedAt": "2026-04-13T00:00:00Z",
+  "isolation": {
+    "type": "pure Rust unit tests with mock transports",
+    "sharedState": false,
+    "externalServices": false,
+    "workingDirectory": "/Users/kai/dev/projects/litter"
+  },
+  "toolsUsed": ["cargo test", "code review"],
+  "assertions": [
+    {
+      "id": "VAL-GUIDED-001",
+      "title": "Detection runs after SSH auth, before Codex bootstrap",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Code review: inspect run_guided_ssh_connect() in src/ffi/ssh.rs",
+          "expected": "detect_all_agents() call appears between SshClient::connect() and resolve_codex_binary_optional_with_shell()",
+          "observed": "Sequence confirmed: (1) SshClient::connect() → ssh_client, (2) progress step DetectingAgents set to InProgress, (3) detect_all_agents(&ssh_client).await → detected, (4) if detected.has_multiple_agents() → return early, (5) resolve_codex_binary_optional_with_shell() → Codex bootstrap"
+        },
+        {
+          "action": "Run cargo test val_guided_001",
+          "expected": "Test passes — DetectingAgents step appears before FindingCodex in bootstrap progress",
+          "observed": "val_guided_001_detection_after_ssh_before_codex_verified PASSED"
+        }
+      ],
+      "evidence": {
+        "codeReview": "src/ffi/ssh.rs lines ~340-370: detection block with DetectingAgents step inserted between SSH connect and FindingCodex",
+        "testOutput": "test ffi::ssh::tests::val_guided_001_detection_after_ssh_before_codex_verified ... ok",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-GUIDED-002",
+      "title": "When only Codex found, proceeds with normal Codex bootstrap (unchanged)",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test val_guided_002",
+          "expected": "Test passes — Codex-only detection does not set pending_agent_selection",
+          "observed": "val_guided_002_codex_only_proceeds_normally PASSED — pending_agent_selection remains false, detected_agents is empty, FindingCodex step is still Pending"
+        }
+      ],
+      "evidence": {
+        "testOutput": "test ffi::ssh::tests::val_guided_002_codex_only_proceeds_normally ... ok",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-GUIDED-003",
+      "title": "When multiple agents found, returns detected agent list for iOS picker",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test val_guided_003",
+          "expected": "Test passes — multiple agents populate progress with detected_agents list and pending_agent_selection=true",
+          "observed": "val_guided_003_multiple_agents_populates_progress PASSED — progress.detected_agents contains 2 entries (codex, pi-native), pending_agent_selection=true, terminal_message set"
+        }
+      ],
+      "evidence": {
+        "testOutput": "test ffi::ssh::tests::val_guided_003_multiple_agents_populates_progress ... ok",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-GUIDED-004",
+      "title": "Detection failure falls through to Codex path",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Code review: inspect detect_all_agents() timeout handling in src/provider/detection.rs",
+          "expected": "Timeout/error returns Codex-only fallback, not propagated error",
+          "observed": "detect_all_agents() wraps tokio::join! in tokio::time::timeout(DETECTION_TIMEOUT). On timeout, returns empty Pi/Droid results + Codex baseline. Individual probe failures are logged and omitted."
+        },
+        {
+          "action": "Run cargo test val_guided_004",
+          "expected": "Test passes — detection failure falls through to Codex path without blocking",
+          "observed": "val_guided_004_detection_failure_falls_through PASSED — pending_agent_selection=false, detected_agents empty, FindingCodex step is Pending (flow continues)"
+        }
+      ],
+      "evidence": {
+        "codeReview": "src/provider/detection.rs: detect_all_agents() uses unwrap_or_else on timeout to return partial results + Codex baseline",
+        "testOutput": "test ffi::ssh::tests::val_guided_004_detection_failure_falls_through ... ok",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-GUIDED-005",
+      "title": "Existing Codex-only flow is unchanged",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test val_guided_005",
+          "expected": "Test passes — Codex flow has detection step in bootstrap sequence",
+          "observed": "val_guided_005_codex_flow_has_detection_step_in_bootstrap PASSED — DetectingAgents step present, defaults to Pending; pending_agent_selection=false; detected_agents empty"
+        },
+        {
+          "action": "Run full test suite (cargo test --lib)",
+          "expected": "All 1032 tests pass (0 regressions)",
+          "observed": "test result: ok. 1032 passed; 0 failed; 9 ignored; 0 measured; 0 filtered out; finished in 61.56s"
+        }
+      ],
+      "evidence": {
+        "testOutput": "test ffi::ssh::tests::val_guided_005_codex_flow_has_detection_step_in_bootstrap ... ok",
+        "fullSuiteOutput": "test result: ok. 1032 passed; 0 failed; 9 ignored; 0 measured",
+        "consoleErrors": "none"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 5 assertions: all 5 passed. VAL-GUIDED-001 through VAL-GUIDED-004 verified through code review and targeted cargo tests. VAL-GUIDED-005 confirmed via full regression suite: 1032/1032 tests pass with 0 failures. Detection is correctly placed after SSH auth and before Codex bootstrap; Codex-only flow is unchanged; multiple-agent detection surfaces the picker list; detection failures gracefully fall through to Codex."
+}

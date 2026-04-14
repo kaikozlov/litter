@@ -1,0 +1,94 @@
+{
+  "groupId": "provider-ssh",
+  "testedAt": "2026-04-13T00:00:00Z",
+  "isolation": {
+    "type": "Rust unit tests with mock transports",
+    "sharedState": false,
+    "externalServices": false,
+    "workingDirectory": "/Users/kai/dev/projects/litter"
+  },
+  "toolsUsed": ["cargo test", "code review"],
+  "assertions": [
+    {
+      "id": "VAL-PROVIDER-001",
+      "title": "Detection validates selected agent exists before spawning transport",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- val_provider_001",
+          "expected": "Tests pass confirming validation runs before factory call",
+          "observed": "2 tests passed: ffi::ssh::tests::val_provider_001_provider_connect_validates_binary and mobile_client::tests::mobile_client_tests::val_provider_001_validation_before_factory_verified"
+        },
+        {
+          "action": "Code review of agent_binary_name mapping",
+          "expected": "All non-Codex agent types (PiNative, PiAcp, DroidNative, DroidAcp) return a binary name for validation",
+          "observed": "agent_binary_name returns Some for all 4 non-Codex types and None for Codex and GenericAcp, confirming validation executes before create_provider_over_ssh()"
+        }
+      ],
+      "evidence": {
+        "testOutput": "running 2 tests — test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1039 filtered out",
+        "sourceFiles": [
+          "src/ffi/ssh.rs:1517 — val_provider_001_provider_connect_validates_binary",
+          "src/mobile_client/tests.rs:2313 — val_provider_001_validation_before_factory_verified"
+        ],
+        "verification": "agent_binary_name() returns Some(\"pi\") for PiNative/PiAcp and Some(\"droid\") for DroidNative/DroidAcp; returns None for Codex/GenericAcp (no validation needed)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PROVIDER-002",
+      "title": "If selected agent not found, returns clear error",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- val_provider_002",
+          "expected": "Tests pass confirming descriptive error with agent name and binary",
+          "observed": "2 tests passed: ffi::ssh::tests::val_provider_002_error_message_contains_agent_and_binary and mobile_client::tests::mobile_client_tests::val_provider_002_error_message_is_clear"
+        },
+        {
+          "action": "Code review of error message construction",
+          "expected": "Error message includes agent type name and binary path, SSH session cleaned up",
+          "observed": "Error message format: \"{agent_type} agent not found on remote host — binary '{binary}' is not on PATH\". Tests verify message contains agent-specific binary name (pi/droid), 'not found', and 'not on PATH'"
+        }
+      ],
+      "evidence": {
+        "testOutput": "running 2 tests — test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1039 filtered out",
+        "sourceFiles": [
+          "src/ffi/ssh.rs:1543 — val_provider_002_error_message_contains_agent_and_binary",
+          "src/mobile_client/tests.rs:2343 — val_provider_002_error_message_is_clear"
+        ],
+        "verification": "For each non-Codex agent type, error message correctly references the binary name (pi for PiNative/PiAcp, droid for DroidNative/DroidAcp) and includes descriptive text about the failure"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PROVIDER-003",
+      "title": "If selected agent found, proceeds with provider factory",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- val_provider_003",
+          "expected": "Tests pass confirming factory is called after successful validation",
+          "observed": "2 tests passed: ffi::ssh::tests::val_provider_003_provider_path_covers_all_non_codex_types and mobile_client::tests::mobile_client_tests::val_provider_003_validation_returns_ok_for_known_binary"
+        },
+        {
+          "action": "Code review of is_non_codex_agent routing",
+          "expected": "All non-Codex types route through provider path; Codex and None do not",
+          "observed": "is_non_codex_agent returns true for PiNative, PiAcp, DroidNative, DroidAcp, GenericAcp and false for Codex and None. All binary-backed types have non-empty binary names confirming validation can succeed and factory will be reached"
+        }
+      ],
+      "evidence": {
+        "testOutput": "running 2 tests — test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1039 filtered out",
+        "sourceFiles": [
+          "src/ffi/ssh.rs:1582 — val_provider_003_provider_path_covers_all_non_codex_types",
+          "src/mobile_client/tests.rs:2375 — val_provider_003_validation_returns_ok_for_known_binary"
+        ],
+        "verification": "All 4 binary-backed agent types produce non-empty binary names; is_non_codex_agent correctly identifies all 5 non-Codex types for provider path routing"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 3 assertions: all 3 passed. 6 total cargo tests executed (2 per assertion), all passed. Code review confirms validate_agent_binary_on_host is called between SSH connect and provider factory creation for all non-Codex agent types, returns descriptive error messages with agent and binary names on failure, and correctly routes to the provider factory on success."
+}
