@@ -1,0 +1,31 @@
+{
+  "featureId": "cross-validation",
+  "reviewedAt": "2026-04-14T02:15:00.000Z",
+  "commitId": "5ad5b5d81e95e6061cb04c87562e61a386e6c828",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Cross-validation feature is purely a verification exercise — no new code was committed. The worker correctly ran all 992 unit tests (pass), clippy clean, and verified all 8 VAL-CROSS assertions through existing test coverage and code review. The single commit (5ad5b5d) is from the ios-wire-agent-selection feature (wiring agent type through iOS SSH connect flow), not new code for cross-validation. All validation assertions are well-covered by existing test infrastructure.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The cross_provider.rs test file uses VAL-CROSS assertion numbers that differ from the validation-contract.md. For example, cross_provider.rs references VAL-CROSS-010, VAL-CROSS-012, VAL-CROSS-013, VAL-CROSS-016, VAL-CROSS-017, VAL-CROSS-018, VAL-CROSS-019, VAL-CROSS-020, VAL-CROSS-021 which don't appear in the validation contract (which only defines VAL-CROSS-001 through VAL-CROSS-008). The tests are still valid, but the numbering mismatch could cause confusion when tracing requirements.",
+      "evidence": "cross_provider.rs header comment lists 'VAL-CROSS-001, VAL-CROSS-002, VAL-CROSS-006, VAL-CROSS-008, VAL-CROSS-010, VAL-CROSS-012, VAL-CROSS-013, VAL-CROSS-016, VAL-CROSS-017, VAL-CROSS-018, VAL-CROSS-019, VAL-CROSS-020, VAL-CROSS-021, VAL-PROV-017, VAL-PROV-020' but validation-contract.md only defines VAL-CROSS-001 through VAL-CROSS-008."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The architecture.md library doc notes a parity gap: DroidAcpTransport is missing a thread/read adapter (falls through to error fallback) while PiAcpTransport correctly implements thread/read → session/load. This is documented but not tracked as a follow-up task in the mission features.",
+      "evidence": ".factory/library/architecture.md under 'Method Mapping Details' → 'Parity gap': 'DroidAcpTransport is missing a thread/read adapter (falls through to error fallback). PiAcpTransport correctly implements thread/read → session/load. This should be addressed in a follow-up.'"
+    },
+    {
+      "area": "skills",
+      "observation": "The worker used the rust-backend-worker skill and followed it correctly (followedProcedure: true, no deviations). The skill appears well-calibrated for this type of verification task.",
+      "evidence": "Handoff skillFeedback: { followedProcedure: true, deviations: [], suggestedChanges: [] }"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS. Cross-validation feature verified all 8 VAL-CROSS assertions through comprehensive existing test coverage (992 tests pass, 9 ignored E2E). IPC isolation confirmed via code review: from_provider() sets ipc_stream_client: None, ipc_ssh_client: None, ipc_stream_bridge_pid: None. Disconnect cleanup is thorough: provider.disconnect() → SessionCommand::Shutdown → worker_handle.abort(), and SSH client disconnects on session teardown. Codex regression verified: None/Codex agent types delegate to existing guided SSH path unchanged. The validation is thorough and the implementation correctly satisfies all requirements. No blocking or non-blocking issues found."
+}

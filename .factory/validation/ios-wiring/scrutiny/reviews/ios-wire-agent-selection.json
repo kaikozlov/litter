@@ -1,0 +1,26 @@
+{
+  "featureId": "ios-wire-agent-selection",
+  "reviewedAt": "2026-04-14T01:45:00.000Z",
+  "commitId": "5ad5b5d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation correctly wires the selected agent type from AgentSelectionStore through the iOS SSH connection flow. The commit modifies only DiscoveryView.swift (14 additions, 7 deletions) with clean parameter threading: connectToServer() reads AgentSelectionStore.shared.selectedAgentType(for: server.id) and passes it through connectViaSSH() → sshConnectAndConnectServer() → appModel.ssh.sshStartRemoteServerConnect(). Both .password and .key credential branches forward the agentType to the FFI call. The auto-SSH simulator path correctly defaults to nil since auto-generated server IDs have no stored agent selection, maintaining backward compatibility.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "AgentSelectionStore is a Swift-only class living in AgentPickerView.swift (not in Models/ or Bridge/). It persists per-server agent type selections via UserDefaults and provides selectedAgentType(for:) and effectiveAgentType(for:availableAgents:). This pattern of colocating a store class with its primary view is used across the codebase but not documented in AGENTS.md or library/.",
+      "evidence": "AgentPickerView.swift lines 80-90 define the @MainActor final class AgentSelectionStore with UserDefaults persistence. DiscoveryView.swift line 919, HeaderView.swift line 33, and SessionsScreen.swift line 1245 all consume it."
+    },
+    {
+      "area": "conventions",
+      "observation": "The feature correctly follows the pattern of keeping Swift code thin — it reads a stored value and passes it through to the Rust FFI boundary without parsing or transforming the agent type. This aligns with AGENTS.md's 'Keep Swift/Kotlin thin' and 'Do not parse upstream wire-format strings in Swift/Kotlin' guidelines.",
+      "evidence": "DiscoveryView.swift passes AgentType? directly to sshStartRemoteServerConnect without any string parsing or transformation. The only string conversion is for logging (persistentKey)."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Clean pass. The implementation fully covers the feature description: agent type is read from AgentSelectionStore in connectToServer(), threaded through connectViaSSH() and sshConnectAndConnectServer(), and passed to sshStartRemoteServerConnect() in both .password and .key credential branches. The auto-SSH simulator path correctly defaults to nil. The Rust FFI already had the agent_type parameter from the prior feature (ffi-agent-type-parameter), and the generated UniFFI bindings already included it. No bugs or edge cases missed. Build verification passed (cargo check, cargo test 992/992, make ios-sim-fast BUILD SUCCEEDED). Worker followed the skill procedure faithfully with no deviations."
+}

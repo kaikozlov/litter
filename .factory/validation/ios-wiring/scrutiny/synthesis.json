@@ -1,0 +1,47 @@
+{
+  "milestone": "ios-wiring",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib", "exitCode": 0, "detail": "992 passed, 0 failed, 9 ignored" },
+    "typecheck": { "passed": true, "command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml", "exitCode": 0 },
+    "lint": { "passed": true, "command": "cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml -- -D warnings", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [],
+  "rejectedObservations": [
+    {
+      "observation": "AgentSelectionStore is a Swift-only class colocated with AgentPickerView.swift, not documented in AGENTS.md or library/",
+      "reason": "already-documented",
+      "sourceFeature": "ios-wire-agent-selection"
+    },
+    {
+      "observation": "Feature correctly follows the 'Keep Swift/Kotlin thin' guideline — passes AgentType? directly to FFI without parsing or transformation",
+      "reason": "already-documented",
+      "sourceFeature": "ios-wire-agent-selection"
+    },
+    {
+      "observation": "cross_provider.rs uses VAL-CROSS assertion numbers (010, 012, etc.) that don't match validation-contract.md (001-008)",
+      "reason": "cosmetic — tests are valid and the numbering mismatch doesn't affect correctness or traceability",
+      "sourceFeature": "cross-validation"
+    },
+    {
+      "observation": "DroidAcpTransport missing thread/read adapter (parity gap with PiAcpTransport)",
+      "reason": "already-documented in library/architecture.md as known parity gap; not blocking",
+      "sourceFeature": "cross-validation"
+    },
+    {
+      "observation": "Worker used rust-backend-worker skill correctly for verification task",
+      "reason": "not actionable — skill procedure confirmation",
+      "sourceFeature": "cross-validation"
+    }
+  ],
+  "previousRound": null
+}
