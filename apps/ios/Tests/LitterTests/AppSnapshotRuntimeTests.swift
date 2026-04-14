@@ -297,7 +297,8 @@ final class AppSnapshotRuntimeTests: XCTestCase {
             requiresOpenaiAuth: false,
             rateLimits: nil,
             availableModels: nil,
-            connectionProgress: nil
+            connectionProgress: nil,
+            agentCapabilities: []
         )
         let sessionSummaries = threads.map { thread in
             AppSessionSummary(

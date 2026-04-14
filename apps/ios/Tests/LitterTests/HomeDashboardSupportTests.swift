@@ -337,7 +337,8 @@ final class HomeDashboardSupportTests: XCTestCase {
             requiresOpenaiAuth: false,
             rateLimits: nil,
             availableModels: nil,
-            connectionProgress: nil
+            connectionProgress: nil,
+            agentCapabilities: []
         )
     }
 
