@@ -20,12 +20,17 @@ pub struct DetectedDroidAgent {
     pub version: Option<String>,
     /// Whether native Factory API transport is supported.
     pub native_supported: bool,
+    /// Whether ACP transport via `droid exec --output-format acp` is supported.
+    ///
+    /// Probed by checking if `droid exec --help` mentions `--output-format`
+    /// or by attempting a dry-run of `droid exec --output-format acp --help`.
+    pub acp_supported: bool,
 }
 
 impl DetectedDroidAgent {
-    /// Returns true if Droid is available on this host.
+    /// Returns true if Droid is available on this host (any transport).
     pub fn is_available(&self) -> bool {
-        self.native_supported
+        self.native_supported || self.acp_supported
     }
 }
 
@@ -43,6 +48,7 @@ const DROID_COMMON_PATHS: &[&str] = &[
 /// 1. `command -v droid` — checks if Droid binary is on PATH
 /// 2. Checks common install locations if not on PATH
 /// 3. `droid --version` — verifies binary works and gets version
+/// 4. `droid exec --help` — checks if `--output-format acp` is supported
 ///
 /// Each probe has a timeout. Failures are non-fatal — the function
 /// returns partial results.
@@ -51,6 +57,7 @@ pub async fn detect_droid_agent(ssh_client: &SshClient) -> DetectedDroidAgent {
         binary_path: None,
         version: None,
         native_supported: false,
+        acp_supported: false,
     };
 
     // Probe 1: Check if droid binary exists on PATH.
@@ -64,13 +71,17 @@ pub async fn detect_droid_agent(ssh_client: &SshClient) -> DetectedDroidAgent {
         if detected.version.is_some() {
             detected.native_supported = true;
         }
+
+        // Probe 3: Check if ACP output format is supported.
+        detected.acp_supported = probe_droid_acp(ssh_client).await;
     }
 
     tracing::info!(
-        "Droid detection complete: binary_path={:?}, version={:?}, native_supported={}",
+        "Droid detection complete: binary_path={:?}, version={:?}, native_supported={}, acp_supported={}",
         detected.binary_path,
         detected.version,
         detected.native_supported,
+        detected.acp_supported,
     );
 
     detected
@@ -136,6 +147,33 @@ async fn probe_droid_version(ssh_client: &SshClient) -> Option<String> {
     }
 }
 
+/// Probe whether `droid exec --output-format acp` is supported.
+///
+/// Checks if `droid exec --help` mentions `--output-format` or
+/// `output-format` in its usage text. If the help text contains
+/// the flag, the ACP transport path is available.
+async fn probe_droid_acp(ssh_client: &SshClient) -> bool {
+    match ssh_client
+        .exec_with_profile("droid exec --help 2>&1")
+        .await
+    {
+        Ok(result) => {
+            let output = format!("{}\n{}", result.stdout, result.stderr);
+            let supports_acp = output.contains("--output-format") || output.contains("output-format");
+            if supports_acp {
+                tracing::debug!("Droid supports --output-format (ACP available)");
+            } else {
+                tracing::debug!("Droid --output-format not found in help text (ACP not available)");
+            }
+            supports_acp
+        }
+        _ => {
+            tracing::debug!("droid exec --help failed, ACP support unknown");
+            false
+        }
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -150,6 +188,7 @@ mod tests {
             binary_path: None,
             version: None,
             native_supported: false,
+            acp_supported: false,
         };
         assert!(!detected.is_available());
     }
@@ -160,6 +199,7 @@ mod tests {
             binary_path: Some("/home/ubuntu/.bun/bin/droid".to_string()),
             version: Some("droid 0.99.0".to_string()),
             native_supported: true,
+            acp_supported: false,
         };
         assert!(detected.is_available());
     }
@@ -171,6 +211,7 @@ mod tests {
             binary_path: Some("/usr/local/bin/droid".to_string()),
             version: None,
             native_supported: false,
+            acp_supported: false,
         };
         assert!(!detected.is_available());
     }
@@ -183,6 +224,7 @@ mod tests {
             binary_path: Some("/home/ubuntu/.bun/bin/droid".to_string()),
             version: Some("droid 0.99.0".to_string()),
             native_supported: true,
+            acp_supported: false,
         };
         assert!(detected.binary_path.is_some());
         assert!(detected.version.is_some());
@@ -195,6 +237,7 @@ mod tests {
             binary_path: None,
             version: None,
             native_supported: false,
+            acp_supported: false,
         };
         assert!(!detected.is_available());
         assert!(detected.binary_path.is_none());
@@ -208,9 +251,65 @@ mod tests {
             binary_path: None,
             version: None,
             native_supported: false,
+            acp_supported: false,
         };
         // No Droid, but the host might still be Codex-capable.
         // The detection result only reflects Droid availability.
         assert!(!detected.is_available());
+    }
+
+    // ── VAL-ACP-071: Droid ACP detection ───────────────────────────────
+
+    #[test]
+    fn droid_acp_detection_supported() {
+        // When ACP is supported alongside native, is_available is true.
+        let detected = DetectedDroidAgent {
+            binary_path: Some("/home/ubuntu/.bun/bin/droid".to_string()),
+            version: Some("droid 0.99.0".to_string()),
+            native_supported: true,
+            acp_supported: true,
+        };
+        assert!(detected.is_available());
+        assert!(detected.acp_supported);
+        assert!(detected.native_supported);
+    }
+
+    #[test]
+    fn droid_acp_only_acp_supported() {
+        // When only ACP is supported (no native), is_available is still true.
+        let detected = DetectedDroidAgent {
+            binary_path: Some("/home/ubuntu/.bun/bin/droid".to_string()),
+            version: Some("droid 0.99.0".to_string()),
+            native_supported: false,
+            acp_supported: true,
+        };
+        assert!(detected.is_available());
+        assert!(detected.acp_supported);
+    }
+
+    #[test]
+    fn droid_acp_detection_not_supported() {
+        // Binary found, native supported, but ACP not available.
+        let detected = DetectedDroidAgent {
+            binary_path: Some("/home/ubuntu/.bun/bin/droid".to_string()),
+            version: Some("droid 0.99.0".to_string()),
+            native_supported: true,
+            acp_supported: false,
+        };
+        assert!(detected.is_available());
+        assert!(!detected.acp_supported);
+    }
+
+    #[test]
+    fn droid_acp_detection_no_binary() {
+        // No binary at all — ACP not supported.
+        let detected = DetectedDroidAgent {
+            binary_path: None,
+            version: None,
+            native_supported: false,
+            acp_supported: false,
+        };
+        assert!(!detected.is_available());
+        assert!(!detected.acp_supported);
     }
 }

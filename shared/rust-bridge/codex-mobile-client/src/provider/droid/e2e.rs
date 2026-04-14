@@ -822,6 +822,7 @@ async fn discovery_detects_droid_on_host() {
         binary_path: Some("/home/ubuntu/.bun/bin/droid".to_string()),
         version: Some("droid 0.99.0".to_string()),
         native_supported: true,
+        acp_supported: false,
     };
 
     let pi_detected = DetectedPiAgent {
@@ -910,6 +911,7 @@ async fn discovery_detects_droid_only() {
         binary_path: Some("/usr/local/bin/droid".to_string()),
         version: Some("droid 0.99.0".to_string()),
         native_supported: true,
+        acp_supported: false,
     };
 
     let pi_detected = DetectedPiAgent {
@@ -936,6 +938,7 @@ async fn discovery_detects_no_agents() {
         binary_path: None,
         version: None,
         native_supported: false,
+        acp_supported: false,
     };
 
     let pi_detected = DetectedPiAgent {
@@ -963,6 +966,7 @@ async fn discovery_droid_partial_detection() {
         binary_path: Some("/home/ubuntu/.local/bin/droid".to_string()),
         version: None,
         native_supported: false, // version check failed → not supported
+        acp_supported: false,
     };
 
     assert!(!droid_detected.is_available(), "partial detection should not report available");

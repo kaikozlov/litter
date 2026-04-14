@@ -97,8 +97,9 @@ fn map_pi_agent(detected: &DetectedPiAgent) -> Vec<AgentInfo> {
 
 /// Map a detected Droid agent into `AgentInfo` entries.
 ///
-/// Currently Droid only supports native transport. If more transports
-/// are added later, additional entries will be included.
+/// Returns entries for native and/or ACP transports depending on what
+/// was detected. If ACP is supported, a separate `DroidAcp` entry is
+/// included alongside or instead of the native entry.
 fn map_droid_agent(detected: &DetectedDroidAgent) -> Vec<AgentInfo> {
     let mut agents = Vec::new();
 
@@ -117,6 +118,16 @@ fn map_droid_agent(detected: &DetectedDroidAgent) -> Vec<AgentInfo> {
         });
     }
 
+    if detected.acp_supported {
+        agents.push(AgentInfo {
+            id: "droid-acp".to_string(),
+            display_name: "Droid (ACP)".to_string(),
+            description: "Droid agent over standard ACP protocol".to_string(),
+            detected_transports: vec![AgentType::DroidAcp],
+            capabilities: vec!["streaming".to_string(), "tools".to_string(), "plans".to_string()],
+        });
+    }
+
     agents
 }
 
@@ -125,6 +136,10 @@ fn map_droid_agent(detected: &DetectedDroidAgent) -> Vec<AgentInfo> {
 /// Runs `detect_pi_agent` and `detect_droid_agent` concurrently with
 /// **independent timeouts**. Each probe gets `PROBE_TIMEOUT` seconds.
 /// A slow Pi probe does NOT discard Droid results (and vice versa).
+///
+/// Also includes GenericAcp agents from user-configured ACP profiles,
+/// when provided. GenericAcp agents don't require SSH probing — they
+/// are included based on the configured remote commands.
 ///
 /// # Timeout Behaviour
 ///
@@ -138,6 +153,24 @@ fn map_droid_agent(detected: &DetectedDroidAgent) -> Vec<AgentInfo> {
 /// entries are simply omitted. Detection errors never block the
 /// connection — callers can always fall back to Codex-only.
 pub async fn detect_all_agents(ssh_client: &SshClient) -> DetectedAgents {
+    detect_all_agents_with_profiles(ssh_client, &[]).await
+}
+
+/// Detect all agent types including GenericAcp from user-configured profiles.
+///
+/// In addition to the standard Pi and Droid probes, this function includes
+/// GenericAcp agents from the provided ACP profiles. Each profile represents
+/// a user-configured remote command that speaks the ACP protocol.
+///
+/// # Arguments
+///
+/// * `ssh_client` — SSH client for probing the remote host
+/// * `acp_profiles` — User-configured ACP profiles with remote commands.
+///   Each profile becomes a `GenericAcp` entry in the detected agents list.
+pub async fn detect_all_agents_with_profiles(
+    ssh_client: &SshClient,
+    acp_profiles: &[AcpProfile],
+) -> DetectedAgents {
     // Run both detection probes concurrently with independent timeouts.
     // Using independent timeouts ensures a slow Pi probe (e.g. npx pi-acp)
     // does not discard a fast Droid result.
@@ -181,6 +214,7 @@ pub async fn detect_all_agents(ssh_client: &SshClient) -> DetectedAgents {
                     binary_path: None,
                     version: None,
                     native_supported: false,
+                    acp_supported: false,
                 }
             }
         }
@@ -197,6 +231,11 @@ pub async fn detect_all_agents(ssh_client: &SshClient) -> DetectedAgents {
     agents.extend(map_pi_agent(&pi_result));
     agents.extend(map_droid_agent(&droid_result));
 
+    // Include GenericAcp agents from user-configured profiles.
+    // Each profile becomes a separate agent entry with the profile's
+    // display name and remote command.
+    agents.extend(map_acp_profiles(acp_profiles));
+
     tracing::info!(
         "Agent detection complete: {} agent(s) found — types: {:?}",
         agents.len(),
@@ -207,6 +246,42 @@ pub async fn detect_all_agents(ssh_client: &SshClient) -> DetectedAgents {
     );
 
     DetectedAgents { agents }
+}
+
+/// A user-configured ACP provider profile.
+///
+/// Represents a custom ACP-compatible agent with a user-specified
+/// remote command. Used during detection to populate GenericAcp entries
+/// in the detected agents list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcpProfile {
+    /// Unique identifier for this profile.
+    pub id: String,
+    /// Human-readable name displayed in the agent picker.
+    pub display_name: String,
+    /// The remote command to spawn over SSH for this ACP agent.
+    pub remote_command: String,
+}
+
+/// Map user-configured ACP profiles into `AgentInfo` entries.
+///
+/// Each profile produces a GenericAcp agent entry with the profile's
+/// display name and remote command in the description.
+fn map_acp_profiles(profiles: &[AcpProfile]) -> Vec<AgentInfo> {
+    profiles
+        .iter()
+        .map(|profile| AgentInfo {
+            id: format!("generic-acp-{}", profile.id),
+            display_name: profile.display_name.clone(),
+            description: format!("Custom ACP agent: {}", profile.remote_command),
+            detected_transports: vec![AgentType::GenericAcp],
+            capabilities: vec![
+                "streaming".to_string(),
+                "tools".to_string(),
+                "plans".to_string(),
+            ],
+        })
+        .collect()
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -251,6 +326,7 @@ mod tests {
             binary_path: None,
             version: None,
             native_supported: false,
+            acp_supported: false,
         };
         let mut agents = Vec::new();
         agents.extend(map_pi_agent(&pi));
@@ -273,6 +349,7 @@ mod tests {
             binary_path: None,
             version: None,
             native_supported: false,
+            acp_supported: false,
         };
         let mut agents = Vec::new();
         agents.extend(map_pi_agent(&pi));
@@ -295,6 +372,7 @@ mod tests {
             binary_path: Some("/home/ubuntu/.bun/bin/droid".to_string()),
             version: Some("droid 0.99.0".to_string()),
             native_supported: true,
+            acp_supported: false,
         };
         let mut agents = Vec::new();
         agents.extend(map_pi_agent(&pi));
@@ -317,18 +395,20 @@ mod tests {
             binary_path: Some("/home/ubuntu/.bun/bin/droid".to_string()),
             version: Some("droid 0.99.0".to_string()),
             native_supported: true,
+            acp_supported: true,
         };
         let mut agents = Vec::new();
         agents.extend(map_pi_agent(&pi));
         agents.extend(map_droid_agent(&droid));
         let detected = DetectedAgents { agents };
-        // PiNative + PiAcp + DroidNative = 3.
-        assert_eq!(detected.agents.len(), 3);
+        // PiNative + PiAcp + DroidNative + DroidAcp = 4.
+        assert_eq!(detected.agents.len(), 4);
         assert!(detected.has_any_agent());
         assert!(detected.has_multiple_agents());
         assert!(detected.find_agent(AgentType::PiNative).is_some());
         assert!(detected.find_agent(AgentType::PiAcp).is_some());
         assert!(detected.find_agent(AgentType::DroidNative).is_some());
+        assert!(detected.find_agent(AgentType::DroidAcp).is_some());
     }
 
     #[test]
@@ -344,6 +424,7 @@ mod tests {
             binary_path: None,
             version: None,
             native_supported: false,
+            acp_supported: false,
         }));
         let detected = DetectedAgents { agents };
         assert!(detected.agents.is_empty());
@@ -415,6 +496,7 @@ mod tests {
             binary_path: Some("/home/ubuntu/.bun/bin/droid".to_string()),
             version: Some("droid 0.99.0".to_string()),
             native_supported: true,
+            acp_supported: false,
         };
         let agents = map_droid_agent(&detected);
         assert_eq!(agents.len(), 1);
@@ -427,9 +509,39 @@ mod tests {
             binary_path: None,
             version: None,
             native_supported: false,
+            acp_supported: false,
         };
         let agents = map_droid_agent(&detected);
         assert!(agents.is_empty());
+    }
+
+    #[test]
+    fn map_droid_agent_acp_only() {
+        let detected = DetectedDroidAgent {
+            binary_path: Some("/home/ubuntu/.bun/bin/droid".to_string()),
+            version: Some("droid 0.99.0".to_string()),
+            native_supported: false,
+            acp_supported: true,
+        };
+        let agents = map_droid_agent(&detected);
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].id, "droid-acp");
+        assert_eq!(agents[0].display_name, "Droid (ACP)");
+        assert!(agents[0].detected_transports.contains(&AgentType::DroidAcp));
+    }
+
+    #[test]
+    fn map_droid_agent_both_native_and_acp() {
+        let detected = DetectedDroidAgent {
+            binary_path: Some("/home/ubuntu/.bun/bin/droid".to_string()),
+            version: Some("droid 0.99.0".to_string()),
+            native_supported: true,
+            acp_supported: true,
+        };
+        let agents = map_droid_agent(&detected);
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0].id, "droid-native");
+        assert_eq!(agents[1].id, "droid-acp");
     }
 
     // ── DetectedAgents helpers ─────────────────────────────────────────
@@ -467,5 +579,191 @@ mod tests {
         };
         assert!(detected.has_pi());
         assert!(detected.has_droid());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // VAL-ACP-070: GenericAcp detection
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn acp_detection_generic_acp_from_profiles() {
+        // When ACP profiles are provided, GenericAcp entries should appear
+        // in the detected agents list.
+        let profiles = vec![
+            AcpProfile {
+                id: "my-agent-1".to_string(),
+                display_name: "My Custom Agent".to_string(),
+                remote_command: "my-agent --acp --port 8080".to_string(),
+            },
+        ];
+
+        let agents = map_acp_profiles(&profiles);
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].id, "generic-acp-my-agent-1");
+        assert_eq!(agents[0].display_name, "My Custom Agent");
+        assert!(agents[0].detected_transports.contains(&AgentType::GenericAcp));
+        assert!(agents[0].capabilities.contains(&"streaming".to_string()));
+        assert!(agents[0].capabilities.contains(&"tools".to_string()));
+    }
+
+    #[test]
+    fn acp_detection_generic_acp_multiple_profiles() {
+        let profiles = vec![
+            AcpProfile {
+                id: "agent-1".to_string(),
+                display_name: "Agent One".to_string(),
+                remote_command: "agent-one --acp".to_string(),
+            },
+            AcpProfile {
+                id: "agent-2".to_string(),
+                display_name: "Agent Two".to_string(),
+                remote_command: "agent-two --acp".to_string(),
+            },
+        ];
+
+        let agents = map_acp_profiles(&profiles);
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0].display_name, "Agent One");
+        assert_eq!(agents[1].display_name, "Agent Two");
+    }
+
+    #[test]
+    fn acp_detection_generic_acp_no_profiles() {
+        // When no profiles are provided, no GenericAcp entries appear.
+        let agents = map_acp_profiles(&[]);
+        assert!(agents.is_empty());
+    }
+
+    #[test]
+    fn acp_detection_generic_acp_in_combined_detection() {
+        // GenericAcp entries from profiles are combined with Pi/Droid results.
+        let pi = DetectedPiAgent {
+            pi_binary_path: Some("/usr/local/bin/pi".to_string()),
+            pi_version: Some("pi 0.66.1".to_string()),
+            pi_acp_available: false,
+            detected_transports: vec![PiTransportKind::Native],
+        };
+        let droid = DetectedDroidAgent {
+            binary_path: Some("/home/ubuntu/.bun/bin/droid".to_string()),
+            version: Some("droid 0.99.0".to_string()),
+            native_supported: true,
+            acp_supported: true,
+        };
+        let profiles = vec![AcpProfile {
+            id: "my-agent".to_string(),
+            display_name: "My Agent".to_string(),
+            remote_command: "my-agent --acp".to_string(),
+        }];
+
+        let mut agents = Vec::new();
+        agents.extend(map_pi_agent(&pi));
+        agents.extend(map_droid_agent(&droid));
+        agents.extend(map_acp_profiles(&profiles));
+
+        let detected = DetectedAgents { agents };
+        // PiNative + DroidNative + DroidAcp + GenericAcp = 4.
+        assert_eq!(detected.agents.len(), 4);
+        assert!(detected.find_agent(AgentType::PiNative).is_some());
+        assert!(detected.find_agent(AgentType::DroidNative).is_some());
+        assert!(detected.find_agent(AgentType::DroidAcp).is_some());
+        assert!(detected.find_agent(AgentType::GenericAcp).is_some());
+        assert!(detected.has_multiple_agents());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // VAL-ACP-071: Droid ACP detection updated for standard ACP
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn acp_detection_droid_acp_appears_in_droid_mapping() {
+        let detected = DetectedDroidAgent {
+            binary_path: Some("/home/ubuntu/.bun/bin/droid".to_string()),
+            version: Some("droid 0.99.0".to_string()),
+            native_supported: true,
+            acp_supported: true,
+        };
+        let agents = map_droid_agent(&detected);
+        assert_eq!(agents.len(), 2);
+
+        let droid_acp = agents.iter().find(|a| a.id == "droid-acp").unwrap();
+        assert_eq!(droid_acp.display_name, "Droid (ACP)");
+        assert!(droid_acp.detected_transports.contains(&AgentType::DroidAcp));
+        assert!(droid_acp.capabilities.contains(&"plans".to_string()));
+    }
+
+    #[test]
+    fn acp_detection_droid_acp_only_no_native() {
+        // Droid with only ACP support (no native) still produces an agent entry.
+        let detected = DetectedDroidAgent {
+            binary_path: Some("/home/ubuntu/.bun/bin/droid".to_string()),
+            version: Some("droid 0.99.0".to_string()),
+            native_supported: false,
+            acp_supported: true,
+        };
+        let agents = map_droid_agent(&detected);
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].id, "droid-acp");
+    }
+
+    #[test]
+    fn acp_detection_droid_has_droid_acp() {
+        let droid_info = AgentInfo {
+            id: "droid-acp".to_string(),
+            display_name: "Droid (ACP)".to_string(),
+            description: "Droid over ACP".to_string(),
+            detected_transports: vec![AgentType::DroidAcp],
+            capabilities: vec![],
+        };
+        let detected = DetectedAgents {
+            agents: vec![droid_info],
+        };
+        assert!(detected.has_droid());
+        assert!(detected.find_agent(AgentType::DroidAcp).is_some());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // AcpProfile construction tests
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn acp_profile_construction() {
+        let profile = AcpProfile {
+            id: "test-1".to_string(),
+            display_name: "Test Agent".to_string(),
+            remote_command: "test-agent --acp".to_string(),
+        };
+        assert_eq!(profile.id, "test-1");
+        assert_eq!(profile.display_name, "Test Agent");
+        assert_eq!(profile.remote_command, "test-agent --acp");
+    }
+
+    #[test]
+    fn acp_profile_equality() {
+        let a = AcpProfile {
+            id: "1".to_string(),
+            display_name: "A".to_string(),
+            remote_command: "cmd".to_string(),
+        };
+        let b = AcpProfile {
+            id: "1".to_string(),
+            display_name: "A".to_string(),
+            remote_command: "cmd".to_string(),
+        };
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn acp_profile_inequality() {
+        let a = AcpProfile {
+            id: "1".to_string(),
+            display_name: "A".to_string(),
+            remote_command: "cmd".to_string(),
+        };
+        let b = AcpProfile {
+            id: "2".to_string(),
+            display_name: "B".to_string(),
+            remote_command: "other".to_string(),
+        };
+        assert_ne!(a, b);
     }
 }
