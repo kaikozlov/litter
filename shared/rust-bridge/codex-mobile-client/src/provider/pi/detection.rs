@@ -144,13 +144,13 @@ async fn probe_pi_binary(ssh_client: &SshClient) -> Option<String> {
     // Try common install locations.
     for path in PI_COMMON_PATHS {
         let cmd = format!("test -x {path} && echo {path} 2>/dev/null");
-        if let Ok(result) = ssh_client.exec_with_profile(&cmd).await {
-            if result.exit_code == 0 {
-                let found = result.stdout.trim().to_string();
-                if !found.is_empty() {
-                    tracing::debug!("Pi binary found at common location: {found}");
-                    return Some(found);
-                }
+        if let Ok(result) = ssh_client.exec_with_profile(&cmd).await
+            && result.exit_code == 0
+        {
+            let found = result.stdout.trim().to_string();
+            if !found.is_empty() {
+                tracing::debug!("Pi binary found at common location: {found}");
+                return Some(found);
             }
         }
     }
