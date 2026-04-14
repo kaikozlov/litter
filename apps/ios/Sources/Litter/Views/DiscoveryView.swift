@@ -691,8 +691,10 @@ struct DiscoveryView: View {
         let compatibleInfos: [AgentInfo]
         if server.agentInfos.isEmpty {
             // No agent info — treat all agent types as compatible
-            compatibleInfos = server.agentTypes.map {
-                AgentInfo(id: $0.persistentKey, displayName: $0.displayName, description: "", detectedTransports: [$0], capabilities: [])
+            compatibleInfos = server.agentTypes.map { at -> AgentInfo in
+                let cached = AgentSelectionStore.shared.agentInfos(for: server.id)
+                let caps = cached.first(where: { info in info.detectedTransports.contains(at) })?.capabilities ?? []
+                return AgentInfo(id: at.persistentKey, displayName: at.displayName, description: "", detectedTransports: [at], capabilities: caps)
             }
         } else {
             compatibleInfos = server.agentInfos.filter { info in

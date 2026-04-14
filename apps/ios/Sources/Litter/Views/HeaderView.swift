@@ -275,13 +275,18 @@ struct ConversationModelPickerPanel: View {
             if availableAgentTypes.count > 1 {
                 InlineAgentSelectorView(
                     agentInfos: availableAgentInfos.isEmpty
-                        ? availableAgentTypes.map { AgentInfo(
-                            id: $0.persistentKey,
-                            displayName: $0.displayName,
-                            description: "",
-                            detectedTransports: [$0],
-                            capabilities: []
-                        )}
+                        ? availableAgentTypes.map { at -> AgentInfo in
+                            // Look up cached capabilities for this agent type
+                            let cached = AgentSelectionStore.shared.agentInfos(for: thread.key.serverId)
+                            let caps = cached.first(where: { $0.detectedTransports.contains(at) })?.capabilities ?? []
+                            return AgentInfo(
+                                id: at.persistentKey,
+                                displayName: at.displayName,
+                                description: "",
+                                detectedTransports: [at],
+                                capabilities: caps
+                            )
+                        }
                         : availableAgentInfos,
                     selectedAgentType: $selectedAgentType,
                     availableTransports: availableTransportsForServer,

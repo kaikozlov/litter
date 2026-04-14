@@ -184,6 +184,77 @@ extension AgentPermissionPolicy {
     }
 }
 
+// MARK: - Agent Capability Badge
+
+/// A compact capability indicator badge for display in agent picker rows.
+/// Shows a small icon and label for each capability the agent supports.
+struct AgentCapabilityBadge: View {
+    let capability: String
+    var tint: Color = LitterTheme.accent
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Image(systemName: iconForCapability)
+                .font(.system(size: 8, weight: .semibold))
+            Text(labelForCapability)
+                .font(.system(size: 9, weight: .medium))
+        }
+        .foregroundColor(tint)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 1.5)
+        .background(tint.opacity(0.12))
+        .clipShape(Capsule())
+    }
+
+    private var iconForCapability: String {
+        switch capability {
+        case "streaming": return "waveform"
+        case "tools": return "wrench.fill"
+        case "plans": return "list.bullet.clipboard.fill"
+        case "reasoning", "thinking-levels": return "brain.head.profile.fill"
+        case "multimodal": return "photo.fill"
+        case "approvals": return "hand.raised.fill"
+        case "autonomy-levels": return "gauge.with.dots.needle.33percent"
+        default: return "circle.fill"
+        }
+    }
+
+    private var labelForCapability: String {
+        switch capability {
+        case "streaming": return "Stream"
+        case "tools": return "Tools"
+        case "plans": return "Plans"
+        case "reasoning", "thinking-levels": return "Think"
+        case "multimodal": return "Multi"
+        case "approvals": return "Approve"
+        case "autonomy-levels": return "Auto"
+        default: return capability.prefix(1).uppercased() + capability.dropFirst(1)
+        }
+    }
+}
+
+/// A row of capability badges for an agent.
+struct AgentCapabilitiesRow: View {
+    let capabilities: [String]
+    var tint: Color = LitterTheme.accent
+    var maxBadges: Int = 4
+
+    var body: some View {
+        if !capabilities.isEmpty {
+            HStack(spacing: 4) {
+                ForEach(Array(capabilities.prefix(maxBadges).enumerated()), id: \.offset) { _, cap in
+                    AgentCapabilityBadge(capability: cap, tint: tint)
+                }
+                if capabilities.count > maxBadges {
+                    Text("+\(capabilities.count - maxBadges)")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(LitterTheme.textMuted)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Preview
 
 #if DEBUG

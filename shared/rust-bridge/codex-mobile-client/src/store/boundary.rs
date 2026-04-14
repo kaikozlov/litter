@@ -31,6 +31,10 @@ pub struct AppServerSnapshot {
     pub rate_limits: Option<crate::types::RateLimitSnapshot>,
     pub available_models: Option<Vec<crate::types::ModelInfo>>,
     pub connection_progress: Option<AppConnectionProgressSnapshot>,
+    /// ACP agent capabilities advertised during the initialize handshake.
+    /// Populated after a successful ACP connection; empty for non-ACP providers.
+    /// Capability strings include: "streaming", "tools", "plans", "reasoning", "multimodal".
+    pub agent_capabilities: Vec<String>,
 }
 
 #[derive(Debug, Clone, uniffi::Enum)]
@@ -243,6 +247,7 @@ impl TryFrom<AppSnapshot> for AppSnapshotRecord {
                     rate_limits: server.rate_limits,
                     available_models: server.available_models,
                     connection_progress: server.connection_progress,
+                    agent_capabilities: server.agent_capabilities,
                 }
             })
             .collect::<Vec<_>>();

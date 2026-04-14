@@ -365,6 +365,17 @@ impl AppStore {
         self.inner.app_store.rename_server(&server_id, display_name);
     }
 
+    /// Update the agent capabilities for a connected server.
+    ///
+    /// Called after a successful ACP handshake to store the capabilities
+    /// advertised by the agent (e.g. "streaming", "tools", "plans").
+    /// The capabilities are included in subsequent server snapshots.
+    pub fn update_server_agent_capabilities(&self, server_id: String, capabilities: Vec<String>) {
+        self.inner
+            .app_store
+            .update_server_agent_capabilities(&server_id, capabilities);
+    }
+
     pub fn set_voice_handoff_thread(&self, key: Option<ThreadKey>) {
         self.inner.set_voice_handoff_thread(key);
     }

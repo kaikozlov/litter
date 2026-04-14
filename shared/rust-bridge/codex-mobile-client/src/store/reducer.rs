@@ -123,6 +123,7 @@ impl AppStoreReducer {
                 existing_has_ipc,
                 existing_connection_progress,
                 existing_transport,
+                existing_agent_capabilities,
             ) = if let Some(existing) = snapshot.servers.get(&config.server_id) {
                 (
                     existing.wake_mac.clone(),
@@ -134,6 +135,7 @@ impl AppStoreReducer {
                     existing.has_ipc,
                     existing.connection_progress.clone(),
                     existing.transport.clone(),
+                    existing.agent_capabilities.clone(),
                 )
             } else {
                 (
@@ -146,6 +148,7 @@ impl AppStoreReducer {
                     false,
                     None,
                     ServerTransportDiagnostics::default(),
+                    Vec::new(),
                 )
             };
             snapshot.servers.insert(
@@ -166,6 +169,7 @@ impl AppStoreReducer {
                     available_models: existing_available_models,
                     connection_progress: existing_connection_progress,
                     transport: existing_transport,
+                    agent_capabilities: existing_agent_capabilities,
                 },
             );
         }
@@ -1021,6 +1025,19 @@ impl AppStoreReducer {
             let mut snapshot = self.snapshot.write().expect("app store lock poisoned");
             if let Some(server) = snapshot.servers.get_mut(server_id) {
                 server.health = health;
+            }
+        }
+        self.emit(AppStoreUpdateRecord::ServerChanged {
+            server_id: server_id.to_string(),
+        });
+    }
+
+    /// Update the agent capabilities for a server (populated after ACP handshake).
+    pub fn update_server_agent_capabilities(&self, server_id: &str, capabilities: Vec<String>) {
+        {
+            let mut snapshot = self.snapshot.write().expect("app store lock poisoned");
+            if let Some(server) = snapshot.servers.get_mut(server_id) {
+                server.agent_capabilities = capabilities;
             }
         }
         self.emit(AppStoreUpdateRecord::ServerChanged {

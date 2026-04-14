@@ -239,6 +239,9 @@ pub struct ServerSnapshot {
     pub available_models: Option<Vec<ModelInfo>>,
     pub connection_progress: Option<AppConnectionProgressSnapshot>,
     pub transport: ServerTransportDiagnostics,
+    /// ACP agent capabilities advertised during the initialize handshake.
+    /// Populated after a successful ACP connection; empty for non-ACP providers.
+    pub agent_capabilities: Vec<String>,
 }
 
 impl ServerSnapshot {

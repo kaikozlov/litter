@@ -439,6 +439,7 @@ mod tests {
                 available_models: None,
                 connection_progress: None,
                 transport: ServerTransportDiagnostics::default(),
+                agent_capabilities: Vec::new(),
             },
         );
 
@@ -494,6 +495,7 @@ mod tests {
                 available_models: None,
                 connection_progress: None,
                 transport: ServerTransportDiagnostics::default(),
+                agent_capabilities: Vec::new(),
             },
         );
 

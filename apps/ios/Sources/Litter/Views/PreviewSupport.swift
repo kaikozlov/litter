@@ -366,7 +366,8 @@ enum LitterPreviewData {
             requiresOpenaiAuth: false,
             rateLimits: nil,
             availableModels: sampleModels,
-            connectionProgress: nil
+            connectionProgress: nil,
+            agentCapabilities: ["streaming", "tools", "approvals"]
         )
 
         let sessionSummaries = threads.map { thread in

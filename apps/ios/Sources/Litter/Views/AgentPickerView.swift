@@ -325,9 +325,22 @@ struct InlineAgentSelectorView: View {
                         .litterFont(.footnote)
                         .foregroundColor(compatible ? LitterTheme.textPrimary : LitterTheme.textMuted)
                     if compatible {
-                        Text(info.detectedTransports.map { $0.transportLabel }.joined(separator: ", "))
-                            .litterFont(.caption2)
-                            .foregroundColor(LitterTheme.textSecondary)
+                        HStack(spacing: 4) {
+                            Text(info.detectedTransports.map { $0.transportLabel }.joined(separator: ", "))
+                                .litterFont(.caption2)
+                                .foregroundColor(LitterTheme.textSecondary)
+                            // VAL-ACP-101: Show capability badges from detection
+                            if !info.capabilities.isEmpty {
+                                Text("·")
+                                    .litterFont(.caption2)
+                                    .foregroundColor(LitterTheme.textMuted)
+                                AgentCapabilitiesRow(
+                                    capabilities: info.capabilities,
+                                    tint: agentType.tintColor,
+                                    maxBadges: 3
+                                )
+                            }
+                        }
                     } else {
                         Text("Transport unavailable")
                             .litterFont(.caption2)
@@ -463,9 +476,22 @@ struct AgentPickerSheet: View {
                     .litterFont(.subheadline)
                     .foregroundColor(compatible ? LitterTheme.textPrimary : LitterTheme.textMuted)
                 if compatible {
-                    Text(info.detectedTransports.map { $0.transportLabel }.joined(separator: ", ") + " transport")
-                        .litterFont(.caption)
-                        .foregroundColor(LitterTheme.textSecondary)
+                    // VAL-ACP-101: Show transport label and capability badges
+                    HStack(spacing: 4) {
+                        Text(info.detectedTransports.map { $0.transportLabel }.joined(separator: ", ") + " transport")
+                            .litterFont(.caption)
+                            .foregroundColor(LitterTheme.textSecondary)
+                        if !info.capabilities.isEmpty {
+                            Text("·")
+                                .litterFont(.caption)
+                                .foregroundColor(LitterTheme.textMuted)
+                            AgentCapabilitiesRow(
+                                capabilities: info.capabilities,
+                                tint: agentType.tintColor,
+                                maxBadges: 3
+                            )
+                        }
+                    }
                 } else {
                     Text("Transport unavailable")
                         .litterFont(.caption)

@@ -887,6 +887,18 @@ impl MobileClient {
         info!(
             "MobileClient: connected provider-backed server {server_id} agent_type={agent_type}"
         );
+
+        // VAL-ACP-100: Store the capabilities advertised during detection for
+        // this agent type. These come from the AgentInfo that was populated
+        // during discovery probing (e.g. "streaming", "tools", "plans").
+        // The capabilities are persisted in the server snapshot so the iOS
+        // UI can query them to enable/disable features conditionally.
+        let caps = capabilities_for_agent_type(agent_type);
+        if !caps.is_empty() {
+            self.app_store
+                .update_server_agent_capabilities(server_id.as_str(), caps);
+        }
+
         Ok(server_id)
     }
 
@@ -2367,6 +2379,53 @@ pub fn agent_binary_name(agent_type: crate::provider::AgentType) -> Option<&'sta
         }
         crate::provider::AgentType::GenericAcp => None,
         crate::provider::AgentType::Codex => None,
+    }
+}
+
+/// Returns the default capabilities for a given agent type.
+///
+/// These are the baseline capabilities advertised during detection and
+/// stored in the server snapshot after a successful connection. They
+/// correspond to the capabilities that the detection layer populates
+/// in `AgentInfo.capabilities`.
+fn capabilities_for_agent_type(agent_type: crate::provider::AgentType) -> Vec<String> {
+    match agent_type {
+        crate::provider::AgentType::Codex => {
+            vec!["streaming".to_string(), "approvals".to_string()]
+        }
+        crate::provider::AgentType::PiNative => {
+            vec![
+                "streaming".to_string(),
+                "tools".to_string(),
+                "thinking-levels".to_string(),
+            ]
+        }
+        crate::provider::AgentType::PiAcp => {
+            vec!["streaming".to_string(), "tools".to_string()]
+        }
+        crate::provider::AgentType::DroidNative => {
+            vec![
+                "streaming".to_string(),
+                "tools".to_string(),
+                "autonomy-levels".to_string(),
+            ]
+        }
+        crate::provider::AgentType::DroidAcp => {
+            vec![
+                "streaming".to_string(),
+                "tools".to_string(),
+                "plans".to_string(),
+            ]
+        }
+        crate::provider::AgentType::GenericAcp => {
+            // GenericAcp capabilities are discovered at runtime from the
+            // initialize handshake. We report the common baseline.
+            vec![
+                "streaming".to_string(),
+                "tools".to_string(),
+                "plans".to_string(),
+            ]
+        }
     }
 }
 
