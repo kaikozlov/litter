@@ -33,6 +33,7 @@ struct SettingsView: View {
                     fontSection
                     conversationSection
                     agentSettingsSection
+                    acpProfilesSection
                     experimentalSection
                     supportSection
                     accountSection
@@ -205,6 +206,41 @@ struct SettingsView: View {
     private func transportPreferenceLabel(_ agentType: AgentType?) -> String {
         guard let agentType else { return "Auto" }
         return agentType.displayName + " (" + agentType.transportLabel + ")"
+    }
+
+    // MARK: - ACP Profiles Section
+
+    /// ACP provider profiles for connecting to custom ACP-compatible agents.
+    /// Users can add, edit, and delete profiles that specify a remote command
+    /// to launch an ACP agent over SSH.
+    private var acpProfilesSection: some View {
+        Section {
+            NavigationLink {
+                ACPProfilesView()
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "gearshape.fill")
+                        .foregroundColor(AgentType.genericAcp.tintColor)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("ACP Providers")
+                            .litterFont(.subheadline)
+                            .foregroundColor(LitterTheme.textPrimary)
+                        let count = ACPProfileStore.shared.profiles().count
+                        Text(count == 0 ? "No profiles configured" : "\(count) profile\(count == 1 ? "" : "s")")
+                            .litterFont(.caption)
+                            .foregroundColor(LitterTheme.textSecondary)
+                    }
+                }
+            }
+            .listRowBackground(LitterTheme.surface.opacity(0.6))
+        } header: {
+            Text("Custom Agents")
+                .foregroundColor(LitterTheme.textSecondary)
+        } footer: {
+            Text("Configure ACP-compatible agent profiles for custom SSH connections.")
+                .foregroundColor(LitterTheme.textMuted)
+        }
     }
 
     // MARK: - Font Section
