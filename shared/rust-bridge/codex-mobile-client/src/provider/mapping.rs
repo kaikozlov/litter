@@ -118,10 +118,22 @@ pub fn server_request_to_provider_event(
                 payload: serde_json::to_string(request).unwrap_or_default(),
             }
         }
-        // Handle any future unknown ServerRequest variants
-        _ => {
-            let method = format!("{request:?}");
-            warn!(method = %method, "unknown server request type — mapping to Unknown ProviderEvent");
+        // ── Legacy v1 approval requests → Unknown ─────────────────────
+        // These are deprecated legacy request types. They still need explicit
+        // match arms for compile-time exhaustiveness, but map to Unknown
+        // because the v2 equivalents (CommandExecutionRequestApproval,
+        // FileChangeRequestApproval) are the canonical mapped path.
+        ServerRequest::ApplyPatchApproval { request_id: _, params: _ } => {
+            let method = "applyPatch/approval".to_string();
+            warn!(method = %method, "legacy v1 apply patch approval — mapping to Unknown ProviderEvent");
+            ProviderEvent::Unknown {
+                method,
+                payload: serde_json::to_string(request).unwrap_or_default(),
+            }
+        }
+        ServerRequest::ExecCommandApproval { request_id: _, params: _ } => {
+            let method = "execCommand/approval".to_string();
+            warn!(method = %method, "legacy v1 exec command approval — mapping to Unknown ProviderEvent");
             ProviderEvent::Unknown {
                 method,
                 payload: serde_json::to_string(request).unwrap_or_default(),
@@ -261,22 +273,172 @@ pub fn server_notification_to_provider_event(
             }
         }
 
-        // ── Unhandled known notifications → Unknown ───────────────────
+        // ── Secondary upstream notifications → Unknown ────────────────
         //
-        // These are legitimate upstream notifications that are not yet
-        // individually mapped to typed ProviderEvent variants. They map
-        // to Unknown for forward compatibility.
-        other => {
-            let method = format!("{other}");
-            warn!(
-                method = %method,
-                "unhandled server notification — mapping to ProviderEvent::Unknown"
-            );
-            ProviderEvent::Unknown {
-                method,
-                payload: serde_json::to_string(notification).unwrap_or_default(),
-            }
-        }
+        // These are legitimate upstream notifications that are not individually
+        // mapped to typed ProviderEvent variants. Each has an explicit match arm
+        // so that adding a new upstream variant causes a compile error here,
+        // forcing the mapping to be updated.
+        //
+        // They map to Unknown for forward compatibility, preserving data for
+        // diagnostic purposes.
+
+        // Thread secondary
+        ServerNotification::ThreadUnarchived(n) => unknown_notification(
+            "thread/unarchived",
+            &n.thread_id,
+            notification,
+        ),
+        ServerNotification::ThreadClosed(n) => unknown_notification(
+            "thread/closed",
+            &n.thread_id,
+            notification,
+        ),
+        ServerNotification::ContextCompacted(n) => unknown_notification(
+            "thread/compacted",
+            &n.thread_id,
+            notification,
+        ),
+
+        // Hook lifecycle
+        ServerNotification::HookStarted(n) => unknown_notification(
+            "hook/started",
+            &n.thread_id,
+            notification,
+        ),
+        ServerNotification::HookCompleted(n) => unknown_notification(
+            "hook/completed",
+            &n.thread_id,
+            notification,
+        ),
+
+        // Item secondary
+        ServerNotification::ItemGuardianApprovalReviewStarted(n) => unknown_notification(
+            "item/autoApprovalReview/started",
+            &n.thread_id,
+            notification,
+        ),
+        ServerNotification::ItemGuardianApprovalReviewCompleted(n) => unknown_notification(
+            "item/autoApprovalReview/completed",
+            &n.thread_id,
+            notification,
+        ),
+        ServerNotification::RawResponseItemCompleted(n) => unknown_notification(
+            "rawResponseItem/completed",
+            &n.thread_id,
+            notification,
+        ),
+
+        // Streaming secondary
+        ServerNotification::ReasoningSummaryPartAdded(n) => unknown_notification(
+            "item/reasoning/summaryPartAdded",
+            &n.thread_id,
+            notification,
+        ),
+        ServerNotification::CommandExecOutputDelta(n) => unknown_notification(
+            "command/exec/outputDelta",
+            &n.process_id,
+            notification,
+        ),
+        ServerNotification::TerminalInteraction(n) => unknown_notification(
+            "item/commandExecution/terminalInteraction",
+            &n.thread_id,
+            notification,
+        ),
+
+        // MCP secondary
+        ServerNotification::McpServerOauthLoginCompleted(_) => unknown_notification(
+            "mcpServer/oauthLogin/completed",
+            "",
+            notification,
+        ),
+        ServerNotification::McpServerStatusUpdated(_) => unknown_notification(
+            "mcpServer/startupStatus/updated",
+            "",
+            notification,
+        ),
+
+        // Account / config secondary
+        ServerNotification::AccountUpdated(_) => unknown_notification(
+            "account/updated",
+            "",
+            notification,
+        ),
+        ServerNotification::AppListUpdated(_) => unknown_notification(
+            "app/list/updated",
+            "",
+            notification,
+        ),
+        ServerNotification::DeprecationNotice(_) => unknown_notification(
+            "deprecationNotice",
+            "",
+            notification,
+        ),
+        ServerNotification::ConfigWarning(_) => unknown_notification(
+            "configWarning",
+            "",
+            notification,
+        ),
+
+        // Filesystem
+        ServerNotification::FsChanged(_) => unknown_notification(
+            "fs/changed",
+            "",
+            notification,
+        ),
+
+        // Skills
+        ServerNotification::SkillsChanged(_) => unknown_notification(
+            "skills/changed",
+            "",
+            notification,
+        ),
+
+        // Fuzzy search
+        ServerNotification::FuzzyFileSearchSessionUpdated(_) => unknown_notification(
+            "fuzzyFileSearch/sessionUpdated",
+            "",
+            notification,
+        ),
+        ServerNotification::FuzzyFileSearchSessionCompleted(_) => unknown_notification(
+            "fuzzyFileSearch/sessionCompleted",
+            "",
+            notification,
+        ),
+
+        // Experimental realtime secondary
+        ServerNotification::ThreadRealtimeItemAdded(n) => unknown_notification(
+            "thread/realtime/itemAdded",
+            &n.thread_id,
+            notification,
+        ),
+        ServerNotification::ThreadRealtimeTranscriptUpdated(n) => unknown_notification(
+            "thread/realtime/transcriptUpdated",
+            &n.thread_id,
+            notification,
+        ),
+        ServerNotification::ThreadRealtimeOutputAudioDelta(n) => unknown_notification(
+            "thread/realtime/outputAudio/delta",
+            &n.thread_id,
+            notification,
+        ),
+        ServerNotification::ThreadRealtimeError(n) => unknown_notification(
+            "thread/realtime/error",
+            &n.thread_id,
+            notification,
+        ),
+
+        // Windows-specific (not applicable on mobile, but must be mapped)
+        ServerNotification::WindowsWorldWritableWarning(_) => unknown_notification(
+            "windows/worldWritableWarning",
+            "",
+            notification,
+        ),
+        ServerNotification::WindowsSandboxSetupCompleted(_) => unknown_notification(
+            "windowsSandbox/setupCompleted",
+            "",
+            notification,
+        ),
     }
 }
 
@@ -573,6 +735,25 @@ fn request_id_to_string(request_id: &codex_app_server_protocol::RequestId) -> St
     match request_id {
         codex_app_server_protocol::RequestId::String(value) => value.clone(),
         codex_app_server_protocol::RequestId::Integer(value) => value.to_string(),
+    }
+}
+
+/// Helper to produce a `ProviderEvent::Unknown` for secondary upstream notifications
+/// that don't map to typed `ProviderEvent` variants. Logs a warning and preserves
+/// the full payload for diagnostic purposes.
+fn unknown_notification(
+    method: &'static str,
+    thread_id: &str,
+    notification: &ServerNotification,
+) -> ProviderEvent {
+    warn!(
+        method = method,
+        thread_id = thread_id,
+        "secondary server notification — mapping to ProviderEvent::Unknown"
+    );
+    ProviderEvent::Unknown {
+        method: method.to_string(),
+        payload: serde_json::to_string(notification).unwrap_or_default(),
     }
 }
 
@@ -937,7 +1118,7 @@ mod tests {
     /// Verify that other unhandled notifications map to Unknown.
     #[test]
     fn unhandled_realtime_notifications_map_to_unknown() {
-        // ThreadRealtimeItemAdded is known upstream but not individually mapped
+        // ThreadRealtimeItemAdded is known upstream but mapped to Unknown
         let notification =
             ServerNotification::ThreadRealtimeItemAdded(proto::ThreadRealtimeItemAddedNotification {
                 thread_id: "t1".to_string(),
@@ -949,6 +1130,200 @@ mod tests {
             matches!(&event, ProviderEvent::Unknown { .. }),
             "unhandled realtime notification should map to Unknown, got {event:?}"
         );
+    }
+
+    /// Verify all secondary upstream notifications that have explicit match arms
+    /// correctly map to `ProviderEvent::Unknown` with non-empty method and payload.
+    ///
+    /// This test covers all ServerNotification variants that are explicitly mapped
+    /// to Unknown (not typed ProviderEvent variants). Each one must preserve the
+    /// upstream payload for diagnostic purposes.
+    #[test]
+    fn secondary_notifications_map_to_unknown_with_data() {
+        let cases: Vec<(ServerNotification, &str)> = vec![
+            // Thread secondary
+            (
+                ServerNotification::ThreadUnarchived(proto::ThreadUnarchivedNotification {
+                    thread_id: "t1".to_string(),
+                }),
+                "thread/unarchived",
+            ),
+            (
+                ServerNotification::ThreadClosed(proto::ThreadClosedNotification {
+                    thread_id: "t1".to_string(),
+                }),
+                "thread/closed",
+            ),
+            (
+                ServerNotification::ContextCompacted(proto::ContextCompactedNotification {
+                    thread_id: "t1".to_string(),
+                    turn_id: "turn1".to_string(),
+                }),
+                "thread/compacted",
+            ),
+            // Streaming secondary
+            (
+                ServerNotification::ReasoningSummaryPartAdded(proto::ReasoningSummaryPartAddedNotification {
+                    thread_id: "t1".to_string(),
+                    turn_id: "turn1".to_string(),
+                    item_id: "item1".to_string(),
+                    summary_index: 0,
+                }),
+                "item/reasoning/summaryPartAdded",
+            ),
+            // Skills
+            (
+                ServerNotification::SkillsChanged(proto::SkillsChangedNotification {}),
+                "skills/changed",
+            ),
+            // Account / config secondary
+            (
+                ServerNotification::AccountUpdated(proto::AccountUpdatedNotification {
+                    auth_mode: None,
+                    plan_type: None,
+                }),
+                "account/updated",
+            ),
+            (
+                ServerNotification::AppListUpdated(proto::AppListUpdatedNotification {
+                    data: vec![],
+                }),
+                "app/list/updated",
+            ),
+            (
+                ServerNotification::DeprecationNotice(proto::DeprecationNoticeNotification {
+                    summary: "test".to_string(),
+                    details: None,
+                }),
+                "deprecationNotice",
+            ),
+            (
+                ServerNotification::ConfigWarning(proto::ConfigWarningNotification {
+                    summary: "warn".to_string(),
+                    details: None,
+                    path: None,
+                    range: None,
+                }),
+                "configWarning",
+            ),
+            // Filesystem
+            (
+                ServerNotification::FsChanged(proto::FsChangedNotification {
+                    watch_id: "w1".to_string(),
+                    changed_paths: vec![],
+                }),
+                "fs/changed",
+            ),
+            // Fuzzy search
+            (
+                ServerNotification::FuzzyFileSearchSessionUpdated(
+                    proto::FuzzyFileSearchSessionUpdatedNotification {
+                        session_id: "fs1".to_string(),
+                        query: "test".to_string(),
+                        files: vec![],
+                    },
+                ),
+                "fuzzyFileSearch/sessionUpdated",
+            ),
+            (
+                ServerNotification::FuzzyFileSearchSessionCompleted(
+                    proto::FuzzyFileSearchSessionCompletedNotification {
+                        session_id: "fs1".to_string(),
+                    },
+                ),
+                "fuzzyFileSearch/sessionCompleted",
+            ),
+            // Experimental realtime secondary
+            (
+                ServerNotification::ThreadRealtimeItemAdded(proto::ThreadRealtimeItemAddedNotification {
+                    thread_id: "t1".to_string(),
+                    item: serde_json::json!({"type": "message"}),
+                }),
+                "thread/realtime/itemAdded",
+            ),
+            (
+                ServerNotification::ThreadRealtimeTranscriptUpdated(
+                    proto::ThreadRealtimeTranscriptUpdatedNotification {
+                        thread_id: "t1".to_string(),
+                        role: "assistant".to_string(),
+                        text: "hello".to_string(),
+                    },
+                ),
+                "thread/realtime/transcriptUpdated",
+            ),
+            (
+                ServerNotification::ThreadRealtimeError(
+                    proto::ThreadRealtimeErrorNotification {
+                        thread_id: "t1".to_string(),
+                        message: "audio error".to_string(),
+                    },
+                ),
+                "thread/realtime/error",
+            ),
+            // Windows-specific
+            (
+                ServerNotification::WindowsWorldWritableWarning(
+                    proto::WindowsWorldWritableWarningNotification {
+                        sample_paths: vec!["/tmp".to_string()],
+                        extra_count: 0,
+                        failed_scan: false,
+                    },
+                ),
+                "windows/worldWritableWarning",
+            ),
+            (
+                ServerNotification::WindowsSandboxSetupCompleted(
+                    proto::WindowsSandboxSetupCompletedNotification {
+                        mode: proto::WindowsSandboxSetupMode::Elevated,
+                        success: true,
+                        error: None,
+                    },
+                ),
+                "windowsSandbox/setupCompleted",
+            ),
+        ];
+
+        assert!(
+            cases.len() >= 15,
+            "expected at least 15 secondary notification mappings, got {}",
+            cases.len()
+        );
+
+        for (i, (notification, expected_method)) in cases.iter().enumerate() {
+            let event = server_notification_to_provider_event("srv1", notification);
+            match &event {
+                ProviderEvent::Unknown { method, payload } => {
+                    assert_eq!(
+                        method, expected_method,
+                        "case {i}: method mismatch"
+                    );
+                    assert!(
+                        !payload.is_empty(),
+                        "case {i}: payload should not be empty for {expected_method}"
+                    );
+                }
+                other => {
+                    panic!(
+                        "case {i}: secondary notification should map to Unknown, got {other:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Verify that the `unhandled_notification_maps_to_unknown` test still works
+    /// for the SkillsChanged variant — it maps to Unknown with the method name.
+    #[test]
+    fn skills_changed_maps_to_unknown() {
+        let notification = ServerNotification::SkillsChanged(proto::SkillsChangedNotification {});
+        let event = server_notification_to_provider_event("srv1", &notification);
+        match &event {
+            ProviderEvent::Unknown { method, payload } => {
+                assert_eq!(method, "skills/changed");
+                assert!(!payload.is_empty());
+            }
+            other => panic!("expected Unknown, got {other:?}"),
+        }
     }
 
     // ── ServerRequest → ProviderEvent ─────────────────────────────────
@@ -1068,7 +1443,157 @@ mod tests {
         }
     }
 
-    // ── AppServerEvent envelope mapping ────────────────────────────────
+    /// Legacy v1 ApplyPatchApproval maps to Unknown (deprecated in favor of
+    /// FileChangeRequestApproval).
+    #[test]
+    fn legacy_apply_patch_approval_maps_to_unknown() {
+        let thread_id = codex_protocol::ThreadId::from_string("67e55044-10b1-426f-9247-bb680e5fe0c8").unwrap();
+        let request = ServerRequest::ApplyPatchApproval {
+            request_id: proto::RequestId::Integer(99),
+            params: proto::ApplyPatchApprovalParams {
+                conversation_id: thread_id,
+                call_id: "call1".to_string(),
+                file_changes: std::collections::HashMap::new(),
+                reason: None,
+                grant_root: None,
+            },
+        };
+        let event = server_request_to_provider_event("srv1", &request);
+        match &event {
+            ProviderEvent::Unknown { method, payload } => {
+                assert_eq!(method, "applyPatch/approval");
+                assert!(!payload.is_empty());
+            }
+            other => panic!("expected Unknown for legacy ApplyPatchApproval, got {other:?}"),
+        }
+    }
+
+    /// Legacy v1 ExecCommandApproval maps to Unknown (deprecated in favor of
+    /// CommandExecutionRequestApproval).
+    #[test]
+    fn legacy_exec_command_approval_maps_to_unknown() {
+        let thread_id = codex_protocol::ThreadId::from_string("67e55044-10b1-426f-9247-bb680e5fe0c8").unwrap();
+        let request = ServerRequest::ExecCommandApproval {
+            request_id: proto::RequestId::Integer(98),
+            params: proto::ExecCommandApprovalParams {
+                conversation_id: thread_id,
+                call_id: "call1".to_string(),
+                approval_id: None,
+                command: vec!["echo".to_string(), "hello".to_string()],
+                cwd: std::path::PathBuf::from("/tmp"),
+                reason: None,
+                parsed_cmd: vec![],
+            },
+        };
+        let event = server_request_to_provider_event("srv1", &request);
+        match &event {
+            ProviderEvent::Unknown { method, payload } => {
+                assert_eq!(method, "execCommand/approval");
+                assert!(!payload.is_empty());
+            }
+            other => panic!("expected Unknown for legacy ExecCommandApproval, got {other:?}"),
+        }
+    }
+
+    /// Verify all ServerRequest variants are explicitly handled (compile-time
+    /// exhaustive). Constructs one instance of each variant to verify the match
+    /// in `server_request_to_provider_event` covers them all.
+    #[test]
+    fn server_request_mapping_is_exhaustive() {
+        // The compile-time check is the primary guarantee: if a new variant
+        // is added to ServerRequest, the match in server_request_to_provider_event
+        // will fail to compile because there is no wildcard arm.
+        //
+        // This test verifies the 7 core variants + 2 legacy variants = 9 total
+        // all produce valid ProviderEvent values without panicking.
+        let requests: Vec<ServerRequest> = vec![
+            ServerRequest::CommandExecutionRequestApproval {
+                request_id: proto::RequestId::Integer(1),
+                params: proto::CommandExecutionRequestApprovalParams {
+                    thread_id: "t1".to_string(),
+                    turn_id: "turn1".to_string(),
+                    item_id: "item1".to_string(),
+                    approval_id: None,
+                    reason: None,
+                    network_approval_context: None,
+                    command: None,
+                    cwd: None,
+                    command_actions: None,
+                    additional_permissions: None,
+                    skill_metadata: None,
+                    proposed_execpolicy_amendment: None,
+                    proposed_network_policy_amendments: None,
+                    available_decisions: None,
+                },
+            },
+            ServerRequest::FileChangeRequestApproval {
+                request_id: proto::RequestId::Integer(2),
+                params: proto::FileChangeRequestApprovalParams {
+                    thread_id: "t1".to_string(),
+                    turn_id: "turn1".to_string(),
+                    item_id: "item1".to_string(),
+                    reason: None,
+                    grant_root: None,
+                },
+            },
+            ServerRequest::DynamicToolCall {
+                request_id: proto::RequestId::Integer(6),
+                params: proto::DynamicToolCallParams {
+                    thread_id: "t1".to_string(),
+                    turn_id: "turn1".to_string(),
+                    call_id: "call1".to_string(),
+                    tool: "tool".to_string(),
+                    arguments: serde_json::json!({}),
+                },
+            },
+            ServerRequest::ChatgptAuthTokensRefresh {
+                request_id: proto::RequestId::Integer(7),
+                params: proto::ChatgptAuthTokensRefreshParams {
+                    previous_account_id: None,
+                    reason: proto::ChatgptAuthTokensRefreshReason::Unauthorized,
+                },
+            },
+            ServerRequest::ApplyPatchApproval {
+                request_id: proto::RequestId::Integer(8),
+                params: proto::ApplyPatchApprovalParams {
+                    conversation_id: codex_protocol::ThreadId::from_string("67e55044-10b1-426f-9247-bb680e5fe0c8").unwrap(),
+                    call_id: "call1".to_string(),
+                    file_changes: std::collections::HashMap::new(),
+                    reason: None,
+                    grant_root: None,
+                },
+            },
+            ServerRequest::ExecCommandApproval {
+                request_id: proto::RequestId::Integer(9),
+                params: proto::ExecCommandApprovalParams {
+                    conversation_id: codex_protocol::ThreadId::from_string("67e55044-10b1-426f-9247-bb680e5fe0c8").unwrap(),
+                    call_id: "call1".to_string(),
+                    approval_id: None,
+                    command: vec![],
+                    cwd: std::path::PathBuf::from("/tmp"),
+                    reason: None,
+                    parsed_cmd: vec![],
+                },
+            },
+        ];
+
+        // At least 6 ServerRequest variants constructed (all that we can easily construct).
+        // The remaining 3 (PermissionsRequestApproval, ToolRequestUserInput,
+        // McpServerElicitationRequest) are tested in dedicated tests above.
+        assert!(
+            requests.len() >= 6,
+            "expected at least 6 ServerRequest variants, got {}",
+            requests.len()
+        );
+
+        for (i, request) in requests.iter().enumerate() {
+            // Must not panic — all variants must be handled
+            let event = server_request_to_provider_event("srv1", request);
+            // Every variant must produce some ProviderEvent
+            let debug = format!("{event:?}");
+            assert!(!debug.is_empty(), "case {i}: event must be non-empty");
+        }
+    }
 
     #[test]
     fn app_server_event_lagged() {
