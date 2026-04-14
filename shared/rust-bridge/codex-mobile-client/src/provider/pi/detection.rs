@@ -10,6 +10,15 @@
 
 use crate::ssh::SshClient;
 
+/// Common paths to check for the `pi` binary.
+const PI_COMMON_PATHS: &[&str] = &[
+    "$HOME/.bun/bin/pi",
+    "$HOME/.local/bin/pi",
+    "/usr/local/bin/pi",
+    "$HOME/.cargo/bin/pi",
+    "$HOME/.volta/bin/pi",
+];
+
 /// Result of probing an SSH host for Pi agent availability.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DetectedPiAgent {
@@ -115,38 +124,60 @@ pub async fn detect_pi_agent(ssh_client: &SshClient) -> DetectedPiAgent {
     detected
 }
 
-/// Probe for the `pi` binary on PATH.
+/// Probe for the `pi` binary on PATH and in common install locations.
 ///
-/// Uses `command -v pi` (POSIX-compatible) to locate the binary.
+/// Uses `command -v pi` (with shell profiles sourced) to locate the binary.
+/// Falls back to checking common install locations if not on PATH.
 async fn probe_pi_binary(ssh_client: &SshClient) -> Option<String> {
-    match ssh_client.exec("command -v pi 2>/dev/null").await {
+    // Try PATH with shell profiles sourced.
+    match ssh_client.exec_with_profile("command -v pi 2>/dev/null").await {
         Ok(result) if result.exit_code == 0 => {
             let path = result.stdout.trim().to_string();
-            if path.is_empty() {
-                None
-            } else {
+            if !path.is_empty() {
                 tracing::debug!("Pi binary found at: {path}");
-                Some(path)
+                return Some(path);
             }
         }
-        _ => {
-            tracing::debug!("Pi binary not found on PATH");
-            None
+        _ => {}
+    }
+
+    // Try common install locations.
+    for path in PI_COMMON_PATHS {
+        let cmd = format!("test -x {path} && echo {path} 2>/dev/null");
+        if let Ok(result) = ssh_client.exec_with_profile(&cmd).await {
+            if result.exit_code == 0 {
+                let found = result.stdout.trim().to_string();
+                if !found.is_empty() {
+                    tracing::debug!("Pi binary found at common location: {found}");
+                    return Some(found);
+                }
+            }
         }
     }
+
+    tracing::debug!("Pi binary not found");
+    None
 }
 
 /// Probe `pi --version` to verify the binary works and get version.
+///
+/// Note: `pi --version` writes the version string to **stderr** (as of
+/// pi 0.67.x). We must NOT discard stderr — instead we check both
+/// stdout and stderr for the version string.
 async fn probe_pi_version(ssh_client: &SshClient) -> Option<String> {
-    match ssh_client.exec("pi --version 2>/dev/null").await {
+    match ssh_client.exec_with_profile("pi --version").await {
         Ok(result) if result.exit_code == 0 => {
-            let version = result.stdout.trim().to_string();
-            if version.is_empty() {
-                None
+            // pi --version may write to stderr or stdout depending on
+            // version, so check both.
+            let version = if !result.stdout.trim().is_empty() {
+                result.stdout.trim().to_string()
+            } else if !result.stderr.trim().is_empty() {
+                result.stderr.trim().to_string()
             } else {
-                tracing::debug!("Pi version: {version}");
-                Some(version)
-            }
+                return None;
+            };
+            tracing::debug!("Pi version: {version}");
+            Some(version)
         }
         _ => {
             tracing::debug!("pi --version failed");
@@ -158,7 +189,7 @@ async fn probe_pi_version(ssh_client: &SshClient) -> Option<String> {
 /// Probe `npx pi-acp --version` to check if ACP adapter is available.
 async fn probe_pi_acp(ssh_client: &SshClient) -> bool {
     match ssh_client
-        .exec("npx pi-acp --version 2>/dev/null")
+        .exec_with_profile("npx pi-acp --version 2>/dev/null")
         .await
     {
         Ok(result) if result.exit_code == 0 => {

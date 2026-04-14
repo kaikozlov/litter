@@ -385,6 +385,16 @@ impl SshClient {
             .map_err(|_| SshError::Timeout)?
     }
 
+    /// Run a command on the remote host with shell profiles sourced first.
+    ///
+    /// Prepends `PROFILE_INIT` so that PATH includes directories like
+    /// `~/.bun/bin`, `~/.volta/bin`, `~/.local/bin`, etc. that are only
+    /// set up in `.bashrc` / `.zshrc` / `.profile`.
+    pub async fn exec_with_profile(&self, command: &str) -> Result<ExecResult, SshError> {
+        let full_command = format!("{PROFILE_INIT} {command}");
+        self.exec_posix(&full_command).await
+    }
+
     async fn exec_inner(&self, command: &str) -> Result<ExecResult, SshError> {
         let handle = self.handle.lock().await;
         if handle.is_closed() {

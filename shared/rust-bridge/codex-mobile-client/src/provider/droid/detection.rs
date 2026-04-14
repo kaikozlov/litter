@@ -78,21 +78,33 @@ pub async fn detect_droid_agent(ssh_client: &SshClient) -> DetectedDroidAgent {
 
 /// Probe for the `droid` binary on PATH and common locations.
 ///
-/// Uses `command -v droid` (POSIX-compatible) to locate the binary.
+/// Uses `command -v droid` (with shell profiles sourced) to locate the binary.
 /// Falls back to checking common install locations.
 async fn probe_droid_binary(ssh_client: &SshClient) -> Option<String> {
-    // Try PATH first.
-    if let Some(path) = probe_command(ssh_client, "command -v droid 2>/dev/null").await {
-        tracing::debug!("Droid binary found on PATH: {path}");
-        return Some(path);
+    // Try PATH with shell profiles sourced.
+    match ssh_client.exec_with_profile("command -v droid 2>/dev/null").await {
+        Ok(result) if result.exit_code == 0 => {
+            let path = result.stdout.trim().to_string();
+            if !path.is_empty() {
+                tracing::debug!("Droid binary found on PATH: {path}");
+                return Some(path);
+            }
+        }
+        _ => {}
     }
 
     // Try common locations.
     for path in DROID_COMMON_PATHS {
         let cmd = format!("test -x {path} && echo {path} 2>/dev/null");
-        if let Some(found) = probe_command(ssh_client, &cmd).await {
-            tracing::debug!("Droid binary found at common location: {found}");
-            return Some(found);
+        match ssh_client.exec_with_profile(&cmd).await {
+            Ok(result) if result.exit_code == 0 => {
+                let found = result.stdout.trim().to_string();
+                if !found.is_empty() {
+                    tracing::debug!("Droid binary found at common location: {found}");
+                    return Some(found);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -101,36 +113,26 @@ async fn probe_droid_binary(ssh_client: &SshClient) -> Option<String> {
 }
 
 /// Probe `droid --version` to verify the binary works and get version.
+///
+/// Checks both stdout and stderr for the version string, since some
+/// CLIs write --version output to stderr.
 async fn probe_droid_version(ssh_client: &SshClient) -> Option<String> {
-    match ssh_client.exec("droid --version 2>/dev/null").await {
+    match ssh_client.exec_with_profile("droid --version").await {
         Ok(result) if result.exit_code == 0 => {
-            let version = result.stdout.trim().to_string();
-            if version.is_empty() {
-                None
+            let version = if !result.stdout.trim().is_empty() {
+                result.stdout.trim().to_string()
+            } else if !result.stderr.trim().is_empty() {
+                result.stderr.trim().to_string()
             } else {
-                tracing::debug!("Droid version: {version}");
-                Some(version)
-            }
+                return None;
+            };
+            tracing::debug!("Droid version: {version}");
+            Some(version)
         }
         _ => {
             tracing::debug!("droid --version failed");
             None
         }
-    }
-}
-
-/// Run a probe command and return the trimmed stdout if successful.
-async fn probe_command(ssh_client: &SshClient, cmd: &str) -> Option<String> {
-    match ssh_client.exec(cmd).await {
-        Ok(result) if result.exit_code == 0 => {
-            let output = result.stdout.trim().to_string();
-            if output.is_empty() {
-                None
-            } else {
-                Some(output)
-            }
-        }
-        _ => None,
     }
 }
 

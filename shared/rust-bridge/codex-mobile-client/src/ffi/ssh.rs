@@ -582,9 +582,9 @@ async fn run_guided_ssh_connect(
 
     // ── Agent Detection ────────────────────────────────────────────────
     // After SSH auth, before Codex bootstrap: probe the host for Pi/Droid
-    // agents. If only Codex found, proceed as normal. If multiple agents
-    // found, signal iOS to show the picker. On failure/timout, fall through
-    // to Codex path.
+    // agents. If any non-Codex agents found, signal iOS to show the picker.
+    // If none found, proceed to Codex bootstrap. On failure/timeout,
+    // fall through to Codex path.
     progress.update_step(
         AppConnectionStepKind::DetectingAgents,
         AppConnectionStepState::InProgress,
@@ -608,16 +608,22 @@ async fn run_guided_ssh_connect(
         Some(format!("{} agent(s) detected", detected.agents.len())),
     );
 
-    if detected.has_multiple_agents() {
-        // Multiple agents: store detected list, signal iOS to show picker.
+    if detected.has_any_agent() {
+        // One or more non-Codex agents detected: store list, signal iOS
+        // to show picker.
         info!(
-            "guided ssh connect multiple agents detected server_id={} agents={:?}",
+            "guided ssh connect agents detected server_id={} agents={:?}",
             server_id,
             detected.agents.iter().map(|a| a.id.clone()).collect::<Vec<_>>()
         );
         progress.detected_agents = detected.agents.clone();
         progress.pending_agent_selection = true;
-        progress.terminal_message = Some("Multiple agents detected. Please select one.".to_string());
+        let label = if detected.agents.len() == 1 {
+            "Agent detected. Please select it to connect.".to_string()
+        } else {
+            "Multiple agents detected. Please select one.".to_string()
+        };
+        progress.terminal_message = Some(label);
         mobile_client
             .app_store
             .update_server_connection_progress(&server_id, Some(progress.clone()));
@@ -629,7 +635,7 @@ async fn run_guided_ssh_connect(
         return Ok(());
     }
 
-    // Only Codex found (or detection failed/timed out). Reset and continue
+    // No non-Codex agents found (or detection failed/timed out).
     // with normal Codex bootstrap.
     progress.pending_agent_selection = false;
     mobile_client

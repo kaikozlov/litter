@@ -130,7 +130,24 @@ struct DiscoveryView: View {
                 Task { await connectToServer(server, targetOverride: target) }
             }
         }
-        .sheet(item: $agentPickerServer) { server in
+        .sheet(item: $agentPickerServer, onDismiss: {
+            // If the picker was dismissed without selecting an agent (Cancel button
+            // or swipe), clean up the pending connection state so the server
+            // doesn't stay stuck at "detecting agents" forever.
+            if agentPickerSelection == nil {
+                let cancelledId = pendingAutoNavigateServerId
+                pendingAutoNavigateServerId = nil
+                pendingAutoNavigateServer = nil
+                connectingServer = nil
+                pendingSSHCredentials = nil
+                agentPickerDetectedAgents = nil
+                if let cancelledId {
+                    Task {
+                        appModel.serverBridge.disconnectServer(serverId: cancelledId)
+                    }
+                }
+            }
+        }) { server in
             // Prefer runtime-detected agents (from guided SSH connect detection),
             // then fall back to discovery-layer agent infos, then synthesize from agent types.
             let pickerInfos: [AgentInfo]
