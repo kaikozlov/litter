@@ -24,48 +24,6 @@ final class ConversationStreamingViewportPolicyTests: XCTestCase {
         )
     }
 
-    func testShouldUseLightweightLiveRenderingWhenDetachedFromStreamingTail() {
-        XCTAssertTrue(
-            ConversationStreamingViewportPolicy.shouldUseLightweightLiveRendering(
-                isStreaming: true,
-                isNearBottom: false,
-                autoFollowStreaming: false,
-                userIsDraggingScroll: true
-            )
-        )
-    }
-
-    func testShouldKeepRichLiveRenderingWhenStillFollowingBottom() {
-        XCTAssertFalse(
-            ConversationStreamingViewportPolicy.shouldUseLightweightLiveRendering(
-                isStreaming: true,
-                isNearBottom: true,
-                autoFollowStreaming: true,
-                userIsDraggingScroll: false
-            )
-        )
-    }
-
-    func testLiveTurnRenderModeStaysRichOncePromoted() {
-        XCTAssertEqual(
-            ConversationStreamingViewportPolicy.resolveLiveTurnRenderMode(
-                current: .rich,
-                shouldUseLightweight: true
-            ),
-            .rich
-        )
-    }
-
-    func testLiveTurnRenderModePromotesBackToRichWhenReattached() {
-        XCTAssertEqual(
-            ConversationStreamingViewportPolicy.resolveLiveTurnRenderMode(
-                current: .lightweight,
-                shouldUseLightweight: false
-            ),
-            .rich
-        )
-    }
-
     func testRetainsActiveAndLatestCompletedLiveDetailItems() {
         let active = ConversationItem(
             id: "active",

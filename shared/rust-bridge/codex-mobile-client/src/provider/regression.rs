@@ -22,7 +22,6 @@
 //! VAL-ABS-031, VAL-ABS-032, VAL-ABS-033, VAL-ABS-039, VAL-ABS-044,
 //! VAL-ABS-045, VAL-ABS-049, VAL-ABS-053, VAL-ABS-059
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -889,7 +888,7 @@ async fn regression_thread_lifecycle_through_provider() {
     // thread/list
     let list_result = session.request("thread/list", json!({})).await;
     assert!(list_result.is_ok(), "thread/list should succeed");
-    let list_val = list_result.unwrap();
+    let _list_val = list_result.unwrap();
 
     // thread/start (creates a new thread)
     let create_result = session.request("thread/start", json!({"cwd": "/tmp"})).await;
