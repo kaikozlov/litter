@@ -1040,13 +1040,17 @@ struct DiscoveryView: View {
         credentials: SSHCredentials,
         agentType: AgentType? = nil
     ) async throws -> String {
+        let remoteCommand: String? = agentType == .genericAcp
+            ? AgentSelectionStore.shared.selectedRemoteCommand()
+            : nil
         let serverId = try await sshConnectAndConnectServer(
             serverId: server.id,
             displayName: server.name,
             host: host,
             credentials: credentials,
             port: server.resolvedSSHPort,
-            agentType: agentType
+            agentType: agentType,
+            remoteCommand: remoteCommand
         )
         SavedServerStore.remember(
             server.withConnectionPreference(.ssh)
@@ -1060,7 +1064,8 @@ struct DiscoveryView: View {
         host: String,
         credentials: SSHCredentials,
         port: UInt16,
-        agentType: AgentType? = nil
+        agentType: AgentType? = nil,
+        remoteCommand: String? = nil
     ) async throws -> String {
         let authMethod: String = switch credentials {
         case .password:
@@ -1076,7 +1081,8 @@ struct DiscoveryView: View {
                 "host": host,
                 "sshPort": Int(port),
                 "authMethod": authMethod,
-                "agentType": agentType?.persistentKey ?? "none"
+                "agentType": agentType?.persistentKey ?? "none",
+                "hasRemoteCommand": remoteCommand != nil ? "true" : "false"
             ]
         )
         let ipcSocketPathOverride = ExperimentalFeatures.shared.ipcSocketPathOverride()
@@ -1095,7 +1101,7 @@ struct DiscoveryView: View {
                 workingDir: nil,
                 ipcSocketPathOverride: ipcSocketPathOverride,
                 agentType: agentType,
-                remoteCommand: nil
+                remoteCommand: remoteCommand
             )
         case .key(let username, let privateKey, let passphrase):
             return try await appModel.ssh.sshStartRemoteServerConnect(
@@ -1111,7 +1117,7 @@ struct DiscoveryView: View {
                 workingDir: nil,
                 ipcSocketPathOverride: ipcSocketPathOverride,
                 agentType: agentType,
-                remoteCommand: nil
+                remoteCommand: remoteCommand
             )
         }
     }

@@ -195,6 +195,43 @@ final class AgentSelectionStore {
     func shouldShowPicker(availableAgents: [AgentType]) -> Bool {
         availableAgents.count > 1
     }
+
+    // MARK: - ACP Profile & Remote Command Selection
+
+    private static let selectedACPProfileIdKey = "litter.selectedACPProfileId"
+    private static let selectedRemoteCommandKey = "litter.selectedRemoteCommand"
+
+    /// Persists the selected ACP profile ID for a context (e.g., "lastSelection").
+    func setSelectedACPProfileId(_ profileId: UUID?, for context: String) {
+        let key = "\(Self.selectedACPProfileIdKey).\(context)"
+        if let profileId {
+            defaults.set(profileId.uuidString, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    /// Returns the previously selected ACP profile ID for a context.
+    func selectedACPProfileId(for context: String) -> UUID? {
+        guard let string = defaults.string(forKey: "\(Self.selectedACPProfileIdKey).\(context)") else {
+            return nil
+        }
+        return UUID(uuidString: string)
+    }
+
+    /// Persists the selected/edited remote command for GenericAcp.
+    func setSelectedRemoteCommand(_ command: String?) {
+        if let command {
+            defaults.set(command, forKey: Self.selectedRemoteCommandKey)
+        } else {
+            defaults.removeObject(forKey: Self.selectedRemoteCommandKey)
+        }
+    }
+
+    /// Returns the persisted remote command for GenericAcp, or nil if none.
+    func selectedRemoteCommand() -> String? {
+        defaults.string(forKey: Self.selectedRemoteCommandKey)
+    }
 }
 
 /// Manages per-agent permission policy preferences, persisted to UserDefaults.
@@ -300,6 +337,16 @@ struct InlineAgentSelectorView: View {
 
                 Spacer()
 
+                if compatible && agentType.usesACP {
+                    Text("ACP")
+                        .litterFont(.caption2, weight: .semibold)
+                        .foregroundColor(AgentType.genericAcp.tintColor)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(AgentType.genericAcp.tintColor.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+
                 if compatible && agentType == selectedAgentType {
                     Image(systemName: "checkmark")
                         .litterFont(size: 12, weight: .medium)
@@ -316,6 +363,7 @@ struct InlineAgentSelectorView: View {
 // MARK: - Agent Picker Sheet (for connection flow)
 
 /// Full agent picker sheet shown during connection flow when server has multiple agents.
+/// Includes detected agents from the server plus ACP profiles for GenericAcp connections.
 struct AgentPickerSheet: View {
     let agentInfos: [AgentInfo]
     /// The transports available on the active connection.
@@ -324,10 +372,26 @@ struct AgentPickerSheet: View {
     @Binding var selectedAgentType: AgentType?
     @Environment(\.dismiss) private var dismiss
 
+    /// Selected ACP profile when user picks a GenericAcp entry.
+    @State private var selectedACPProfile: ACPProfile?
+    /// Custom command override text (pre-populated from profile, editable).
+    @State private var customCommand = ""
+    /// Whether the custom command field is showing (after user picks an ACP profile).
+    @State private var showingCustomCommand = false
+    /// Validation error for the custom command field.
+    @State private var commandError: String?
+    /// ACP profiles loaded from the store.
+    @State private var acpProfiles: [ACPProfile] = []
+
     /// Returns true if this agent has at least one transport matching the available transports.
     private func isCompatible(_ info: AgentInfo) -> Bool {
         guard !availableTransports.isEmpty else { return true }
         return !Set(info.detectedTransports).isDisjoint(with: Set(availableTransports))
+    }
+
+    /// Whether GenericAcp is available as a transport option.
+    private var genericAcpAvailable: Bool {
+        availableTransports.isEmpty || availableTransports.contains(.genericAcp)
     }
 
     var body: some View {
@@ -335,42 +399,29 @@ struct AgentPickerSheet: View {
             ZStack {
                 LitterTheme.backgroundGradient.ignoresSafeArea()
                 List {
+                    // MARK: Detected agents section
                     ForEach(agentInfos, id: \.id) { info in
                         let compatible = isCompatible(info)
                         let agentType = info.detectedTransports.first ?? .codex
                         Button {
                             guard compatible else { return }
-                            selectedAgentType = agentType
-                            dismiss()
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: agentType.icon)
-                                    .font(.system(size: 20, weight: .medium))
-                                    .foregroundColor(compatible ? agentType.tintColor : LitterTheme.textMuted)
-                                    .frame(width: 32)
-                                    .opacity(compatible ? 1.0 : 0.4)
-
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(info.displayName)
-                                        .litterFont(.subheadline)
-                                        .foregroundColor(compatible ? LitterTheme.textPrimary : LitterTheme.textMuted)
-                                    if compatible {
-                                        Text(info.detectedTransports.map { $0.transportLabel }.joined(separator: ", ") + " transport")
-                                            .litterFont(.caption)
-                                            .foregroundColor(LitterTheme.textSecondary)
-                                    } else {
-                                        Text("Transport unavailable")
-                                            .litterFont(.caption)
-                                            .foregroundColor(LitterTheme.danger)
-                                    }
-                                }
-
-                                Spacer()
+                            if agentType == .genericAcp {
+                                // Show profile sub-options or configure prompt
+                                handleGenericAcpSelection()
+                            } else {
+                                selectedAgentType = agentType
+                                dismiss()
                             }
-                            .padding(.vertical, 4)
+                        } label: {
+                            agentPickerRow(info: info, agentType: agentType, compatible: compatible)
                         }
                         .listRowBackground(LitterTheme.surface.opacity(0.6))
                         .disabled(!compatible)
+                    }
+
+                    // MARK: ACP Profiles section (when GenericAcp available)
+                    if genericAcpAvailable {
+                        acpProfilesSection
                     }
                 }
                 .scrollContentBackground(.hidden)
@@ -379,11 +430,276 @@ struct AgentPickerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Cancel") { dismiss() }
+                    if showingCustomCommand {
+                        Button("Back") {
+                            showingCustomCommand = false
+                            selectedACPProfile = nil
+                        }
                         .foregroundColor(LitterTheme.textSecondary)
+                    } else {
+                        Button("Cancel") { dismiss() }
+                            .foregroundColor(LitterTheme.textSecondary)
+                    }
                 }
             }
+            .onAppear {
+                acpProfiles = ACPProfileStore.shared.profiles()
+            }
         }
+    }
+
+    // MARK: - Agent Row
+
+    private func agentPickerRow(info: AgentInfo, agentType: AgentType, compatible: Bool) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: agentType.icon)
+                .font(.system(size: 20, weight: .medium))
+                .foregroundColor(compatible ? agentType.tintColor : LitterTheme.textMuted)
+                .frame(width: 32)
+                .opacity(compatible ? 1.0 : 0.4)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(info.displayName)
+                    .litterFont(.subheadline)
+                    .foregroundColor(compatible ? LitterTheme.textPrimary : LitterTheme.textMuted)
+                if compatible {
+                    Text(info.detectedTransports.map { $0.transportLabel }.joined(separator: ", ") + " transport")
+                        .litterFont(.caption)
+                        .foregroundColor(LitterTheme.textSecondary)
+                } else {
+                    Text("Transport unavailable")
+                        .litterFont(.caption)
+                        .foregroundColor(LitterTheme.danger)
+                }
+            }
+
+            Spacer()
+
+            // Show ACP badge for ACP-type transports
+            if compatible && agentType.usesACP {
+                Text("ACP")
+                    .litterFont(.caption2, weight: .semibold)
+                    .foregroundColor(AgentType.genericAcp.tintColor)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(AgentType.genericAcp.tintColor.opacity(0.15))
+                    .clipShape(Capsule())
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - ACP Profiles Section
+
+    @ViewBuilder
+    private var acpProfilesSection: some View {
+        if showingCustomCommand, let profile = selectedACPProfile {
+            // Show custom command editor for the selected profile
+            customCommandSection(profile)
+        } else if !acpProfiles.isEmpty {
+            Section {
+                ForEach(acpProfiles) { profile in
+                    Button {
+                        selectACPProfile(profile)
+                    } label: {
+                        acpProfileRow(profile)
+                    }
+                }
+
+                if acpProfiles.count > 1 {
+                    Button {
+                        // "Other command" — show blank command field
+                        selectedACPProfile = nil
+                        customCommand = ""
+                        showingCustomCommand = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "terminal")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundColor(AgentType.genericAcp.tintColor)
+                                .frame(width: 32)
+                            Text("Enter custom command…")
+                                .litterFont(.subheadline)
+                                .foregroundColor(LitterTheme.textSecondary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .listRowBackground(LitterTheme.surface.opacity(0.6))
+                }
+            } header: {
+                SectionHeader(label: "ACP Providers")
+            }
+        } else {
+            // No profiles configured — offer a configure link
+            Section {
+                Button {
+                    // Dismiss picker and navigate to settings
+                    dismiss()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: AgentType.genericAcp.icon)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(AgentType.genericAcp.tintColor)
+                            .frame(width: 32)
+                            .opacity(0.6)
+                        Text("No ACP profiles configured")
+                            .litterFont(.subheadline)
+                            .foregroundColor(LitterTheme.textMuted)
+                        Spacer()
+                        Text("Settings →")
+                            .litterFont(.caption)
+                            .foregroundColor(LitterTheme.textSecondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+                .listRowBackground(LitterTheme.surface.opacity(0.6))
+            } header: {
+                SectionHeader(label: "ACP Providers")
+            }
+        }
+    }
+
+    private func acpProfileRow(_ profile: ACPProfile) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: profile.icon ?? AgentType.genericAcp.icon)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(AgentType.genericAcp.tintColor)
+                .frame(width: 32)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(profile.displayName)
+                    .litterFont(.subheadline)
+                    .foregroundColor(LitterTheme.textPrimary)
+                Text(profile.remoteCommand)
+                    .litterFont(.caption)
+                    .foregroundColor(LitterTheme.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer()
+
+            // ACP badge
+            Text("ACP")
+                .litterFont(.caption2, weight: .semibold)
+                .foregroundColor(AgentType.genericAcp.tintColor)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(AgentType.genericAcp.tintColor.opacity(0.15))
+                .clipShape(Capsule())
+        }
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - Custom Command Editor
+
+    private func customCommandSection(_ profile: ACPProfile?) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                if let profile {
+                    HStack(spacing: 8) {
+                        Image(systemName: profile.icon ?? AgentType.genericAcp.icon)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(AgentType.genericAcp.tintColor)
+                        Text(profile.displayName)
+                            .litterFont(.subheadline, weight: .medium)
+                            .foregroundColor(LitterTheme.textPrimary)
+                    }
+                }
+
+                TextField("Remote command", text: $customCommand)
+                    .litterFont(.footnote)
+                    .foregroundColor(LitterTheme.textPrimary)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+                    .font(.system(.body, design: .monospaced))
+                    .padding(8)
+                    .background(LitterTheme.surfaceLight)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                if let error = commandError {
+                    Text(error)
+                        .litterFont(.caption2)
+                        .foregroundColor(LitterTheme.danger)
+                }
+
+                Button {
+                    confirmCustomCommand()
+                } label: {
+                    HStack {
+                        Spacer()
+                        Text("Connect")
+                            .litterFont(.subheadline, weight: .medium)
+                            .foregroundColor(LitterTheme.textOnAccent)
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
+                    .background(commandIsValid ? AgentType.genericAcp.tintColor : LitterTheme.surfaceLight)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .disabled(!commandIsValid)
+                .padding(.top, 4)
+            }
+            .padding(.vertical, 4)
+        } header: {
+            if let profile {
+                SectionHeader(label: "Custom Command for \(profile.displayName)")
+            } else {
+                SectionHeader(label: "Custom Command")
+            }
+        }
+        .listRowBackground(LitterTheme.surface.opacity(0.6))
+    }
+
+    // MARK: - Actions
+
+    private func handleGenericAcpSelection() {
+        let profiles = ACPProfileStore.shared.profiles()
+        if profiles.count == 1 {
+            // Auto-select the only profile
+            selectACPProfile(profiles[0])
+        }
+        // If multiple or zero profiles, the section handles it
+    }
+
+    private func selectACPProfile(_ profile: ACPProfile) {
+        selectedACPProfile = profile
+        customCommand = profile.remoteCommand
+        commandError = nil
+        showingCustomCommand = true
+    }
+
+    private var commandIsValid: Bool {
+        let trimmed = customCommand.trimmingCharacters(in: .whitespaces)
+        return !trimmed.isEmpty && !containsDangerousShellCharacters(trimmed)
+    }
+
+    private func confirmCustomCommand() {
+        let trimmed = customCommand.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            commandError = "Command cannot be empty"
+            return
+        }
+        guard !containsDangerousShellCharacters(trimmed) else {
+            commandError = "Command contains potentially dangerous characters"
+            return
+        }
+
+        // Persist the selected profile and command
+        if let profile = selectedACPProfile {
+            AgentSelectionStore.shared.setSelectedACPProfileId(profile.id, for: "lastSelection")
+        }
+        AgentSelectionStore.shared.setSelectedRemoteCommand(trimmed)
+
+        selectedAgentType = .genericAcp
+        dismiss()
+    }
+
+    private func containsDangerousShellCharacters(_ command: String) -> Bool {
+        // Basic validation: reject commands with shell injection risks
+        let dangerous = ["&&", "||", ";", "`", "$(", ">", ">>", "<", "|"]
+        return dangerous.contains(where: { command.contains($0) })
     }
 }
 
@@ -493,5 +809,16 @@ struct DroidAutonomyControl: View {
         )
     }
     .background(Color.black)
+}
+
+#Preview("Agent Picker Sheet") {
+    AgentPickerSheet(
+        agentInfos: [
+            AgentInfo(id: "codex", displayName: "Codex", description: "Code assistant", detectedTransports: [.codex], capabilities: []),
+            AgentInfo(id: "pi", displayName: "Pi", description: "AI coding agent", detectedTransports: [.piNative], capabilities: []),
+        ],
+        availableTransports: [.codex, .piNative, .droidNative, .genericAcp],
+        selectedAgentType: .constant(nil)
+    )
 }
 #endif

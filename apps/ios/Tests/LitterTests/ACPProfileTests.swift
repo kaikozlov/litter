@@ -352,3 +352,105 @@ final class ACPProfileStoreTests: XCTestCase {
         XCTAssertNil(store.profile(id: profile.id))
     }
 }
+
+// MARK: - AgentSelectionStore ACP Persistence Tests
+
+final class AgentSelectionStoreACPTests: XCTestCase {
+
+    private var store: AgentSelectionStore!
+
+    override func setUp() {
+        super.setUp()
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: "litter.selectedACPProfileId.lastSelection")
+        defaults.removeObject(forKey: "litter.selectedRemoteCommand")
+        defaults.removeObject(forKey: "litter.selectedAgent.test-server-acp")
+        store = AgentSelectionStore.shared
+    }
+
+    override func tearDown() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: "litter.selectedACPProfileId.lastSelection")
+        defaults.removeObject(forKey: "litter.selectedRemoteCommand")
+        defaults.removeObject(forKey: "litter.selectedAgent.test-server-acp")
+        store = nil
+        super.tearDown()
+    }
+
+    // MARK: - ACP Profile ID Persistence
+
+    @MainActor
+    func testSetAndGetACPProfileId() {
+        let id = UUID()
+        store.setSelectedACPProfileId(id, for: "lastSelection")
+
+        let retrieved = store.selectedACPProfileId(for: "lastSelection")
+        XCTAssertEqual(retrieved, id)
+    }
+
+    @MainActor
+    func testClearACPProfileId() {
+        let id = UUID()
+        store.setSelectedACPProfileId(id, for: "lastSelection")
+        store.setSelectedACPProfileId(nil, for: "lastSelection")
+
+        let retrieved = store.selectedACPProfileId(for: "lastSelection")
+        XCTAssertNil(retrieved)
+    }
+
+    @MainActor
+    func testACPProfileIdReturnsNilWhenNotSet() {
+        let retrieved = store.selectedACPProfileId(for: "lastSelection")
+        XCTAssertNil(retrieved)
+    }
+
+    // MARK: - Remote Command Persistence
+
+    @MainActor
+    func testSetAndGetRemoteCommand() {
+        store.setSelectedRemoteCommand("my-agent --acp --verbose")
+
+        let retrieved = store.selectedRemoteCommand()
+        XCTAssertEqual(retrieved, "my-agent --acp --verbose")
+    }
+
+    @MainActor
+    func testClearRemoteCommand() {
+        store.setSelectedRemoteCommand("my-agent --acp")
+        store.setSelectedRemoteCommand(nil)
+
+        let retrieved = store.selectedRemoteCommand()
+        XCTAssertNil(retrieved)
+    }
+
+    @MainActor
+    func testRemoteCommandReturnsNilWhenNotSet() {
+        let retrieved = store.selectedRemoteCommand()
+        XCTAssertNil(retrieved)
+    }
+
+    // MARK: - Selected Agent Type for GenericAcp
+
+    @MainActor
+    func testSelectedAgentTypeRoundTripForGenericAcp() {
+        store.setSelectedAgentType(.genericAcp, for: "test-server-acp")
+        let result = store.selectedAgentType(for: "test-server-acp")
+        XCTAssertEqual(result, .genericAcp)
+    }
+
+    @MainActor
+    func testSelectedAgentTypePersistsAcrossInstances() {
+        store.setSelectedAgentType(.genericAcp, for: "test-server-acp")
+        // Re-read from the same shared instance (which reads from UserDefaults)
+        let result = store.selectedAgentType(for: "test-server-acp")
+        XCTAssertEqual(result, .genericAcp)
+    }
+
+    @MainActor
+    func testSelectedAgentTypeClearsToNil() {
+        store.setSelectedAgentType(.genericAcp, for: "test-server-acp")
+        store.setSelectedAgentType(nil, for: "test-server-acp")
+        let result = store.selectedAgentType(for: "test-server-acp")
+        XCTAssertNil(result)
+    }
+}

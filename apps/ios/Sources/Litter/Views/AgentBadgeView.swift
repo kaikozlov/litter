@@ -82,6 +82,16 @@ extension AgentType {
             return "ACP"
         }
     }
+
+    /// Whether this agent type uses the ACP transport protocol.
+    var usesACP: Bool {
+        switch self {
+        case .piAcp, .droidAcp, .genericAcp:
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 // MARK: - Agent Badge View
