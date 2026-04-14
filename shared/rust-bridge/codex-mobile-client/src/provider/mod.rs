@@ -434,6 +434,7 @@ pub mod acp;
 pub mod codex;
 #[cfg(test)]
 mod cross_provider;
+pub mod detection;
 pub mod droid;
 pub mod error_handling;
 pub mod factory;
