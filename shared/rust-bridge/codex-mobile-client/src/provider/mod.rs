@@ -440,6 +440,8 @@ pub mod error_handling;
 pub mod factory;
 pub mod mapping;
 pub mod pi;
+#[cfg(test)]
+mod regression;
 
 // ── Factory functions ──────────────────────────────────────────────────────
 
