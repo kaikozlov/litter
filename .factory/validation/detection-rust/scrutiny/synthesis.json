@@ -1,0 +1,57 @@
+{
+  "milestone": "detection-rust",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml -- -D warnings",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 3,
+    "passed": 3,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add guidance on when to use direct field mutation vs method-based updates on AppConnectionProgressSnapshot. Currently, step changes use update_step() but detection results use direct field assignment (progress.detected_agents = ...). A convention would help future workers stay consistent.",
+      "evidence": "Feature detection-in-guided-ssh-connect uses direct field mutation for detected_agents and pending_agent_selection on AppConnectionProgressSnapshot, while other state changes in the same function use update_step(). No convention is documented.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Consider adding a note about DRY cleanup patterns in connect_remote_over_ssh_with_agent_type(). The disconnect+health-update+progress-reset pattern is repeated 3 times in the same function. A helper method could reduce repetition and risk of drift.",
+      "evidence": "Feature detection-in-provider-ssh-connect: three nearly identical error-cleanup blocks in connect_remote_over_ssh_with_agent_type() at lines ~795-801, ~813-819, and ~841-847 of mobile_client/mod.rs.",
+      "isSystemic": false
+    },
+    {
+      "target": "skills (rust-backend-worker)",
+      "suggestion": "Consider relaxing or clarifying the 'Write Tests First (Red)' step in the rust-backend-worker skill. Two of three workers in this milestone wrote tests after implementation rather than before. The skill feedback claimed followedProcedure: true despite the deviation. Either enforce TDD strictly or acknowledge iterative test-after as acceptable.",
+      "evidence": "Features detection-in-guided-ssh-connect and detection-in-provider-ssh-connect both had implementation edits before test edits in their transcripts. The skill Step 2 says 'Before ANY implementation: Create test cases'.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "The command -v <binary> pattern for probing remote binary availability should be documented in .factory/library/",
+      "reason": "already-documented — provider-transport.md already covers this pattern extensively (lines 293, 407, 409)"
+    }
+  ],
+  "previousRound": null
+}

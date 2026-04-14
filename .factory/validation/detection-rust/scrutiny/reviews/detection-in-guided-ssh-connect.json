@@ -1,0 +1,45 @@
+{
+  "featureId": "detection-in-guided-ssh-connect",
+  "reviewedAt": "2026-04-14T04:30:00Z",
+  "commitId": "590d946",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation correctly wires detect_all_agents() into run_guided_ssh_connect() after SSH auth and before Codex bootstrap. The detection flow handles three cases: (1) only Codex → normal bootstrap unchanged, (2) multiple agents → early return with progress snapshot populated for iOS picker, (3) detection failure/timeout → falls through to Codex path. All 1032 tests pass (up from 1012 baseline + 9 new for the prior feature, now 1032). The new AppConnectionStepKind::DetectingAgents and the detected_agents/pending_agent_selection fields are proper UniFFI types (Enum and Record). One non-blocking issue: when the multi-agent path returns Ok(()), the spawn cleanup code clears the bootstrap flow from the HashMap and logs 'completed', which means a subsequent call to resume with the chosen agent will create a fresh flow — this is likely fine but worth noting since the comment says 'iOS will call ssh_start_remote_server_connect again'.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/ffi/ssh.rs",
+        "line": 446,
+        "severity": "non_blocking",
+        "description": "When multiple agents are detected and run_guided_ssh_connect returns Ok(()), the spawn block at line 446 removes the server_id from bootstrap_flows and logs 'ssh connect task completed'. This means the SSH connection is dropped (ssh_client goes out of scope). When iOS calls ssh_start_remote_server_connect again with the chosen AgentType, it will start a fresh SSH connection via run_provider_ssh_connect(). This is architecturally correct but means the detection SSH session is not reused — a new SSH auth round-trip is required. The comment in the multi-agent return (line ~622) correctly describes this flow but does not mention the connection teardown cost."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/ffi/ssh.rs",
+        "line": 615,
+        "severity": "non_blocking",
+        "description": "The comment says 'detection failure/timed out' falls through to Codex path, but the actual fallthrough is based on has_multiple_agents() returning false. This works correctly because detect_all_agents() always returns at least Codex, so agents.len() == 1 → has_multiple_agents() == false on failure. However, there is no explicit log message distinguishing between 'only Codex detected' and 'detection error occurred'. The info log at line ~598 only logs the agent count. A tracing::warn for the detection error path inside detect_all_agents() does exist in detection.rs, but the guided flow itself doesn't distinguish these cases. Minor observability gap."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/ffi/ssh.rs",
+        "line": 1293,
+        "severity": "non_blocking",
+        "description": "The val_guided_001 test verifies step ordering structurally (DetectingAgents before FindingCodex in ssh_bootstrap()), which is good. However, the test cannot verify the actual runtime insertion point — it only verifies the static bootstrap template. The comment acknowledges this is a 'code-review assertion'. This is acceptable given that unit-testing the actual SSH connect flow would require SSH infrastructure, but it's worth noting that the VAL-GUIDED-001 assertion relies on code inspection rather than automated verification."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The worker added new fields (detected_agents, pending_agent_selection) directly to AppConnectionProgressSnapshot as public Vec<AgentInfo> and bool. This follows the existing pattern where the snapshot is a uniffi::Record with public fields. However, the mutation pattern (direct field assignment like progress.detected_agents = ... and progress.pending_agent_selection = true) is different from how other fields are mutated via update_step(). The architecture.md in .factory/library/ doesn't document the convention for when to use direct field mutation vs method-based updates on the progress snapshot.",
+      "evidence": "ssh.rs:613-616 — direct field assignment to progress.detected_agents and progress.pending_agent_selection; compare to ssh.rs:587-590 where update_step() is used for step state changes"
+    },
+    {
+      "area": "skills",
+      "observation": "The rust-backend-worker skill says to 'Write Tests First (Red)' — create failing tests before implementation. The transcript shows the worker wrote tests after implementation (the implementation edits come first, then tests are added). The skillFeedback says followedProcedure: true, which is inaccurate. The deviation is minor (tests were still comprehensive and all pass) but the skill's TDD workflow was not followed.",
+      "evidence": "Transcript shows: Edit to ssh.rs (implementation) at sequence positions 8-14, then Edit to add tests at position 15. Skill Step 2 says 'Before ANY implementation: Create test cases'."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS with non-blocking observations. The implementation correctly wires detect_all_agents() into run_guided_ssh_connect() in the right position (after SSH auth, before Codex bootstrap). The three detection paths work as specified: only-Codex proceeds normally, multiple-agents populates progress for iOS picker and returns early, and detection failure falls through to Codex. All 1032 tests pass with 0 regressions. UniFFI types are properly derived. The non-blocking issues are: (1) multi-agent path tears down the SSH session requiring a new connection when iOS resumes, (2) no observability distinction between 'only Codex found' and 'detection error' in the guided flow log, and (3) VAL-GUIDED-001 relies on structural code inspection rather than runtime verification. The worker deviated from the skill's prescribed TDD workflow but produced comprehensive test coverage."
+}

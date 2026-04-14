@@ -1,0 +1,45 @@
+{
+  "featureId": "detection-in-provider-ssh-connect",
+  "reviewedAt": "2026-04-14T04:20:00.000Z",
+  "commitId": "3340822",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation correctly adds agent binary validation to the provider SSH connect path. `agent_binary_name()` maps PiNative/PiAcp → \"pi\", DroidNative/DroidAcp → \"droid\", with Codex and GenericAcp returning None (skipping validation). `validate_agent_binary_on_host()` runs `command -v <binary>` after SSH connects and before `create_provider_over_ssh()`. On failure, it returns a clear `TransportError::ConnectionFailed` with the agent name and binary, disconnects the SSH session, and updates store health to Disconnected. The placement in `connect_remote_over_ssh_with_agent_type()` (mod.rs ~line 813) is correct — between SSH connect success and provider factory invocation. SSH cleanup is handled consistently with the existing pattern (matching the factory failure path at ~line 840). 11 tests were added covering binary name mapping, error message format, validation flow, and graceful failure for both Pi and Droid agent types. All tests pass, clippy is clean.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/mobile_client/mod.rs",
+        "line": 2399,
+        "severity": "non_blocking",
+        "description": "When `ssh_client.exec()` returns `Ok(result)` with `exit_code == 0` but `stdout.trim()` is empty, the function logs a warning but still returns `Ok(())`, effectively treating it as a successful validation. This is a minor edge case — `command -v` on a POSIX system should always return a path on stdout when exit code is 0, but some non-standard shells or environments could behave differently. The current behavior (proceed and let the factory fail later) is reasonable as a fallback, but worth noting."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/mobile_client/tests.rs",
+        "line": 2386,
+        "severity": "non_blocking",
+        "description": "The VAL-PROVIDER-001/002/003 tests in tests.rs are structural/unit-level tests that verify function output mappings and error message format, but they don't test the full integration path through `validate_agent_binary_on_host()` with a mock SSH client (since the function is private and requires a real `SshClient`). The two async tests in ssh.rs (`provider_connect_task_fails_gracefully_for_pi_native` and `provider_connect_task_fails_gracefully_for_droid_native`) do exercise the end-to-end path but fail at the SSH connect stage (connecting to 127.0.0.1:22 with fake credentials), so they verify the failure-handling path rather than the binary validation path specifically. The tests are sufficient for the structural contract, but a future improvement could mock `SshClient::exec()` to directly test the binary-found vs. not-found branches."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/mobile_client/tests.rs",
+        "line": 2367,
+        "severity": "non_blocking",
+        "description": "Minor: `val_provider_003_validation_returns_ok_for_known_binary` has a comment with `//` (line comment) followed by a `*` on the next line — the doc comment opens with `///` but the second line starts with `//  flow:` (note the extra space, missing the third `/`). This doesn't affect compilation but is inconsistent with the other doc comments."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The error cleanup pattern (disconnect SSH + update_server_health to Disconnected + update_server_connection_progress to None) is repeated verbatim 3 times within `connect_remote_over_ssh_with_agent_type()` — after SSH connect failure, after binary validation failure, and after provider factory failure. This same pattern appears elsewhere in the codebase. A helper method on MobileClient could reduce this repetition, but AGENTS.md doesn't mention whether DRY cleanup helpers are preferred.",
+      "evidence": "shared/rust-bridge/codex-mobile-client/src/mobile_client/mod.rs lines 795-801, 813-819, 841-847 — three nearly identical error-cleanup blocks in the same function"
+    },
+    {
+      "area": "knowledge",
+      "observation": "The `command -v <binary> 2>/dev/null` pattern for probing remote binary availability is now used in two places: `validate_agent_binary_on_host()` and the detection functions (`detect_pi_agent`, `detect_droid_agent`) in the provider layer. This pattern could be documented in .factory/library/ as the standard way to probe for agent binaries over SSH, so future workers don't reinvent it or use different approaches (like `which`, `hash`, or `test -x`).",
+      "evidence": "validate_agent_binary_on_host() in mod.rs uses `command -v {binary_name} 2>/dev/null`; detection functions use similar patterns in provider/pi/detection.rs and provider/droid/detection.rs"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS. The implementation correctly adds agent binary validation between SSH connect and provider factory in `connect_remote_over_ssh_with_agent_type()`. The validation uses `command -v` to probe for the expected binary (pi/droid), returns a clear error message when not found, and cleanly disconnects the SSH session on failure. The placement ensures validation runs BEFORE `create_provider_over_ssh()`. Codex and GenericAcp correctly skip validation. 11 tests cover binary name mapping, error messages, and graceful failure. Minor non-blocking issues: empty-stdout edge case on successful exit code, integration tests only exercise the SSH-connect-failure path (not the binary-not-found branch directly), and a minor doc comment formatting inconsistency."
+}
