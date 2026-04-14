@@ -862,4 +862,154 @@ mod tests {
             other => panic!("expected Skipped or AgentResponse, got {other:?}"),
         }
     }
+
+    // ── VAL-ACP-050: NDJSON framing correct for all ACP messages ──────
+
+    /// Verify outgoing requests have proper NDJSON framing: jsonrpc field,
+    /// id field, method field, and no embedded newline.
+    #[test]
+    fn ndjson_framing_request_format() {
+        let init = ClientRequest::InitializeRequest(
+            agent_client_protocol_schema::InitializeRequest::new(
+                ProtocolVersion::V1,
+            ),
+        );
+        let id = RequestId::Number(42);
+        let line = serialize_client_request(&id, &init).unwrap();
+
+        // Must be valid JSON.
+        let parsed: serde_json::Value = serde_json::from_str(&line).unwrap();
+
+        // Must have jsonrpc 2.0.
+        assert_eq!(parsed["jsonrpc"], "2.0");
+
+        // Must have the request ID.
+        assert_eq!(parsed["id"], 42);
+
+        // Must have method.
+        assert_eq!(parsed["method"], "initialize");
+
+        // Must have params.
+        assert!(parsed["params"].is_object());
+
+        // Must not contain a newline (it's added by the write_line function).
+        assert!(!line.contains('\n'), "serialized line should not contain newline");
+    }
+
+    /// Verify outgoing notifications have no id field.
+    #[test]
+    fn ndjson_framing_notification_no_id() {
+        let cancel = ClientNotification::CancelNotification(
+            CancelNotification::new("test-session"),
+        );
+        let line = serialize_client_notification(&cancel).unwrap();
+
+        let parsed: serde_json::Value = serde_json::from_str(&line).unwrap();
+
+        assert_eq!(parsed["jsonrpc"], "2.0");
+        assert!(parsed.get("id").is_none(), "notifications should not have an id");
+        assert_eq!(parsed["method"], "session/cancel");
+        assert!(!line.contains('\n'));
+    }
+
+    /// Verify that method-aware deserialization works by checking a known
+    /// notification method resolves to the correct type.
+    #[test]
+    fn ndjson_framing_method_aware_deserialization() {
+        // session/update notifications should resolve to SessionNotification.
+        let update_line = make_session_update_line("s1");
+        let msg = decode_line(&update_line);
+        match msg {
+            IncomingMessage::AgentNotification(
+                AgentNotification::SessionNotification(_)
+            ) => {}
+            other => panic!("expected SessionNotification, got {other:?}"),
+        }
+    }
+
+    // ── VAL-ACP-051: Large messages handled without buffer overflow ───
+
+    /// Verify that a message close to MAX_LINE_LENGTH (256 KiB) is
+    /// processed correctly.
+    #[tokio::test]
+    async fn ndjson_large_message_near_max_length() {
+        // Create a message close to but under MAX_LINE_LENGTH.
+        let text = "x".repeat(250_000);
+        let json = serde_json::to_string(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "s1",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": { "type": "text", "text": text }
+                }
+            }
+        })).unwrap();
+
+        assert!(json.len() < MAX_LINE_LENGTH, "test message should be under limit");
+
+        let input = format!("{json}\n");
+        let cursor = io::Cursor::new(input.into_bytes());
+        let mut reader = NdjsonReader::new(cursor);
+
+        let msg = reader.next_message().await;
+        assert!(msg.is_ok(), "large message under limit should decode: {msg:?}");
+    }
+
+    /// Verify that a message exceeding MAX_LINE_LENGTH is rejected with
+    /// LineTooLong error.
+    #[tokio::test]
+    async fn ndjson_oversized_message_rejected() {
+        // Create a message over the default MAX_LINE_LENGTH.
+        let large_text = "y".repeat(300_000);
+        let json = serde_json::to_string(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "test",
+            "params": { "data": large_text }
+        })).unwrap();
+        let input = format!("{json}\n");
+        let cursor = io::Cursor::new(input.into_bytes());
+        let mut reader = NdjsonReader::new(cursor);
+
+        let result = reader.next_message().await;
+        match result {
+            Err(FramingError::LineTooLong { length, max }) => {
+                assert!(length > MAX_LINE_LENGTH, "length {length} should exceed max {max}");
+                assert_eq!(max, MAX_LINE_LENGTH);
+            }
+            other => panic!("expected LineTooLong, got {other:?}"),
+        }
+    }
+
+    // ── VAL-ACP-052: Binary/null bytes in stream handled gracefully ───
+
+    /// Verify that lines with null bytes are skipped and the stream continues.
+    #[test]
+    fn ndjson_null_bytes_in_line_skipped() {
+        let msg = decode_line("valid json\0but has null");
+        match msg {
+            IncomingMessage::Skipped { reason } => {
+                assert!(reason.contains("null byte"), "reason should mention null byte: {reason}");
+            }
+            _ => panic!("line with null bytes should be skipped"),
+        }
+    }
+
+    /// Verify that after binary garbage, valid lines still decode.
+    #[test]
+    fn ndjson_recovery_after_binary_garbage() {
+        // Binary garbage — use byte values that are valid in a Rust string
+        // but unlikely to be valid JSON.
+        let msg = decode_line("\x01\x02\x03");
+        assert!(matches!(msg, IncomingMessage::Skipped { .. }));
+
+        // Valid message after garbage.
+        let valid = make_session_update_line("s1");
+        let msg = decode_line(&valid);
+        assert!(
+            matches!(msg, IncomingMessage::AgentNotification(_)),
+            "valid line after binary garbage should decode: {msg:?}"
+        );
+    }
 }

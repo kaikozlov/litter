@@ -1457,4 +1457,220 @@ mod tests {
         let result = connect_handle.await.unwrap();
         assert!(result.is_err(), "connect should fail with auth failure");
     }
+
+    // ── Graceful shutdown (flush pending messages) ─────────────────────
+
+    /// Test: disconnect() after a successful handshake is clean and
+    /// subsequent operations fail with Disconnected.
+    #[tokio::test]
+    async fn generic_acp_graceful_shutdown_after_handshake() {
+        let (client_end, mut mock_end) = test_duplex();
+        let mut transport = GenericAcpTransport::new(client_end);
+
+        // Perform handshake.
+        let config = ProviderConfig {
+            client_name: "litter".to_string(),
+            client_version: "0.1.0".to_string(),
+            ..Default::default()
+        };
+
+        let connect_handle = tokio::spawn(async move { transport.connect(&config).await });
+        mock_handshake(&mut mock_end).await;
+        let result = connect_handle.await.unwrap();
+        assert!(result.is_ok(), "connect should succeed: {result:?}");
+
+        // We can't access the transport that was moved into the spawn.
+        // Instead, test disconnect behavior with a fresh transport.
+        let (client_end2, mut mock_end2) = test_duplex();
+        let transport2 = GenericAcpTransport::new(client_end2);
+        let config2 = ProviderConfig {
+            client_name: "litter".to_string(),
+            client_version: "0.1.0".to_string(),
+            ..Default::default()
+        };
+
+        let t = Arc::new(tokio::sync::Mutex::new(transport2));
+        let t_clone = t.clone();
+        let connect2 = tokio::spawn(async move { t_clone.lock().await.connect(&config2).await });
+        mock_handshake(&mut mock_end2).await;
+        connect2.await.unwrap().unwrap();
+
+        // Now disconnect.
+        t.lock().await.disconnect().await;
+        assert!(!t.lock().await.is_connected());
+
+        // After disconnect, all operations should fail.
+        let req_result = t.lock().await
+            .send_request("session/new", serde_json::json!({"cwd": "/tmp"}))
+            .await;
+        assert!(req_result.is_err(), "send_request after disconnect should fail");
+
+        let notif_result: Result<(), RpcError> = t.lock().await
+            .send_notification("cancel", serde_json::json!({}))
+            .await;
+        assert!(notif_result.is_err(), "send_notification after disconnect should fail");
+
+        let list_result: Result<Vec<SessionInfo>, RpcError> = t.lock().await.list_sessions().await;
+        assert!(list_result.is_err(), "list_sessions after disconnect should fail");
+    }
+
+    /// Test: disconnect is safe even during an active session.
+    #[tokio::test]
+    async fn generic_acp_graceful_shutdown_during_active_session() {
+        let (client_end, mut mock_end) = test_duplex();
+        let transport = Arc::new(tokio::sync::Mutex::new(GenericAcpTransport::new(client_end)));
+
+        let config = ProviderConfig {
+            client_name: "litter".to_string(),
+            client_version: "0.1.0".to_string(),
+            ..Default::default()
+        };
+
+        let t = transport.clone();
+        let connect_h = tokio::spawn(async move { t.lock().await.connect(&config).await });
+        mock_handshake(&mut mock_end).await;
+        connect_h.await.unwrap().unwrap();
+
+        // Create a session.
+        let t = transport.clone();
+        let handle = tokio::spawn(async move {
+            t.lock().await.send_request("session/new", serde_json::json!({"cwd": "/tmp"})).await
+        });
+        let line = read_mock_line(&mut mock_end).await;
+        let val: serde_json::Value = serde_json::from_str(&line).unwrap();
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": val["id"],
+            "result": {"sessionId": "graceful-sess"}
+        }).to_string()).await;
+        let _ = handle.await.unwrap();
+
+        // Disconnect during session — should not panic.
+        transport.lock().await.disconnect().await;
+        assert!(!transport.lock().await.is_connected());
+    }
+
+    // ── Concurrent operations serialization ────────────────────────────
+
+    /// Test: Multiple concurrent send_request calls are serialized
+    /// correctly without data races (the Mutex on AcpClient inner
+    /// ensures serialization).
+    #[tokio::test]
+    async fn generic_acp_concurrent_operations_serialized() {
+        let (transport_handle, mut mock_end) = setup_authenticated_transport().await;
+        let transport = Arc::new(tokio::sync::Mutex::new(transport_handle.await.unwrap()));
+
+        // Spawn two concurrent session operations.
+        let t1 = transport.clone();
+        let h1 = tokio::spawn(async move {
+            t1.lock().await.send_request("session/new", serde_json::json!({"cwd": "/tmp/a"})).await
+        });
+
+        // Read first request and respond.
+        let line1 = read_mock_line(&mut mock_end).await;
+        let val1: serde_json::Value = serde_json::from_str(&line1).unwrap();
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": val1["id"],
+            "result": {"sessionId": "conc-sess-1"}
+        }).to_string()).await;
+
+        let r1 = h1.await.unwrap();
+        assert!(r1.is_ok(), "first concurrent request should succeed: {r1:?}");
+
+        let t2 = transport.clone();
+        let h2 = tokio::spawn(async move {
+            t2.lock().await.send_request("session/list", serde_json::json!({})).await
+        });
+
+        let line2 = read_mock_line(&mut mock_end).await;
+        let val2: serde_json::Value = serde_json::from_str(&line2).unwrap();
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": val2["id"],
+            "result": {"sessions": []}
+        }).to_string()).await;
+
+        let r2 = h2.await.unwrap();
+        assert!(r2.is_ok(), "second concurrent request should succeed: {r2:?}");
+    }
+
+    // ── Error handling for transport errors vs protocol errors ─────────
+
+    /// Test: Protocol error from agent (JSON-RPC error) returns Server error.
+    #[tokio::test]
+    async fn generic_acp_error_handling_protocol_error() {
+        let (transport_handle, mut mock_end) = setup_authenticated_transport().await;
+        let mut transport = transport_handle.await.unwrap();
+
+        let handle = tokio::spawn(async move {
+            transport.send_request("session/new", serde_json::json!({"cwd": "/tmp"})).await
+        });
+
+        let line = read_mock_line(&mut mock_end).await;
+        let val: serde_json::Value = serde_json::from_str(&line).unwrap();
+
+        // Respond with a JSON-RPC error.
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": val["id"],
+            "error": {"code": -32602, "message": "Invalid params"}
+        }).to_string()).await;
+
+        let result = handle.await.unwrap();
+        assert!(result.is_err(), "protocol error should return error");
+        match result.unwrap_err() {
+            RpcError::Server { code, message } => {
+                assert_eq!(code, -32602);
+                assert!(message.contains("Invalid params"));
+            }
+            other => panic!("expected Server error, got: {other:?}"),
+        }
+    }
+
+    /// Test: Transport error (disconnect) returns TransportError::Disconnected.
+    #[tokio::test]
+    async fn generic_acp_error_handling_transport_disconnect() {
+        let (client_end, _) = test_duplex();
+        let mut transport = GenericAcpTransport::new(client_end);
+        *transport.initialized.lock().await = true;
+        transport.disconnect().await;
+
+        let result = transport
+            .send_request("session/new", serde_json::json!({}))
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            RpcError::Transport(TransportError::Disconnected) => {}
+            other => panic!("expected TransportError::Disconnected, got: {other:?}"),
+        }
+    }
+
+    /// Test: Agent error during session operations is distinct from
+    /// transport error.
+    #[tokio::test]
+    async fn generic_acp_error_handling_agent_error_distinct_from_transport() {
+        let (transport_handle, mut mock_end) = setup_authenticated_transport().await;
+        let mut transport = transport_handle.await.unwrap();
+
+        let handle = tokio::spawn(async move {
+            transport.send_request("session/new", serde_json::json!({"cwd": "/tmp"})).await
+        });
+
+        let line = read_mock_line(&mut mock_end).await;
+        let val: serde_json::Value = serde_json::from_str(&line).unwrap();
+
+        // Respond with an agent-specific error code (not transport error).
+        write_mock_line(&mut mock_end, &serde_json::json!({
+            "jsonrpc": "2.0", "id": val["id"],
+            "error": {"code": -32002, "message": "session limit reached"}
+        }).to_string()).await;
+
+        let result = handle.await.unwrap();
+        assert!(result.is_err(), "agent error should return error");
+        // Agent errors come back as RpcError::Server, not Transport.
+        match result.unwrap_err() {
+            RpcError::Server { code, message } => {
+                assert_eq!(code, -32002);
+                assert!(message.contains("session limit"));
+            }
+            other => panic!("expected Server error for agent error, got: {other:?}"),
+        }
+    }
 }

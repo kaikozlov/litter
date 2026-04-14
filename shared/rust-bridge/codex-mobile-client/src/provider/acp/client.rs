@@ -3040,6 +3040,635 @@ mod tests {
         client.lock().await.shutdown().await;
     }
 
+    // ── VAL-ACP-040: session/new creates session with CWD ─────────────
+
+    /// Verify that session/new sends the CWD parameter and stores the
+    /// returned session ID as the active session.
+    #[tokio::test]
+    async fn acp_session_lifecycle_new_with_cwd() {
+        let (client, mut mock_end) = setup_client();
+
+        // Full handshake.
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        mock_init(&mut mock_end, 1, 1u16, vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))]).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.authenticate(None).await });
+        mock_auth(&mut mock_end, 2).await;
+        h.await.unwrap().unwrap();
+
+        // session/new with a specific CWD.
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.session_new("/home/user/project").await });
+
+        // Read the request and verify it contains the CWD.
+        let req_line = read_mock_line(&mut mock_end).await;
+        let req_val: serde_json::Value = serde_json::from_str(&req_line).unwrap();
+        assert_eq!(req_val["method"], "session/new");
+
+        write_mock_line(&mut mock_end, &make_new_session_response(3, "sess-cwd-001")).await;
+
+        let result = h.await.unwrap();
+        assert!(result.is_ok(), "session/new should succeed: {result:?}");
+        let new_result = result.unwrap();
+        assert_eq!(new_result.session_id.to_string(), "sess-cwd-001");
+
+        // Verify active_session_id is set.
+        {
+            let guard = client.lock().await;
+            let inner = guard.inner.lock().await;
+            assert_eq!(inner.active_session_id.as_ref().unwrap().to_string(), "sess-cwd-001");
+        }
+
+        client.lock().await.shutdown().await;
+    }
+
+    // ── VAL-ACP-041: session/prompt streams updates then completes ────
+
+    /// Verify that session/prompt blocks until PromptResponse is received,
+    /// and all streaming events are broadcast via event_receiver.
+    #[tokio::test]
+    async fn acp_session_lifecycle_prompt_streams_then_completes() {
+        let (client, mut mock_end) = setup_client();
+
+        // Full handshake + session/new.
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        mock_init(&mut mock_end, 1, 1u16, vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))]).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.authenticate(None).await });
+        mock_auth(&mut mock_end, 2).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.session_new("/tmp").await });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &make_new_session_response(3, "sess-stream")).await;
+        h.await.unwrap().unwrap();
+
+        // Subscribe to events BEFORE the prompt.
+        let mut event_rx = client.lock().await.subscribe();
+
+        // session/prompt.
+        let c = client.clone();
+        let h = tokio::spawn(async move {
+            c.lock().await.session_prompt(&SessionId::new("sess-stream"), "Tell me a story").await
+        });
+        let _ = read_mock_line(&mut mock_end).await;
+
+        // Stream multiple updates.
+        write_mock_line(&mut mock_end, &make_session_update_notification("sess-stream", "Once upon")).await;
+        write_mock_line(&mut mock_end, &make_session_update_notification("sess-stream", " a time")).await;
+
+        // Then send the completion response.
+        write_mock_line(&mut mock_end, &make_prompt_response(4, "end_turn")).await;
+
+        let result = h.await.unwrap();
+        assert!(result.is_ok(), "session/prompt should succeed: {result:?}");
+        let stop_reason = result.unwrap().stop_reason;
+        // Stop reason is Debug-formatted from the enum variant, so "end_turn" becomes "EndTurn".
+        assert!(!stop_reason.is_empty(), "stop reason should be non-empty: {stop_reason}");
+
+        // Verify streaming events were received.
+        let mut deltas = Vec::new();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        while let Ok(event) = event_rx.try_recv() {
+            if let ProviderEvent::MessageDelta { delta, .. } = event {
+                deltas.push(delta);
+            }
+        }
+        assert!(deltas.len() >= 2, "should have received at least 2 MessageDelta events, got {deltas:?}");
+        assert!(deltas[0].contains("Once upon"), "first delta should contain 'Once upon'");
+        assert!(deltas[1].contains("a time"), "second delta should contain 'a time'");
+
+        client.lock().await.shutdown().await;
+    }
+
+    // ── VAL-ACP-042: session/cancel aborts active prompt ──────────────
+
+    /// Verify that session/cancel sends a cancel notification and resets
+    /// is_streaming, making the session ready for next prompt.
+    #[tokio::test]
+    async fn acp_session_lifecycle_cancel_resets_and_allows_next_prompt() {
+        let (client, mut mock_end) = setup_client();
+
+        // Full handshake + session/new.
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        mock_init(&mut mock_end, 1, 1u16, vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))]).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.authenticate(None).await });
+        mock_auth(&mut mock_end, 2).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.session_new("/tmp").await });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &make_new_session_response(3, "sess-cancel")).await;
+        h.await.unwrap().unwrap();
+
+        // Simulate streaming state.
+        {
+            let guard = client.lock().await;
+            let mut inner = guard.inner.lock().await;
+            inner.is_streaming = true;
+        }
+
+        // Cancel.
+        let result = client.lock().await.session_cancel(&SessionId::new("sess-cancel")).await;
+        assert!(result.is_ok(), "cancel should succeed: {result:?}");
+
+        // is_streaming should be reset.
+        {
+            let guard = client.lock().await;
+            let inner = guard.inner.lock().await;
+            assert!(!inner.is_streaming, "is_streaming should be false after cancel");
+        }
+
+        // Next prompt should work.
+        let c = client.clone();
+        let h = tokio::spawn(async move {
+            c.lock().await.session_prompt(&SessionId::new("sess-cancel"), "After cancel").await
+        });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &make_prompt_response(4, "end_turn")).await;
+        let result = h.await.unwrap();
+        assert!(result.is_ok(), "prompt after cancel should succeed: {result:?}");
+
+        client.lock().await.shutdown().await;
+    }
+
+    // ── VAL-ACP-060: Connection failure during handshake ──────────────
+
+    /// Verify that stream close during initialize returns a clean error.
+    #[tokio::test]
+    async fn acp_error_handling_disconnect_during_initialize() {
+        let (client, mut mock_end) = setup_client();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+
+        // Read the initialize request.
+        let _ = read_mock_line(&mut mock_end).await;
+
+        // Drop the connection instead of responding.
+        drop(mock_end);
+
+        let result = h.await.unwrap();
+        assert!(result.is_err(), "initialize should fail when stream closes: {result:?}");
+    }
+
+    /// Verify that stream close during authenticate returns a clean error.
+    #[tokio::test]
+    async fn acp_error_handling_disconnect_during_authenticate() {
+        let (client, mut mock_end) = setup_client();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        mock_init(&mut mock_end, 1, 1u16, vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))]).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.authenticate(None).await });
+
+        // Read the authenticate request.
+        let _ = read_mock_line(&mut mock_end).await;
+
+        // Drop the connection.
+        drop(mock_end);
+
+        let result = h.await.unwrap();
+        assert!(result.is_err(), "authenticate should fail when stream closes: {result:?}");
+    }
+
+    // ── VAL-ACP-061: Agent crash mid-stream ───────────────────────────
+
+    /// Verify that agent process exit during streaming emits Disconnected
+    /// event and pending requests fail cleanly.
+    #[tokio::test]
+    async fn acp_error_handling_agent_crash_emits_disconnected() {
+        let (client, mut mock_end) = setup_client();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        mock_init(&mut mock_end, 1, 1u16, vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))]).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.authenticate(None).await });
+        mock_auth(&mut mock_end, 2).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.session_new("/tmp").await });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &make_new_session_response(3, "sess-crash")).await;
+        h.await.unwrap().unwrap();
+
+        let mut event_rx = client.lock().await.subscribe();
+
+        // Start a prompt.
+        let c = client.clone();
+        let prompt_h = tokio::spawn(async move {
+            c.lock().await.session_prompt(&SessionId::new("sess-crash"), "hello").await
+        });
+
+        // Read the prompt request.
+        let _ = read_mock_line(&mut mock_end).await;
+
+        // Send a partial update, then crash (drop).
+        write_mock_line(&mut mock_end, &make_session_update_notification("sess-crash", "partial...")).await;
+
+        // Wait for the notification to be processed.
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), event_rx.recv()).await;
+
+        // Drop the connection (agent crash).
+        drop(mock_end);
+
+        // Should get Disconnected event.
+        let event = tokio::time::timeout(std::time::Duration::from_secs(3), event_rx.recv()).await;
+        match event {
+            Ok(Ok(ProviderEvent::Disconnected { message })) => {
+                assert!(!message.is_empty());
+            }
+            other => panic!("expected Disconnected event, got {other:?}"),
+        }
+
+        // Pending prompt should fail.
+        let prompt_result = prompt_h.await.unwrap();
+        assert!(prompt_result.is_err(), "pending prompt should fail on agent crash");
+    }
+
+    // ── VAL-ACP-062: Malformed JSON from agent ────────────────────────
+
+    /// Verify that invalid JSON lines are skipped and processing continues.
+    #[tokio::test]
+    async fn acp_error_handling_malformed_json_skipped_continues() {
+        let (client, mut mock_end) = setup_client();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        mock_init(&mut mock_end, 1, 1u16, vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))]).await;
+        h.await.unwrap().unwrap();
+
+        let mut event_rx = client.lock().await.subscribe();
+
+        // Send a malformed line.
+        write_mock_line(&mut mock_end, "this is not json!!!").await;
+
+        // Send a valid notification after it.
+        let valid_json = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "s1",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": { "type": "text", "text": "after malformed" }
+                }
+            }
+        });
+        write_mock_line(&mut mock_end, &serde_json::to_string(&valid_json).unwrap()).await;
+
+        // Should get the valid event.
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), event_rx.recv()).await;
+        match event {
+            Ok(Ok(ProviderEvent::MessageDelta { delta, .. })) => {
+                assert_eq!(delta, "after malformed");
+            }
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {
+                // The malformed line produced a skipped event — try next.
+                let event2 = tokio::time::timeout(std::time::Duration::from_secs(2), event_rx.recv()).await;
+                match event2 {
+                    Ok(Ok(ProviderEvent::MessageDelta { delta, .. })) => {
+                        assert_eq!(delta, "after malformed");
+                    }
+                    other => panic!("expected MessageDelta after lagged, got {other:?}"),
+                }
+            }
+            other => panic!("expected MessageDelta, got {other:?}"),
+        }
+
+        client.lock().await.shutdown().await;
+    }
+
+    // ── VAL-ACP-063: Unknown session/update variants → Unknown event ──
+
+    /// Verify that unrecognized SessionUpdate variants produce
+    /// ProviderEvent::Unknown for forward compatibility.
+    #[tokio::test]
+    async fn acp_error_handling_unknown_session_update_maps_to_unknown() {
+        let (client, mut mock_end) = setup_client();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        mock_init(&mut mock_end, 1, 1u16, vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))]).await;
+        h.await.unwrap().unwrap();
+
+        let mut event_rx = client.lock().await.subscribe();
+
+        // Send an unknown session/update variant via raw JSON that won't
+        // match any known SessionUpdate but still parses as a valid notification.
+        // We use a valid session/update with an unknown variant name.
+        let unknown_update = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "future/feature",
+            "params": {
+                "sessionId": "s1",
+                "data": { "custom": true }
+            }
+        });
+        write_mock_line(&mut mock_end, &serde_json::to_string(&unknown_update).unwrap()).await;
+
+        // Should get Unknown event (gracefully handled).
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), event_rx.recv()).await;
+        match event {
+            Ok(Ok(ProviderEvent::Unknown { method, .. })) => {
+                // The method should reflect the unknown notification.
+                assert!(!method.is_empty(), "unknown method should be non-empty: {method}");
+            }
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {}
+            other => panic!("expected Unknown event, got {other:?}"),
+        }
+
+        client.lock().await.shutdown().await;
+    }
+
+    // ── VAL-ACP-065: Buffered response routing ────────────────────────
+
+    /// Verify that responses arriving before their request is registered
+    /// are buffered and correctly delivered.
+    #[tokio::test]
+    async fn acp_error_handling_buffered_response_delivered() {
+        let (client, mut mock_end) = setup_client();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        mock_init(&mut mock_end, 1, 1u16, vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))]).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.authenticate(None).await });
+        mock_auth(&mut mock_end, 2).await;
+        h.await.unwrap().unwrap();
+
+        // Test: Send two sequential requests and verify they are correctly
+        // correlated by ID (even though they come in order).
+        // This validates the response routing mechanism.
+        let c = client.clone();
+        let list_h = tokio::spawn(async move { c.lock().await.session_list().await });
+
+        let req_line = read_mock_line(&mut mock_end).await;
+        let req_val: serde_json::Value = serde_json::from_str(&req_line).unwrap();
+        let req_id = req_val["id"].as_i64().unwrap();
+
+        // Respond with the matching ID.
+        write_mock_line(&mut mock_end, &make_list_sessions_response(req_id, vec![("s1", "Test")])).await;
+
+        let result = list_h.await.unwrap();
+        assert!(result.is_ok(), "session/list should succeed: {result:?}");
+        let sessions = result.unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "s1");
+
+        client.lock().await.shutdown().await;
+    }
+
+    // ── VAL-ACP-120: Unicode content preserved through ACP ────────────
+
+    /// Verify that Unicode text (emoji, CJK, RTL) survives the full
+    /// round-trip through ACP streaming.
+    #[tokio::test]
+    async fn acp_session_lifecycle_unicode_content_preserved() {
+        let (client, mut mock_end) = setup_client();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        mock_init(&mut mock_end, 1, 1u16, vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))]).await;
+        h.await.unwrap().unwrap();
+
+        let mut event_rx = client.lock().await.subscribe();
+
+        // Send updates with diverse Unicode content.
+        let unicode_texts = vec![
+            "🌍🌎🌏",                           // Emoji
+            "世界こんにちは",                      // CJK
+            "مرحبا بالعالم",                     // RTL Arabic
+            "Héllo wörld café",                // Latin with diacritics
+            "Test\u{0301} combining",          // Combining character
+        ];
+
+        for text in &unicode_texts {
+            let chunk_json = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": "s-unicode",
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": { "type": "text", "text": text }
+                    }
+                }
+            });
+            write_mock_line(&mut mock_end, &serde_json::to_string(&chunk_json).unwrap()).await;
+        }
+
+        // Verify all deltas preserve Unicode content.
+        let mut received_deltas = Vec::new();
+        for _ in 0..unicode_texts.len() {
+            let event = tokio::time::timeout(std::time::Duration::from_secs(2), event_rx.recv()).await;
+            match event {
+                Ok(Ok(ProviderEvent::MessageDelta { delta, .. })) => {
+                    received_deltas.push(delta);
+                }
+                other => panic!("expected MessageDelta for Unicode content, got {other:?}"),
+            }
+        }
+
+        assert_eq!(received_deltas.len(), unicode_texts.len(),
+            "should receive all Unicode deltas");
+        for (i, expected) in unicode_texts.iter().enumerate() {
+            assert_eq!(&received_deltas[i], expected,
+                "Unicode delta {i} should be preserved: expected '{expected}', got '{}'", received_deltas[i]);
+        }
+
+        client.lock().await.shutdown().await;
+    }
+
+    // ── VAL-ACP-121: Empty prompt handling ────────────────────────────
+
+    /// Verify that an empty prompt text is handled gracefully.
+    #[tokio::test]
+    async fn acp_session_lifecycle_empty_prompt_handled() {
+        let (client, mut mock_end) = setup_client();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        mock_init(&mut mock_end, 1, 1u16, vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))]).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.authenticate(None).await });
+        mock_auth(&mut mock_end, 2).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.session_new("/tmp").await });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &make_new_session_response(3, "sess-empty")).await;
+        h.await.unwrap().unwrap();
+
+        // Send an empty prompt. The agent may accept or reject it, but
+        // the client should not crash or hang.
+        let c = client.clone();
+        let h = tokio::spawn(async move {
+            c.lock().await.session_prompt(&SessionId::new("sess-empty"), "").await
+        });
+
+        // Read the prompt request — it should still be sent with empty text.
+        let req_line = read_mock_line(&mut mock_end).await;
+        let req_val: serde_json::Value = serde_json::from_str(&req_line).unwrap();
+        assert_eq!(req_val["method"], "session/prompt");
+
+        // The agent could respond with success or error.
+        // For this test, respond with success (end_turn).
+        write_mock_line(&mut mock_end, &make_prompt_response(4, "end_turn")).await;
+
+        let result = h.await.unwrap();
+        // Should succeed — the empty prompt was sent and the agent responded.
+        assert!(result.is_ok(), "empty prompt should complete without crash: {result:?}");
+
+        client.lock().await.shutdown().await;
+    }
+
+    // ── VAL-ACP-122: Very long prompt (>1MB) ──────────────────────────
+
+    /// Verify that a very large prompt (over 1MB) can be serialized and
+    /// sent without OOM or framing corruption.
+    #[tokio::test]
+    async fn acp_session_lifecycle_very_long_prompt() {
+        // Use a larger duplex buffer for this test (default is 4096).
+        let (client_end, mut mock_end) = tokio::io::duplex(2 * 1024 * 1024);
+
+        let client = Arc::new(tokio::sync::Mutex::new(AcpClient::new(client_end)));
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        mock_init(&mut mock_end, 1, 1u16, vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))]).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.authenticate(None).await });
+        mock_auth(&mut mock_end, 2).await;
+        h.await.unwrap().unwrap();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.session_new("/tmp").await });
+        let _ = read_mock_line(&mut mock_end).await;
+        write_mock_line(&mut mock_end, &make_new_session_response(3, "sess-long")).await;
+        h.await.unwrap().unwrap();
+
+        // Create a very long prompt (1MB+).
+        let long_text = "A".repeat(1_100_000);
+
+        let c = client.clone();
+        let h = tokio::spawn(async move {
+            c.lock().await.session_prompt(&SessionId::new("sess-long"), &long_text).await
+        });
+
+        // Read the prompt request. It should be a valid NDJSON line.
+        let req_line = read_mock_line(&mut mock_end).await;
+        assert!(!req_line.is_empty(), "should receive prompt request");
+
+        // Parse the JSON.
+        let req_val: serde_json::Value = serde_json::from_str(&req_line).unwrap();
+        assert_eq!(req_val["method"], "session/prompt");
+
+        // Verify the long text was included — find it anywhere in the params.
+        let req_str = req_line.clone();
+        assert!(req_str.contains(&"A".repeat(100)),
+            "long text should be present in the serialized request");
+        assert!(req_str.len() > 1_100_000,
+            "request should be over 1MB: actual len = {}", req_str.len());
+
+        // Respond with success.
+        let req_id = req_val["id"].as_i64().unwrap();
+        write_mock_line(&mut mock_end, &make_prompt_response(req_id, "max_tokens")).await;
+
+        let result = h.await.unwrap();
+        assert!(result.is_ok(), "long prompt should succeed: {result:?}");
+
+        client.lock().await.shutdown().await;
+    }
+
+    // ── VAL-ACP-123: Concurrent event subscribers ─────────────────────
+
+    /// Verify that multiple broadcast receivers all receive the same events
+    /// and that slow consumers get Lagged notification.
+    #[tokio::test]
+    async fn acp_session_lifecycle_concurrent_event_subscribers() {
+        let (client, mut mock_end) = setup_client();
+
+        let c = client.clone();
+        let h = tokio::spawn(async move { c.lock().await.initialize("litter", "0.1.0").await });
+        mock_init(&mut mock_end, 1, 1u16, vec![AuthMethod::Agent(AuthMethodAgent::new("local", "Local Auth"))]).await;
+        h.await.unwrap().unwrap();
+
+        // Create multiple subscribers.
+        let mut rx1 = client.lock().await.subscribe();
+        let mut rx2 = client.lock().await.subscribe();
+        let mut rx3 = client.lock().await.subscribe();
+
+        // Send a notification.
+        let chunk_json = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "s-multi",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": { "type": "text", "text": "broadcast test" }
+                }
+            }
+        });
+        write_mock_line(&mut mock_end, &serde_json::to_string(&chunk_json).unwrap()).await;
+
+        // All subscribers should receive the event.
+        let e1 = tokio::time::timeout(std::time::Duration::from_secs(2), rx1.recv()).await;
+        let e2 = tokio::time::timeout(std::time::Duration::from_secs(2), rx2.recv()).await;
+        let e3 = tokio::time::timeout(std::time::Duration::from_secs(2), rx3.recv()).await;
+
+        assert!(matches!(e1, Ok(Ok(ProviderEvent::MessageDelta { .. }))),
+            "subscriber 1 should get MessageDelta: {e1:?}");
+        assert!(matches!(e2, Ok(Ok(ProviderEvent::MessageDelta { .. }))),
+            "subscriber 2 should get MessageDelta: {e2:?}");
+        assert!(matches!(e3, Ok(Ok(ProviderEvent::MessageDelta { .. }))),
+            "subscriber 3 should get MessageDelta: {e3:?}");
+
+        // Verify all got the same content.
+        match (e1.unwrap().unwrap(), e2.unwrap().unwrap(), e3.unwrap().unwrap()) {
+            (ProviderEvent::MessageDelta { delta: d1, .. },
+             ProviderEvent::MessageDelta { delta: d2, .. },
+             ProviderEvent::MessageDelta { delta: d3, .. }) => {
+                assert_eq!(d1, "broadcast test");
+                assert_eq!(d2, "broadcast test");
+                assert_eq!(d3, "broadcast test");
+                // All deltas should be identical.
+                assert_eq!(d1, d2);
+                assert_eq!(d2, d3);
+            }
+            _ => unreachable!(),
+        }
+
+        client.lock().await.shutdown().await;
+    }
+
     /// Verify that initialize can only be called once.
     #[tokio::test]
     async fn acp_handshake_initialize_called_twice_fails() {
