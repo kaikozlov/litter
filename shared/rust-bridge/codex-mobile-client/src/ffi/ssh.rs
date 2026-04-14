@@ -648,7 +648,7 @@ async fn run_guided_ssh_connect(
 
     // ── Codex Bootstrap ────────────────────────────────────────────────
     progress.update_step(
-        AppConnectionStepKind::FindingCodex,
+        AppConnectionStepKind::FindingAgent,
         AppConnectionStepState::InProgress,
         None,
     );
@@ -673,12 +673,12 @@ async fn run_guided_ssh_connect(
                 binary.path()
             );
             progress.update_step(
-                AppConnectionStepKind::FindingCodex,
+                AppConnectionStepKind::FindingAgent,
                 AppConnectionStepState::Completed,
                 Some(binary.path().to_string()),
             );
             progress.update_step(
-                AppConnectionStepKind::InstallingCodex,
+                AppConnectionStepKind::InstallingAgent,
                 AppConnectionStepState::Cancelled,
                 Some("Already installed".to_string()),
             );
@@ -695,7 +695,7 @@ async fn run_guided_ssh_connect(
             );
             progress.pending_install = true;
             progress.update_step(
-                AppConnectionStepKind::FindingCodex,
+                AppConnectionStepKind::FindingAgent,
                 AppConnectionStepState::AwaitingUserInput,
                 Some("Codex not found on remote host".to_string()),
             );
@@ -719,12 +719,12 @@ async fn run_guided_ssh_connect(
             progress.pending_install = false;
             if !should_install {
                 progress.update_step(
-                    AppConnectionStepKind::FindingCodex,
+                    AppConnectionStepKind::FindingAgent,
                     AppConnectionStepState::Failed,
                     Some("Install declined".to_string()),
                 );
                 progress.update_step(
-                    AppConnectionStepKind::InstallingCodex,
+                    AppConnectionStepKind::InstallingAgent,
                     AppConnectionStepState::Cancelled,
                     Some("Install declined".to_string()),
                 );
@@ -740,12 +740,12 @@ async fn run_guided_ssh_connect(
             }
 
             progress.update_step(
-                AppConnectionStepKind::FindingCodex,
+                AppConnectionStepKind::FindingAgent,
                 AppConnectionStepState::Completed,
                 Some("Installing latest stable release".to_string()),
             );
             progress.update_step(
-                AppConnectionStepKind::InstallingCodex,
+                AppConnectionStepKind::InstallingAgent,
                 AppConnectionStepState::InProgress,
                 None,
             );
@@ -771,7 +771,7 @@ async fn run_guided_ssh_connect(
                 installed_binary.path()
             );
             progress.update_step(
-                AppConnectionStepKind::InstallingCodex,
+                AppConnectionStepKind::InstallingAgent,
                 AppConnectionStepState::Completed,
                 Some(installed_binary.path().to_string()),
             );
@@ -783,7 +783,7 @@ async fn run_guided_ssh_connect(
     };
 
     progress.update_step(
-        AppConnectionStepKind::StartingAppServer,
+        AppConnectionStepKind::StartingAgent,
         AppConnectionStepState::InProgress,
         None,
     );
@@ -810,7 +810,7 @@ async fn run_guided_ssh_connect(
     );
 
     progress.update_step(
-        AppConnectionStepKind::StartingAppServer,
+        AppConnectionStepKind::StartingAgent,
         AppConnectionStepState::Completed,
         Some(format!("Remote port {}", bootstrap.server_port)),
     );
@@ -944,8 +944,8 @@ fn is_non_codex_agent(agent_type: Option<AgentType>) -> bool {
 /// Connect to a remote server over SSH using the provider factory path
 /// for non-Codex agent types (Pi, Droid, ACP).
 ///
-/// This skips all Codex-specific bootstrap steps (FindingCodex, InstallingCodex,
-/// StartingAppServer, OpeningTunnel) and delegates directly to
+/// This skips all Codex-specific bootstrap steps (FindingAgent, InstallingAgent,
+/// StartingAgent, OpeningTunnel) and delegates directly to
 /// `MobileClient::connect_remote_over_ssh_with_agent_type`.
 async fn run_provider_ssh_connect(
     mobile_client: Arc<crate::MobileClient>,
@@ -1278,7 +1278,7 @@ mod tests {
     #[test]
     fn val_guided_001_detection_after_ssh_before_codex_verified() {
         // Structural test: verify that the detection-related step kind
-        // exists and appears before FindingCodex in the bootstrap sequence.
+        // exists and appears before FindingAgent in the bootstrap sequence.
         let progress = AppConnectionProgressSnapshot::ssh_bootstrap();
         let step_kinds: Vec<_> = progress.steps.iter().map(|s| s.kind).collect();
 
@@ -1287,7 +1287,7 @@ mod tests {
             .position(|k| *k == AppConnectionStepKind::DetectingAgents);
         let finding_codex_pos = step_kinds
             .iter()
-            .position(|k| *k == AppConnectionStepKind::FindingCodex);
+            .position(|k| *k == AppConnectionStepKind::FindingAgent);
 
         assert!(
             detecting_pos.is_some(),
@@ -1295,11 +1295,11 @@ mod tests {
         );
         assert!(
             finding_codex_pos.is_some(),
-            "FindingCodex step must exist in bootstrap progress"
+            "FindingAgent step must exist in bootstrap progress"
         );
         assert!(
             detecting_pos.unwrap() < finding_codex_pos.unwrap(),
-            "DetectingAgents must appear before FindingCodex in the step sequence"
+            "DetectingAgents must appear before FindingAgent in the step sequence"
         );
     }
 
@@ -1323,11 +1323,11 @@ mod tests {
         assert!(!progress.pending_agent_selection);
         assert!(progress.detected_agents.is_empty());
 
-        // FindingCodex should still be Pending (not yet started)
+        // FindingAgent should still be Pending (not yet started)
         let finding_step = progress
             .steps
             .iter()
-            .find(|s| s.kind == AppConnectionStepKind::FindingCodex)
+            .find(|s| s.kind == AppConnectionStepKind::FindingAgent)
             .unwrap();
         assert_eq!(finding_step.state, AppConnectionStepState::Pending);
     }
@@ -1391,11 +1391,11 @@ mod tests {
         assert!(!progress.pending_agent_selection);
         assert!(progress.detected_agents.is_empty());
 
-        // Should be able to continue to FindingCodex
+        // Should be able to continue to FindingAgent
         let finding_step = progress
             .steps
             .iter()
-            .find(|s| s.kind == AppConnectionStepKind::FindingCodex)
+            .find(|s| s.kind == AppConnectionStepKind::FindingAgent)
             .unwrap();
         assert_eq!(finding_step.state, AppConnectionStepState::Pending);
     }
@@ -1406,7 +1406,7 @@ mod tests {
     // 1. When agent_type is None/Codex, the guided path is selected (unchanged routing)
     // 2. detect_all_agents() always includes Codex, so if no Pi/Droid found,
     //    has_multiple_agents() returns false → normal Codex bootstrap proceeds
-    // 3. The DetectingAgents step is completed and the flow continues to FindingCodex
+    // 3. The DetectingAgents step is completed and the flow continues to FindingAgent
     #[test]
     fn val_guided_005_codex_flow_has_detection_step_in_bootstrap() {
         let progress = AppConnectionProgressSnapshot::ssh_bootstrap();

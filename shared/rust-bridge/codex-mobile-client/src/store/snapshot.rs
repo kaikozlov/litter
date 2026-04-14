@@ -15,9 +15,9 @@ use crate::types::{AppVoiceSessionPhase, AppVoiceTranscriptEntry};
 pub enum AppConnectionStepKind {
     ConnectingToSsh,
     DetectingAgents,
-    FindingCodex,
-    InstallingCodex,
-    StartingAppServer,
+    FindingAgent,
+    InstallingAgent,
+    StartingAgent,
     OpeningTunnel,
     Connected,
 }
@@ -68,17 +68,17 @@ impl AppConnectionProgressSnapshot {
                     detail: None,
                 },
                 AppConnectionStepSnapshot {
-                    kind: AppConnectionStepKind::FindingCodex,
+                    kind: AppConnectionStepKind::FindingAgent,
                     state: AppConnectionStepState::Pending,
                     detail: None,
                 },
                 AppConnectionStepSnapshot {
-                    kind: AppConnectionStepKind::InstallingCodex,
+                    kind: AppConnectionStepKind::InstallingAgent,
                     state: AppConnectionStepState::Pending,
                     detail: None,
                 },
                 AppConnectionStepSnapshot {
-                    kind: AppConnectionStepKind::StartingAppServer,
+                    kind: AppConnectionStepKind::StartingAgent,
                     state: AppConnectionStepState::Pending,
                     detail: None,
                 },
