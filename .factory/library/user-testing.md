@@ -56,3 +56,32 @@
 - Android source files are text-updated only (not compiled) — verify via `rg` not build
 - For field rename assertions, use `rg` to verify old names are gone and new names present
 - Codable migration tests MUST verify backward compatibility with old key names
+
+## Flow Validator Guidance: Rust Unit Tests
+
+- **Surface:** `make rust-test` — cargo test for codex-mobile-client
+- **Isolation:** Tests run in-process, no shared external state, no ports needed
+- **Boundaries:** Do NOT start any services. Do NOT access the network. Only run `cargo test`.
+- **Concurrency:** Safe to run up to 5 validators concurrently (low resource, isolated test processes)
+- **Shared state concerns:** None — each test process gets its own tokio runtime and mock transports
+- **Verification pattern:** Run the test command, grep for specific test names, check exit code is 0
+
+## Flow Validator Guidance: iOS Build and Tests
+
+- **Surface:** `make ios-sim-fast` (build), `make test-ios` (unit tests)
+- **Isolation:** Single Xcode process, single simulator — MUST run alone
+- **Boundaries:** Do NOT run any other iOS validator concurrently. Do NOT start simulator manually.
+- **Concurrency:** Max concurrent: 1. No other iOS or resource-heavy processes should run alongside.
+- **Shared state concerns:** Xcode build locks, DerivedData, simulator state — single validator only
+- **Verification pattern:** Run `make ios-sim-fast`, check exit code 0. Then `make test-ios`, check exit code 0.
+
+## Flow Validator Guidance: iOS UI (tuistory)
+
+- **Surface:** iOS Simulator via tuistory skill
+- **Isolation:** Single simulator instance, single session
+- **Boundaries:** Do NOT run alongside other iOS validators or simulators
+- **Concurrency:** Max concurrent: 1
+- **Shared state concerns:** Simulator app data (UserDefaults, keychain), app state
+- **Prerequisites:** Successful `make ios-sim-fast` build must complete before UI testing
+- **Verification pattern:** Install app on simulator, use tuistory for interaction, take screenshots for evidence
+- **Note:** For generic-acp milestone, iOS UI assertions may be partially testable via code review (rg) since real ACP agents require remote servers

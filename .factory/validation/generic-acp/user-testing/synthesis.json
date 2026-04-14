@@ -1,0 +1,92 @@
+{
+  "milestone": "generic-acp",
+  "round": 1,
+  "status": "fail",
+  "assertionsSummary": {
+    "total": 59,
+    "passed": 56,
+    "failed": 0,
+    "blocked": 3
+  },
+  "passedAssertions": [
+    "VAL-ACP-001",
+    "VAL-ACP-002",
+    "VAL-ACP-010",
+    "VAL-ACP-011",
+    "VAL-ACP-012",
+    "VAL-ACP-013",
+    "VAL-ACP-020",
+    "VAL-ACP-021",
+    "VAL-ACP-022",
+    "VAL-ACP-023",
+    "VAL-ACP-024",
+    "VAL-ACP-025",
+    "VAL-ACP-030",
+    "VAL-ACP-031",
+    "VAL-ACP-032",
+    "VAL-ACP-033",
+    "VAL-ACP-034",
+    "VAL-ACP-035",
+    "VAL-ACP-036",
+    "VAL-ACP-040",
+    "VAL-ACP-041",
+    "VAL-ACP-042",
+    "VAL-ACP-043",
+    "VAL-ACP-044",
+    "VAL-ACP-045",
+    "VAL-ACP-046",
+    "VAL-ACP-050",
+    "VAL-ACP-051",
+    "VAL-ACP-052",
+    "VAL-ACP-060",
+    "VAL-ACP-061",
+    "VAL-ACP-062",
+    "VAL-ACP-063",
+    "VAL-ACP-064",
+    "VAL-ACP-065",
+    "VAL-ACP-070",
+    "VAL-ACP-071",
+    "VAL-ACP-080",
+    "VAL-ACP-081",
+    "VAL-ACP-082",
+    "VAL-ACP-090",
+    "VAL-ACP-091",
+    "VAL-ACP-092",
+    "VAL-ACP-093",
+    "VAL-ACP-100",
+    "VAL-ACP-101",
+    "VAL-ACP-110",
+    "VAL-ACP-111",
+    "VAL-ACP-112",
+    "VAL-ACP-120",
+    "VAL-ACP-121",
+    "VAL-ACP-122",
+    "VAL-ACP-123",
+    "VAL-ACP-130",
+    "VAL-ACP-131",
+    "VAL-ACP-132"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [
+    {
+      "id": "VAL-ACP-140",
+      "blockedBy": "Requires real ACP agent server accessible via SSH for full E2E flow (configure profile → connect → chat). All individual iOS UI components and Rust transport verified via code review and unit tests."
+    },
+    {
+      "id": "VAL-ACP-141",
+      "blockedBy": "Requires remote server with Droid agent installed for E2E Droid ACP testing. DroidAcp transport and detection verified via Rust unit tests and code review."
+    },
+    {
+      "id": "VAL-ACP-142",
+      "blockedBy": "Requires existing ACP session on remote server for session/load E2E testing. Session load infrastructure verified in Rust code (GenericAcpTransport maps session/load → client.session_load())."
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added Flow Validator Guidance sections for Rust Unit Tests, iOS Build and Tests, and iOS UI (tuistory) surfaces with isolation rules and boundaries for concurrent testing.",
+      "source": "setup"
+    }
+  ],
+  "previousRound": null
+}

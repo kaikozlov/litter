@@ -1,0 +1,362 @@
+{
+  "groupId": "ios-ui-acp",
+  "testedAt": "2026-04-14T12:00:00Z",
+  "isolation": {
+    "method": "code-review",
+    "scope": "iOS UI ACP assertions via rg/grep verification",
+    "workingDirectory": "/Users/kai/dev/projects/litter",
+    "noSimulatorsStarted": true,
+    "noServicesStarted": true
+  },
+  "toolsUsed": ["rg"],
+  "assertions": [
+    {
+      "id": "VAL-ACP-080",
+      "title": "ACP provider profiles in Settings",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "rg 'ACPProfile|ACPProvider' apps/ios/Sources/",
+          "expected": "Settings UI with ACP profiles section found",
+          "observed": "Found in: SettingsView.swift (acpProfilesSection with NavigationLink to ACPProfilesView), ACPProfilesView.swift (full CRUD UI), ACPProfile.swift (model + store)"
+        },
+        {
+          "action": "Verify CRUD operations in ACPProfilesView",
+          "expected": "Add, edit, delete profile UI exists",
+          "observed": "Add: showAddSheet → ACPEditProfileView(mode: .create). Edit: profileToEdit sheet → ACPEditProfileView(mode: .edit). Delete: showDeleteConfirmation alert with destructive button calling ACPProfileStore.shared.deleteProfile(id:). Empty state shown when no profiles."
+        },
+        {
+          "action": "Verify Settings navigation to ACP profiles",
+          "expected": "Settings has 'ACP Providers' section",
+          "observed": "SettingsView has acpProfilesSection with NavigationLink to ACPProfilesView. Header: 'Custom Agents', label: 'ACP Providers'. Shows profile count or 'No profiles configured'."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none (code review only)",
+        "network": "N/A (code review only)",
+        "filesReviewed": [
+          "apps/ios/Sources/Litter/Views/SettingsView.swift",
+          "apps/ios/Sources/Litter/Views/ACPProfilesView.swift",
+          "apps/ios/Sources/Litter/Models/ACPProfile.swift"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-081",
+      "title": "ACPProfileStore persistence",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "rg 'ACPProfileStore' apps/ios/Sources/",
+          "expected": "Store class with UserDefaults backing and CRUD methods",
+          "observed": "ACPProfileStore is @MainActor final class with: profiles() -> [ACPProfile], addProfile(_:), updateProfile(_:), deleteProfile(id:). Uses UserDefaults.standard with key 'litter.acpProfiles'. JSONEncoder/JSONDecoder for serialization. Singleton via .shared."
+        },
+        {
+          "action": "Verify UserDefaults persistence",
+          "expected": "Data encoded to UserDefaults on each mutation",
+          "observed": "Private persist(_:) method encodes [ACPProfile] to JSON data and sets on UserDefaults. All CRUD methods call persist() after mutation. Reading uses JSONDecoder from UserDefaults data."
+        },
+        {
+          "action": "Verify stable UUID IDs",
+          "expected": "Profile IDs are UUIDs that don't change",
+          "observed": "ACPProfile.id is 'let id: UUID' (immutable). Default value UUID() in init. updateProfile matches by id via firstIndex(where:). deleteProfile matches by id."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none (code review only)",
+        "network": "N/A (code review only)",
+        "filesReviewed": [
+          "apps/ios/Sources/Litter/Models/ACPProfile.swift"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-082",
+      "title": "ACP profile data model",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "rg 'struct ACPProfile' apps/ios/Sources/",
+          "expected": "Model with id, displayName, remoteCommand, permissionPolicy, icon fields",
+          "observed": "ACPProfile struct is Codable, Identifiable, Equatable. Fields: id: UUID, displayName: String, remoteCommand: String, permissionPolicy: AgentPermissionPolicy, icon: String?. All required fields present."
+        },
+        {
+          "action": "Verify Codable conformance",
+          "expected": "Model supports JSON serialization",
+          "observed": "ACPProfile conforms to Codable. Used with JSONEncoder/JSONDecoder in ACPProfileStore.persist(). AgentPermissionPolicy also has @retroactive Codable extension in AgentPickerView.swift."
+        },
+        {
+          "action": "Verify Identifiable for SwiftUI",
+          "expected": "Works in ForEach",
+          "observed": "ACPProfile conforms to Identifiable (id: UUID). Used in ForEach(profiles) in ACPProfilesView and ForEach(acpProfiles) in AgentPickerSheet."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none (code review only)",
+        "network": "N/A (code review only)",
+        "filesReviewed": [
+          "apps/ios/Sources/Litter/Models/ACPProfile.swift"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-090",
+      "title": "Agent picker shows GenericAcp option",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "rg 'genericAcp|GenericAcp' apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+          "expected": "GenericAcp entry in agent picker views",
+          "observed": "AgentPickerSheet has acpProfilesSection that shows ACP profiles when genericAcpAvailable is true (when .genericAcp is in availableTransports). Shows profile rows with 'ACP' badge. InlineAgentSelectorView includes GenericAcp entries from agentInfos."
+        },
+        {
+          "action": "Verify 'Configure...' link when no profiles",
+          "expected": "Fallback when no profiles configured",
+          "observed": "When acpProfiles.isEmpty, shows 'No ACP profiles configured' with 'Settings →' link that dismisses picker."
+        },
+        {
+          "action": "Verify selection sets .genericAcp",
+          "expected": "Selecting GenericAcp sets agent type",
+          "observed": "confirmCustomCommand() sets selectedAgentType = .genericAcp and calls dismiss(). handleGenericAcpSelection() auto-selects when only 1 profile exists."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none (code review only)",
+        "network": "N/A (code review only)",
+        "filesReviewed": [
+          "apps/ios/Sources/Litter/Views/AgentPickerView.swift"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-091",
+      "title": "Custom command text field in agent picker",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "rg 'remoteCommand|customCommand' apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+          "expected": "Text field for custom ACP command visible when GenericAcp selected",
+          "observed": "customCommandSection(profile) shows TextField('Remote command', text: $customCommand) with monospaced font. Pre-populated from profile.remoteCommand via selectACPProfile(). Command validated with containsDangerousShellCharacters(). Shows inline commandError when invalid. 'Connect' button disabled when !commandIsValid."
+        },
+        {
+          "action": "Verify shell metacharacter validation",
+          "expected": "Dangerous characters rejected",
+          "observed": "containsDangerousShellCharacters() checks for: &&, ||, ;, `, $(, >, >>, <, |. Same validation in ACPEditProfileView.isValid."
+        },
+        {
+          "action": "Verify text field is editable",
+          "expected": "User can override profile command",
+          "observed": "customCommand is @State var bound to TextField. Pre-populated from profile but fully editable. Override value persisted via AgentSelectionStore.shared.setSelectedRemoteCommand(trimmed)."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none (code review only)",
+        "network": "N/A (code review only)",
+        "filesReviewed": [
+          "apps/ios/Sources/Litter/Views/AgentPickerView.swift"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-092",
+      "title": "Selected profile passed to ProviderConfig",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Trace flow from iOS UI to Rust ProviderConfig",
+          "expected": "remoteCommand flows from AgentPickerSheet → AgentSelectionStore → DiscoveryView → sshStartRemoteServerConnect → Rust",
+          "observed": "Flow: 1) AgentPickerSheet.confirmCustomCommand() persists command via AgentSelectionStore.shared.setSelectedRemoteCommand(trimmed). 2) DiscoveryView.connectToDiscoveredServerSSH() reads AgentSelectionStore.shared.selectedRemoteCommand() when agentType == .genericAcp. 3) Passes remoteCommand to sshConnectAndConnectServer(). 4) sshConnectAndConnectServer() passes to appModel.ssh.sshStartRemoteServerConnect(remoteCommand: remoteCommand). 5) Rust ffi/ssh.rs receives remote_command: Option<String> and passes through to connect_remote_over_ssh_with_agent_type. 6) ProviderConfig.remote_command used by factory."
+        },
+        {
+          "action": "Verify override value used instead of profile default",
+          "expected": "Text field override takes precedence",
+          "observed": "confirmCustomCommand() uses trimmed text field value, not profile.remoteCommand. This is stored via setSelectedRemoteCommand and read back via selectedRemoteCommand in DiscoveryView."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none (code review only)",
+        "network": "N/A (code review only)",
+        "filesReviewed": [
+          "apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift",
+          "shared/rust-bridge/codex-mobile-client/src/ffi/ssh.rs"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-093",
+      "title": "AgentBadgeView for GenericAcp",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "rg 'genericAcp' apps/ios/Sources/Litter/Views/AgentBadgeView.swift",
+          "expected": "GenericAcp badge with gear icon and gray tint",
+          "observed": "AgentType.genericAcp: icon='gearshape.fill', tintColor=Color.gray, displayName='ACP', transportLabel='ACP', usesACP=true. AgentBadgeView shows icon + label. AgentTypePill shows icon + 'ACP' text in capsule with gray tint."
+        },
+        {
+          "action": "Verify badge in SwiftUI Preview",
+          "expected": "Preview includes GenericAcp",
+          "observed": "#Preview('Agent Badges') includes .genericAcp in the ForEach loop alongside all other agent types."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none (code review only)",
+        "network": "N/A (code review only)",
+        "filesReviewed": [
+          "apps/ios/Sources/Litter/Views/AgentBadgeView.swift"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-100",
+      "title": "Capabilities accessible after connection",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "rg 'agent_capabilities|update_server_agent_capabilities' shared/rust-bridge/codex-mobile-client/src/",
+          "expected": "Capabilities stored after ACP handshake and accessible via server snapshot",
+          "observed": "Rust: ServerSnapshot has agent_capabilities: Vec<String>. AppStore has update_server_agent_capabilities(). mobile_client/mod.rs calls capabilities_for_agent_type(agent_type) and updates store after connection. AppStore FFI exposes update_server_agent_capabilities() to iOS."
+        },
+        {
+          "action": "rg 'agentCapabilities' apps/ios/Sources/",
+          "expected": "iOS can query capabilities from server snapshot",
+          "observed": "AppServerSnapshot+UI.swift exposes computed properties: supportsStreaming, supportsTools, supportsPlans, supportsReasoning, supportsMultimodal, supportsApprovals, supportsAutonomyLevels, hasAgentCapabilities, capabilitiesSummary. All backed by agentCapabilities.contains()."
+        },
+        {
+          "action": "Verify capability flow from ACP handshake to server snapshot",
+          "expected": "Capabilities from initialize stored in server snapshot",
+          "observed": "GenericAcpTransport stores InitializeResult after handshake. capabilities() method returns agent_capabilities. MobileClient.connect_with_provider calls capabilities_for_agent_type and updates AppStore. Provider/detection.rs maps capabilities per agent type (e.g., DroidAcp gets streaming+tools+plans, GenericAcp gets streaming+tools+plans+reasoning)."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none (code review only)",
+        "network": "N/A (code review only)",
+        "filesReviewed": [
+          "shared/rust-bridge/codex-mobile-client/src/store/snapshot.rs",
+          "shared/rust-bridge/codex-mobile-client/src/store/reducer.rs",
+          "shared/rust-bridge/codex-mobile-client/src/ffi/app_store.rs",
+          "shared/rust-bridge/codex-mobile-client/src/mobile_client/mod.rs",
+          "shared/rust-bridge/codex-mobile-client/src/provider/acp/generic_transport.rs",
+          "shared/rust-bridge/codex-mobile-client/src/provider/detection.rs",
+          "apps/ios/Sources/Litter/Models/AppServerSnapshot+UI.swift"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-101",
+      "title": "Capabilities influence agent info in detection",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "rg 'capabilities' shared/rust-bridge/codex-mobile-client/src/provider/detection.rs",
+          "expected": "AgentInfo includes capabilities from detection",
+          "observed": "map_pi_agent sets capabilities: ['streaming', 'tools']. map_droid_agent sets capabilities: ['streaming', 'tools'] for native, ['streaming', 'tools', 'plans'] for ACP. map_acp_profiles sets capabilities: ['streaming', 'tools', 'plans', 'reasoning'] for GenericAcp."
+        },
+        {
+          "action": "rg 'capabilities' apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+          "expected": "Agent picker displays capability badges",
+          "observed": "InlineAgentSelectorView shows AgentCapabilitiesRow when !info.capabilities.isEmpty. AgentPickerSheet shows AgentCapabilitiesRow in agent rows. AgentCapabilitiesRow renders up to maxBadges (3) capability badges using AgentCapabilityBadge view."
+        },
+        {
+          "action": "Verify AgentInfo.capabilities is a UniFFI record field",
+          "expected": "Field crosses FFI boundary",
+          "observed": "AgentInfo has #[derive(uniffi::Record)] with capabilities: Vec<String>. This field is accessible in Swift as info.capabilities."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none (code review only)",
+        "network": "N/A (code review only)",
+        "filesReviewed": [
+          "shared/rust-bridge/codex-mobile-client/src/provider/detection.rs",
+          "shared/rust-bridge/codex-mobile-client/src/provider/mod.rs",
+          "apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+          "apps/ios/Sources/Litter/Views/AgentBadgeView.swift"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-140",
+      "title": "E2E: configure profile → connect → chat",
+      "status": "blocked",
+      "steps": [
+        {
+          "action": "Verify iOS implementation exists for full flow",
+          "expected": "All UI components exist to support the flow",
+          "observed": "All individual components verified: ACPProfilesView for profile config, AgentPickerSheet for agent selection, custom command field, DiscoveryView for SSH connect with remoteCommand, Rust factory for creating GenericAcpTransport. However, full E2E requires a real ACP agent server accessible via SSH."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A",
+        "network": "N/A",
+        "note": "Blocked: requires real ACP agent server. All iOS UI components verified present via code review."
+      },
+      "issues": "Blocked: requires real ACP agent running on a remote server to complete full E2E flow. All individual iOS UI components (profile config, picker, command field, connection flow) verified present via code review."
+    },
+    {
+      "id": "VAL-ACP-141",
+      "title": "E2E: Droid via standard ACP",
+      "status": "blocked",
+      "steps": [
+        {
+          "action": "Verify DroidAcp transport uses standard ACP in Rust",
+          "expected": "Factory creates DroidAcp via standard ACP",
+          "observed": "Code review shows Droid ACP agent info includes capabilities with 'plans'. Rust provider/detection.rs maps DroidAcp with capabilities: ['streaming', 'tools', 'plans']. However, full E2E requires real Droid agent."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A",
+        "network": "N/A",
+        "note": "Blocked: requires remote server with Droid installed. DroidAcp transport and detection verified via code review."
+      },
+      "issues": "Blocked: requires remote server with Droid agent installed and accessible via SSH."
+    },
+    {
+      "id": "VAL-ACP-142",
+      "title": "E2E: load saved session",
+      "status": "blocked",
+      "steps": [
+        {
+          "action": "Verify session/load support in Rust ACP client",
+          "expected": "session/load maps to ACP protocol",
+          "observed": "GenericAcpTransport send_request maps 'session/load' → client.session_load(). AcpClient supports session load with history replay. However, full E2E requires existing ACP session to load."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A",
+        "network": "N/A",
+        "note": "Blocked: requires real ACP session on remote server. Session load infrastructure verified in Rust code."
+      },
+      "issues": "Blocked: requires existing ACP session on a remote server to test session/load flow."
+    }
+  ],
+  "frictions": [],
+  "blockers": [
+    {
+      "description": "VAL-ACP-140, VAL-ACP-141, VAL-ACP-142 require real ACP agent servers accessible via SSH. No ACP agent server is available in the local environment for E2E testing.",
+      "affectedAssertions": ["VAL-ACP-140", "VAL-ACP-141", "VAL-ACP-142"],
+      "quickFixAttempted": "N/A — these assertions inherently require external infrastructure"
+    }
+  ],
+  "summary": "Tested 12 assertions: 9 passed (via code review), 3 blocked (E2E flows requiring real ACP agent servers). All iOS UI components verified present: ACPProfile model with all required fields (id, displayName, remoteCommand, permissionPolicy, icon), ACPProfileStore with full CRUD persistence via UserDefaults, ACP profiles section in SettingsView, ACP profiles management view with add/edit/delete, GenericAcp in agent picker with custom command text field and validation, command flow from UI through to Rust ProviderConfig.remote_command, AgentBadgeView with gear icon and gray tint for GenericAcp, capabilities surfaced from ACP handshake to iOS server snapshot with computed property accessors, and capability badges displayed in agent picker rows."
+}

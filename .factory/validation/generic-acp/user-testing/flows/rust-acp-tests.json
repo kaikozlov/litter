@@ -1,0 +1,668 @@
+{
+  "groupId": "rust-acp-tests",
+  "testedAt": "2026-04-14T00:00:00Z",
+  "isolation": {
+    "tool": "make rust-test (cargo test)",
+    "workingDirectory": "/Users/kai/dev/projects/litter",
+    "services": "none"
+  },
+  "toolsUsed": ["make rust-test", "rg"],
+  "assertions": [
+    {
+      "id": "VAL-ACP-001",
+      "title": "remote_command field on ProviderConfig",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "All tests pass, including ProviderConfig remote_command tests", "observed": "1250 passed, 0 failed" },
+        { "action": "rg remote_command shared/rust-bridge/codex-mobile-client/src/provider/factory.rs", "expected": "remote_command field exists on ProviderConfig and is used in factory", "observed": "Found remote_command references in factory.rs (config construction, validation, and test assertions)" },
+        { "action": "Verify test factory_generic_acp_accepts_remote_command passes", "expected": "remote_command: Some(...) compiles and is accessible", "observed": "Test present at factory.rs:281, passes with 1250 total pass" }
+      ],
+      "evidence": {
+        "testNames": ["factory_generic_acp_requires_remote_command", "factory_generic_acp_accepts_remote_command"],
+        "testResult": "1250 passed; 0 failed",
+        "codeStructure": "remote_command field found in ProviderConfig across factory.rs, mod.rs, ffi/ssh.rs, mobile_client/mod.rs"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-002",
+      "title": "remote_command used by GenericAcp factory path",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "All tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg create_generic_acp in factory.rs", "expected": "create_generic_acp reads config.remote_command, returns error when None", "observed": "factory.rs:180-189: reads remote_command.as_deref(), returns TransportError::ConnectionFailed with 'remote_command' message when None" }
+      ],
+      "evidence": {
+        "testNames": ["factory_generic_acp_requires_remote_command", "factory_generic_acp_accepts_remote_command"],
+        "testResult": "1250 passed; 0 failed",
+        "codeStructure": "create_generic_acp at factory.rs:180 uses config.remote_command"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-010",
+      "title": "DroidAcp uses standard ACP command",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Droid ACP migration tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-010 in factory.rs", "expected": "Tests verifying droid exec --output-format acp command", "observed": "factory.rs:555-594: tests droid_acp_migration_uses_standard_acp_command, droid_acp_migration_uses_pi_acp_transport, droid_acp_migration_handshake_is_standard_acp" }
+      ],
+      "evidence": {
+        "testNames": ["droid_acp_migration_uses_standard_acp_command", "droid_acp_migration_uses_pi_acp_transport", "droid_acp_migration_handshake_is_standard_acp", "droid_acp_transport_uses_standard_acp"],
+        "testResult": "1250 passed; 0 failed",
+        "codeStructure": "create_droid_acp at factory.rs:145 uses standard ACP transport"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-011",
+      "title": "DroidAcp events map through ACP pipeline",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "ACP event mapping tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-004 through VAL-ACP-007 in client.rs", "expected": "Event mapping tests (AgentMessageChunk, AgentThoughtChunk, ToolCall, Plan)", "observed": "client.rs:1785-2149: tests for AgentMessageChunk→MessageDelta, AgentThoughtChunk→ReasoningDelta, ToolCall→ToolCallStarted/Update, Plan→PlanUpdated" }
+      ],
+      "evidence": {
+        "testNames": ["acp_map_agent_message_chunk_to_message_delta (VAL-ACP-004)", "acp_map_agent_thought_chunk_to_reasoning_delta (VAL-ACP-005)", "acp_map_tool_call_events (VAL-ACP-006)", "acp_map_plan_events (VAL-ACP-007)"],
+        "testResult": "1250 passed; 0 failed",
+        "codeStructure": "map_session_update in client.rs covers all SessionUpdate variants"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-012",
+      "title": "DroidAcp old transport code removed or deprecated",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Deprecation warning tests pass", "observed": "1250 passed, 0 failed (9 ignored); DroidAcpTransport tests show deprecation warnings" },
+        { "action": "rg DroidAcpTransport in factory.rs", "expected": "No construction of DroidAcpTransport in factory", "observed": "factory.rs:674-686: test droid_acp_migration_factory_no_droid_acp_transport verifies factory does not create DroidAcpTransport; factory uses PiAcpTransport for DroidAcp" }
+      ],
+      "evidence": {
+        "testNames": ["droid_acp_migration_factory_no_droid_acp_transport"],
+        "testResult": "1250 passed; 0 failed",
+        "codeStructure": "DroidAcpTransport only referenced in deprecated tests, not in production factory path"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-013",
+      "title": "DroidAcp session lifecycle through standard ACP",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Droid ACP session lifecycle test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg droid_acp_migration_session_lifecycle in factory.rs", "expected": "Full session lifecycle test exists", "observed": "factory.rs:694: droid_acp_migration_session_lifecycle test present and passing" }
+      ],
+      "evidence": {
+        "testNames": ["droid_acp_migration_session_lifecycle"],
+        "testResult": "1250 passed; 0 failed",
+        "codeStructure": "create_droid_acp constructs standard ACP transport supporting full lifecycle"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-020",
+      "title": "GenericAcpTransport wraps AcpClient with configurable command",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "GenericAcpTransport tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg GenericAcpTransport in generic_transport.rs", "expected": "Struct exists, wraps AcpClient", "observed": "generic_transport.rs:57: pub struct GenericAcpTransport with AcpClient field, configurable via constructor" }
+      ],
+      "evidence": {
+        "testNames": ["generic_acp_lifecycle", "generic_acp_from_client", "generic_acp_connect_performs_handshake"],
+        "testResult": "1250 passed; 0 failed",
+        "codeStructure": "GenericAcpTransport at generic_transport.rs:57 wraps AcpClient, accepts any bidirectional stream"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-021",
+      "title": "GenericAcpTransport implements full ProviderTransport trait",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "All ProviderTransport method tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg impl ProviderTransport for GenericAcpTransport", "expected": "All trait methods implemented", "observed": "generic_transport.rs:270-485: connect, disconnect, send_request, send_notification, next_event, event_receiver, list_sessions, is_connected all implemented" }
+      ],
+      "evidence": {
+        "testNames": ["generic_acp_send_request_session_new", "generic_acp_send_request_prompt", "generic_acp_event_receiver_returns_broadcast_receiver", "generic_acp_list_sessions", "generic_acp_send_notification_delegates", "generic_acp_next_event_returns_none", "generic_acp_is_connected_initially", "generic_acp_boxed_as_provider_transport"],
+        "testResult": "1250 passed; 0 failed",
+        "codeStructure": "impl ProviderTransport at generic_transport.rs:270"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-022",
+      "title": "GenericAcpTransport handshake timeout",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Timeout test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg generic_acp_connect_timeout in generic_transport.rs", "expected": "Test verifying timeout on no response", "observed": "generic_transport.rs:828: generic_acp_connect_timeout_when_no_response test present" }
+      ],
+      "evidence": {
+        "testNames": ["generic_acp_connect_timeout_when_no_response"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-023",
+      "title": "GenericAcpTransport disconnect cleanup",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Disconnect cleanup tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg generic_acp_disconnect in generic_transport.rs", "expected": "Idempotent disconnect, post-disconnect operations fail", "observed": "Tests: generic_acp_disconnect_idempotent, generic_acp_post_disconnect_is_not_connected, generic_acp_post_disconnect_request_fails, generic_acp_post_disconnect_notification_fails, generic_acp_post_disconnect_list_sessions_fails" }
+      ],
+      "evidence": {
+        "testNames": ["generic_acp_disconnect_idempotent", "generic_acp_post_disconnect_is_not_connected", "generic_acp_post_disconnect_request_fails", "generic_acp_post_disconnect_notification_fails", "generic_acp_post_disconnect_list_sessions_fails", "generic_acp_connect_rejected_after_disconnect"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-024",
+      "title": "GenericAcpTransport unknown method error",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Unknown method returns -32601 error", "observed": "1250 passed, 0 failed" },
+        { "action": "rg generic_acp_unknown_method in generic_transport.rs", "expected": "Test verifying -32601 error for unknown methods", "observed": "generic_transport.rs:938: generic_acp_unknown_method_returns_error test present and passing" }
+      ],
+      "evidence": {
+        "testNames": ["generic_acp_unknown_method_returns_error"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-025",
+      "title": "Session operations before auth fail",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Pre-auth operations return NotAuthenticated/NotInitialized errors", "observed": "1250 passed, 0 failed" },
+        { "action": "rg generic_acp_send_request_before_init|generic_acp_session_new_before_init|generic_acp_session_ops_blocked in generic_transport.rs", "expected": "Tests verifying operations fail before init/auth", "observed": "Tests: generic_acp_send_request_before_init_fails, generic_acp_session_new_before_init_fails, generic_acp_session_ops_blocked_before_handshake_via_trait" }
+      ],
+      "evidence": {
+        "testNames": ["generic_acp_send_request_before_init_fails", "generic_acp_session_new_before_init_fails", "generic_acp_session_ops_blocked_before_handshake_via_trait", "acp_session_new_rejected_before_authenticate"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-030",
+      "title": "Initialize handshake success",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "ACP initialize handshake tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-030 in client.rs", "expected": "Comprehensive initialize handshake test", "observed": "client.rs:2458-2520: acp_initialize_handshake_success_comprehensive test verifies protocolVersion, capabilities, authMethods, agentInfo fields" }
+      ],
+      "evidence": {
+        "testNames": ["acp_initialize_handshake_success", "acp_initialize_handshake_success_comprehensive"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-031",
+      "title": "Initialize rejects incompatible protocol version",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Protocol version mismatch error test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-031 in client.rs", "expected": "Test verifying ProtocolVersionMismatch error", "observed": "client.rs:2535-2560: test verifies both version numbers in error and Uninitialized state" }
+      ],
+      "evidence": {
+        "testNames": ["acp_initialize_rejects_incompatible_version", "generic_acp_version_mismatch_connect_error"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-032",
+      "title": "Initialize accepts lower compatible version",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Lower version accepted test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-032 in client.rs", "expected": "Test verifying lower version accepted", "observed": "client.rs:2570-2589: test verifies handshake succeeds with lower version, stored correctly" }
+      ],
+      "evidence": {
+        "testNames": ["acp_initialize_accepts_lower_compatible_version"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-033",
+      "title": "Authenticate with first available method",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Auth with first method test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-033 in client.rs", "expected": "Test verifying first available auth method is used", "observed": "client.rs:2600-2640: test verifies first method used, client transitions to Authenticated" }
+      ],
+      "evidence": {
+        "testNames": ["acp_authenticate_after_initialize"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-034",
+      "title": "Authenticate permanent failure",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Permanent auth failure (-32000) not retried", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-034 in client.rs", "expected": "Test verifying no retry on -32000", "observed": "client.rs:2650-2687: test verifies permanent failure, single attempt, no retry" }
+      ],
+      "evidence": {
+        "testNames": ["acp_authenticate_permanent_failure_no_retry", "generic_acp_auth_failure_connect_error"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-035",
+      "title": "Authenticate transient retry",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Transient auth failure retries once", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-035 in client.rs", "expected": "Test verifying exactly one retry", "observed": "client.rs:2703-2752: test verifies retry with different request ID, success on retry; also verifies double-transient returns error" }
+      ],
+      "evidence": {
+        "testNames": ["acp_authenticate_transient_retry_once"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-036",
+      "title": "Capabilities surfaced from initialize",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Capabilities queryable after handshake", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-036 in client.rs and generic_transport.rs", "expected": "Tests verifying capabilities accessible", "observed": "client.rs:2816-2866: capabilities populated test; generic_transport.rs:1211-1348: tests for capabilities none before connect, populated after connect, accessible via arc, and initialize_result queryable" }
+      ],
+      "evidence": {
+        "testNames": ["generic_acp_capabilities_none_before_connect", "generic_acp_capabilities_populated_after_connect", "generic_acp_initialize_result_queryable_after_handshake", "generic_acp_capabilities_accessible_via_arc"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-040",
+      "title": "session/new creates session with CWD",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "session/new returns session ID", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-040 and acp_session_lifecycle_new_with_cwd in client.rs", "expected": "Test verifying session/new with CWD", "observed": "client.rs:3043-3048: acp_session_lifecycle_new_with_cwd test present" }
+      ],
+      "evidence": {
+        "testNames": ["acp_session_new_returns_id", "acp_session_lifecycle_new_with_cwd", "generic_acp_send_request_session_new"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-041",
+      "title": "session/prompt streams updates then completes",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Prompt streaming tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-041 and acp_session_lifecycle_prompt in client.rs", "expected": "Test verifying prompt streams updates then completes", "observed": "client.rs:3088-3093: acp_session_lifecycle_prompt_streams_then_completes test present" }
+      ],
+      "evidence": {
+        "testNames": ["acp_session_prompt_streams_updates", "acp_session_lifecycle_prompt_streams_then_completes", "generic_acp_send_request_prompt"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-042",
+      "title": "session/cancel aborts active prompt",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Cancel test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-042 and acp_session_lifecycle_cancel in client.rs", "expected": "Test verifying cancel resets streaming state", "observed": "client.rs:3151-3156: acp_session_lifecycle_cancel_resets_and_allows_next_prompt test present" }
+      ],
+      "evidence": {
+        "testNames": ["acp_session_cancel_mid_stream", "acp_session_lifecycle_cancel_resets_and_allows_next_prompt", "generic_acp_turn_interrupt_calls_cancel"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-043",
+      "title": "session/cancel when idle is no-op",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Cancel when idle succeeds without sending notification", "observed": "1250 passed, 0 failed" },
+        { "action": "rg acp_session_cancel_no_active_turn in client.rs", "expected": "Test verifying no-op cancel", "observed": "client.rs:1472: acp_session_cancel_no_active_turn test present" }
+      ],
+      "evidence": {
+        "testNames": ["acp_session_cancel_no_active_turn"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-044",
+      "title": "session/list returns available sessions",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Session list tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg acp_session_list in client.rs", "expected": "Tests for session list and empty array", "observed": "client.rs:1491-1523: tests acp_session_list_returns_sessions and acp_session_list_empty_array" }
+      ],
+      "evidence": {
+        "testNames": ["acp_session_list_returns_sessions", "acp_session_list_empty_array", "generic_acp_list_sessions"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-045",
+      "title": "session/load replays history",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Session load tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg acp_session_load in client.rs", "expected": "Tests for session load and unknown ID error", "observed": "client.rs:1548-1576: tests acp_session_load_replays_history and acp_session_load_unknown_returns_error" }
+      ],
+      "evidence": {
+        "testNames": ["acp_session_load_replays_history", "acp_session_load_unknown_returns_error"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-046",
+      "title": "Codex wire method adapters work on GenericAcp",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Wire method adapter tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-046 in generic_transport.rs", "expected": "Wire method adapter tests exist", "observed": "generic_transport.rs:373-442: thread/start→session/new+prompt, turn/start→prompt, turn/interrupt→cancel, thread/list→session/list, thread/read→session/load, no-ops, collaborationMode/list" }
+      ],
+      "evidence": {
+        "testNames": ["generic_acp_thread_start_creates_session_and_prompts", "generic_acp_turn_interrupt_calls_cancel", "generic_acp_thread_archive_is_noop", "generic_acp_collaboration_mode_list_returns_empty"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-050",
+      "title": "NDJSON framing correct for all ACP messages",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "NDJSON framing tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-050 in framing.rs", "expected": "NDJSON framing test", "observed": "framing.rs:866: VAL-ACP-050 test section present" }
+      ],
+      "evidence": {
+        "testNames": ["acp_ndjson_framing_correct (VAL-ACP-050 section in framing.rs)"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-051",
+      "title": "Large messages handled without buffer overflow",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Large message test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-051 in framing.rs", "expected": "Large message handling test", "observed": "framing.rs:930: VAL-ACP-051 test section present" }
+      ],
+      "evidence": {
+        "testNames": ["acp_large_message_handling (VAL-ACP-051 section in framing.rs)"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-052",
+      "title": "Binary/null bytes in stream are handled gracefully",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Binary data handling test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-052 in framing.rs", "expected": "Binary/null bytes handling test", "observed": "framing.rs:985: VAL-ACP-052 test section present" }
+      ],
+      "evidence": {
+        "testNames": ["acp_binary_bytes_handling (VAL-ACP-052 section in framing.rs)"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-060",
+      "title": "Connection failure during handshake",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Connection failure during handshake tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-060 in client.rs", "expected": "Connection failure during handshake test", "observed": "client.rs:3207: VAL-ACP-060 section present; generic_transport.rs:1162: generic_acp_connect_fails_on_init_error" }
+      ],
+      "evidence": {
+        "testNames": ["generic_acp_connect_fails_on_init_error", "acp_connection_failure_during_handshake (VAL-ACP-060)"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-061",
+      "title": "Agent crash mid-stream",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Agent crash mid-stream test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-061 in client.rs", "expected": "Agent crash recovery test", "observed": "client.rs:3250: VAL-ACP-061 section present; generic_transport.rs:1629: generic_acp_error_handling_transport_disconnect" }
+      ],
+      "evidence": {
+        "testNames": ["generic_acp_error_handling_transport_disconnect", "acp_agent_crash_mid_stream (VAL-ACP-061)"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-062",
+      "title": "Malformed JSON from agent",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Malformed JSON handling test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-062 in client.rs", "expected": "Malformed JSON skipped test", "observed": "client.rs:3308: VAL-ACP-062 section present" }
+      ],
+      "evidence": {
+        "testNames": ["acp_malformed_json_skipped (VAL-ACP-062)"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-063",
+      "title": "Unknown session/update variants mapped to Unknown event",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Unknown variant mapping test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-063 in client.rs", "expected": "Unknown variant → ProviderEvent::Unknown test", "observed": "client.rs:3361: VAL-ACP-063 section present" }
+      ],
+      "evidence": {
+        "testNames": ["acp_unknown_session_update_maps_to_unknown (VAL-ACP-063)"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-064",
+      "title": "Agent sends request to client (request_permission)",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Permission handling tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg handle_request_permission in handlers.rs", "expected": "Permission handler with policy-based dispatch", "observed": "handlers.rs:193-303: handle_request_permission function; tests: acp_permission_auto_approve, acp_permission_auto_reject, acp_permission_prompt_emits_event, acp_per_agent_policy_independence, acp_terminal_*_returns_method_not_found" }
+      ],
+      "evidence": {
+        "testNames": ["acp_permission_auto_approve", "acp_permission_auto_reject", "acp_permission_auto_reject_approves_low_risk", "acp_permission_prompt_emits_event", "acp_per_agent_policy_independence", "acp_terminal_create_returns_method_not_found", "acp_terminal_output_returns_method_not_found"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-065",
+      "title": "Buffered response routing (race condition)",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Buffered response routing test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-065 in client.rs", "expected": "Buffered response routing test", "observed": "client.rs:3403: VAL-ACP-065 section present; also generic_transport.rs:1558: generic_acp_concurrent_operations_serialized" }
+      ],
+      "evidence": {
+        "testNames": ["acp_buffered_response_routing (VAL-ACP-065)", "generic_acp_concurrent_operations_serialized"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-070",
+      "title": "GenericAcp detected in detect_all_agents",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "GenericAcp detection tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-070 in detection.rs", "expected": "GenericAcp detection tests", "observed": "detection.rs:585-638: tests acp_detection_generic_acp_from_profiles, acp_detection_generic_acp_multiple_profiles, acp_detection_generic_acp_no_profiles, acp_detection_generic_acp_in_combined_detection" }
+      ],
+      "evidence": {
+        "testNames": ["acp_detection_generic_acp_from_profiles", "acp_detection_generic_acp_multiple_profiles", "acp_detection_generic_acp_no_profiles", "acp_detection_generic_acp_in_combined_detection"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-071",
+      "title": "DroidAcp detection updated for standard ACP",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Droid ACP detection tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-071 in detection.rs", "expected": "Droid ACP detection tests for standard ACP", "observed": "detection.rs:674-709: tests acp_detection_droid_acp_appears_in_droid_mapping, acp_detection_droid_acp_only_no_native, acp_detection_droid_has_droid_acp" }
+      ],
+      "evidence": {
+        "testNames": ["acp_detection_droid_acp_appears_in_droid_mapping", "acp_detection_droid_acp_only_no_native", "acp_detection_droid_has_droid_acp"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-100",
+      "title": "Capabilities accessible after connection",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Capabilities query tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-036 in generic_transport.rs", "expected": "Capabilities queryable after connect tests", "observed": "generic_transport.rs:1207-1364: tests generic_acp_capabilities_none_before_connect, generic_acp_capabilities_populated_after_connect, generic_acp_capabilities_accessible_via_arc, generic_acp_initialize_result_queryable_after_handshake" }
+      ],
+      "evidence": {
+        "testNames": ["generic_acp_capabilities_none_before_connect", "generic_acp_capabilities_populated_after_connect", "generic_acp_capabilities_accessible_via_arc", "generic_acp_initialize_result_queryable_after_handshake"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-101",
+      "title": "Capabilities influence agent info in detection",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "ACP capabilities in detection tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg capabilities in detection.rs", "expected": "Capabilities included in AgentInfo", "observed": "Detection tests at detection.rs:589+ verify GenericAcp agent info includes capabilities from profiles" }
+      ],
+      "evidence": {
+        "testNames": ["acp_detection_generic_acp_from_profiles", "acp_detection_generic_acp_in_combined_detection"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-110",
+      "title": "ProviderEvent parity across PiAcp, DroidAcp, GenericAcp",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Cross-provider parity tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-110 in cross_provider.rs", "expected": "ProviderEvent parity test", "observed": "cross_provider.rs:1487: VAL-ACP-110 section present" }
+      ],
+      "evidence": {
+        "testNames": ["acp_parity_provider_event_identical_across_providers (VAL-ACP-110 in cross_provider.rs)"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-111",
+      "title": "Transport fallback (Native → ACP)",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Transport fallback tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-111 in cross_provider.rs", "expected": "Transport fallback test", "observed": "cross_provider.rs:1662: VAL-ACP-111 section present; also transport_fallback_native_to_acp and transport_fallback_acp_to_native" }
+      ],
+      "evidence": {
+        "testNames": ["transport_fallback_native_to_acp", "transport_fallback_acp_to_native", "acp_parity_transport_fallback (VAL-ACP-111)"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-112",
+      "title": "Session ID collision across ACP providers",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Session ID collision isolation tests pass", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-112 in cross_provider.rs", "expected": "Session ID collision test", "observed": "cross_provider.rs:1740-1744: VAL-ACP-112 section and acp_parity_session_id_collision_across_acp_providers test; also session_id_collision_isolation" }
+      ],
+      "evidence": {
+        "testNames": ["session_id_collision_isolation", "acp_parity_session_id_collision_across_acp_providers"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-120",
+      "title": "Unicode content preserved through ACP",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Unicode content test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-120 in client.rs", "expected": "Unicode content preservation test", "observed": "client.rs:3443-3448: acp_session_lifecycle_unicode_content_preserved test present" }
+      ],
+      "evidence": {
+        "testNames": ["acp_session_lifecycle_unicode_content_preserved"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-121",
+      "title": "Empty prompt handling",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Empty prompt test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-121 in client.rs", "expected": "Empty prompt handling test", "observed": "client.rs:3504-3508: acp_session_lifecycle_empty_prompt_handled test present" }
+      ],
+      "evidence": {
+        "testNames": ["acp_session_lifecycle_empty_prompt_handled"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-122",
+      "title": "Very long prompt (>1MB)",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Very long prompt test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-122 in client.rs", "expected": "Very long prompt handling test", "observed": "client.rs:3550-3555: acp_session_lifecycle_very_long_prompt test present" }
+      ],
+      "evidence": {
+        "testNames": ["acp_session_lifecycle_very_long_prompt"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-ACP-123",
+      "title": "Concurrent event subscribers",
+      "status": "pass",
+      "steps": [
+        { "action": "Run make rust-test", "expected": "Concurrent subscriber test passes", "observed": "1250 passed, 0 failed" },
+        { "action": "rg VAL-ACP-123 in client.rs", "expected": "Concurrent event subscriber test", "observed": "client.rs:3610-3615: acp_session_lifecycle_concurrent_event_subscribers test present" }
+      ],
+      "evidence": {
+        "testNames": ["acp_session_lifecycle_concurrent_event_subscribers"],
+        "testResult": "1250 passed; 0 failed"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 45 assertions (VAL-ACP-001 through VAL-ACP-123). All 45 assertions PASS. `make rust-test` completed with 1250 passed, 0 failed, 9 ignored (E2E tests requiring remote servers). All relevant tests identified in factory.rs, generic_transport.rs, client.rs, framing.rs, handlers.rs, detection.rs, and cross_provider.rs."
+}
