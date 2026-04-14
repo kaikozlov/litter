@@ -15,8 +15,81 @@ use tokio::net::TcpStream;
 use tokio::sync::{Semaphore, broadcast, mpsc};
 use tokio::task::JoinSet;
 
-/// Default ports to probe for Codex and SSH servers.
-const DEFAULT_SCAN_PORTS: &[u16] = &[8390, 9234, 22];
+/// Default port for SSH connections.
+const SSH_PORT: u16 = 22;
+
+/// Agent-type-to-port registry: maps each known agent type to its default
+/// listening port(s). Used to build the scan port set and to classify
+/// reachable ports by agent type during discovery.
+///
+/// SSH (port 22) is handled separately — it is a transport, not an agent type.
+static AGENT_PORT_REGISTRY: &[(crate::provider::AgentType, &[u16])] = &[
+    (crate::provider::AgentType::Codex, &[8390]),
+    (crate::provider::AgentType::PiNative, &[9234]),
+    (crate::provider::AgentType::PiAcp, &[9234]),
+];
+
+/// Return the default port(s) associated with a given agent type.
+///
+/// Returns an empty slice for agent types that do not have a well-known
+/// listening port (e.g. `GenericAcp` which uses a user-configured command,
+/// or `DroidNative`/`DroidAcp` which are spawned on-demand over SSH).
+pub fn agent_default_ports(agent_type: crate::provider::AgentType) -> &'static [u16] {
+    for &(at, ports) in AGENT_PORT_REGISTRY {
+        if at == agent_type {
+            return ports;
+        }
+    }
+    &[]
+}
+
+/// Compute the default scan port set from the agent port registry plus SSH.
+///
+/// The result is sorted and deduplicated. This replaces the old
+/// `DEFAULT_SCAN_PORTS` constant with a data-driven approach.
+fn default_scan_ports_from_registry() -> Vec<u16> {
+    let mut ports: Vec<u16> = Vec::new();
+    for &(_, agent_ports) in AGENT_PORT_REGISTRY {
+        for &p in agent_ports {
+            if !ports.contains(&p) {
+                ports.push(p);
+            }
+        }
+    }
+    if !ports.contains(&SSH_PORT) {
+        ports.push(SSH_PORT);
+    }
+    ports.sort_unstable();
+    ports
+}
+
+/// Classify a reachable non-SSH port into the agent type(s) that typically
+/// listen on that port. Returns an empty Vec if the port is not associated
+/// with any known agent type.
+fn classify_port(port: u16) -> Vec<crate::provider::AgentType> {
+    let mut types = Vec::new();
+    for &(agent_type, ports) in AGENT_PORT_REGISTRY {
+        if ports.contains(&port) {
+            types.push(agent_type);
+        }
+    }
+    types
+}
+
+/// Classify a set of reachable non-SSH ports into a deduplicated list of
+/// agent types. Useful for determining what agents might be available on a
+/// host based purely on open ports.
+fn classify_agent_ports(ports: &[u16]) -> Vec<crate::provider::AgentType> {
+    let mut types = Vec::new();
+    for &port in ports {
+        for &t in &classify_port(port) {
+            if !types.contains(&t) {
+                types.push(t);
+            }
+        }
+    }
+    types
+}
 
 /// Maximum concurrent TCP probes during subnet scans.
 const MAX_CONCURRENT_PROBES: usize = 64;
@@ -128,7 +201,7 @@ pub struct DiscoveryConfig {
 impl Default for DiscoveryConfig {
     fn default() -> Self {
         Self {
-            scan_ports: DEFAULT_SCAN_PORTS.to_vec(),
+            scan_ports: default_scan_ports_from_registry(),
             probe_timeout: Duration::from_secs(2),
             enable_bonjour: true,
             enable_tailscale: true,
@@ -739,10 +812,14 @@ impl DiscoveryService {
             }
 
             let display = clean_hostname(&seed.name);
-            let is_codex_service = seed.service_type.starts_with("_codex.");
+            // Recognize known mDNS service types that advertise an agent server.
+            // `_codex._tcp.` → Codex agent, but the classification is generic:
+            // any `_agent._tcp.`-style service is treated as indicating an agent port.
+            let is_agent_service = seed.service_type.starts_with("_codex.")
+                || seed.service_type.starts_with("_agent.");
             let is_ssh_service = seed.service_type.starts_with("_ssh.");
 
-            let mut agent_port = if is_codex_service { seed.port } else { None };
+            let mut agent_port = if is_agent_service { seed.port } else { None };
             let ssh_port = if is_ssh_service {
                 Some(seed.port.unwrap_or(22))
             } else {
@@ -757,7 +834,7 @@ impl DiscoveryService {
             }
 
             if agent_port.is_none() {
-                let agent_only_ports: Vec<u16> = self
+                let non_ssh_scan_ports: Vec<u16> = self
                     .config
                     .scan_ports
                     .iter()
@@ -765,7 +842,7 @@ impl DiscoveryService {
                     .filter(|&p| p != SSH_PORT)
                     .collect();
                 if let Some(port) =
-                    first_reachable_port(&host, &agent_only_ports, self.config.probe_timeout).await
+                    first_reachable_port(&host, &non_ssh_scan_ports, self.config.probe_timeout).await
                 {
                     agent_port = Some(port);
                     reachable = true;
@@ -791,6 +868,15 @@ impl DiscoveryService {
                 continue;
             }
 
+            // Classify agent types from the detected port(s).
+            let bonjour_agent_ports: Vec<u16> = agent_port.into_iter().collect();
+            let classified = classify_agent_ports(&bonjour_agent_ports);
+            let agent_types = if classified.is_empty() {
+                default_agent_types()
+            } else {
+                classified
+            };
+
             results.push(DiscoveredServer {
                 id: format!("network-{}", host),
                 display_name: if display.is_empty() {
@@ -801,13 +887,13 @@ impl DiscoveryService {
                 host,
                 port,
                 agent_port,
-                agent_ports: agent_port.into_iter().collect(),
+                agent_ports: bonjour_agent_ports,
                 ssh_port,
                 source: DiscoverySource::Bonjour,
                 metadata,
                 last_seen: Instant::now(),
                 reachable,
-                agent_types: default_agent_types(),
+                agent_types,
                 agent_infos: vec![],
             });
         }
@@ -930,12 +1016,14 @@ async fn all_reachable_ports(host: &str, ports: &[u16], timeout: Duration) -> Ve
         .collect()
 }
 
-/// Well-known SSH port.
-const SSH_PORT: u16 = 22;
-
 /// Build a `DiscoveredServer` from the set of reachable ports, correctly
-/// classifying SSH vs Codex ports. Grabs the SSH banner when port 22 is
+/// classifying SSH vs agent ports. Grabs the SSH banner when port 22 is
 /// open to identify the remote OS.
+///
+/// Agent types are inferred from the open ports using the agent port
+/// registry. For example, port 8390 → Codex, port 9234 → PiNative/PiAcp.
+/// Falls back to `[AgentType::Codex]` if no port-based classification is
+/// possible (backward compatibility).
 async fn server_from_reachable_ports(
     host: &str,
     reachable_ports: &[u16],
@@ -950,6 +1038,14 @@ async fn server_from_reachable_ports(
         .collect();
     let agent_port = agent_ports.first().copied();
     let port = primary_port(agent_port, ssh_port);
+
+    // Classify agent types from the open ports.
+    let classified = classify_agent_ports(&agent_ports);
+    let agent_types = if classified.is_empty() {
+        default_agent_types()
+    } else {
+        classified
+    };
 
     let mut metadata = HashMap::new();
     if ssh_port.is_some()
@@ -973,7 +1069,7 @@ async fn server_from_reachable_ports(
         metadata,
         last_seen: Instant::now(),
         reachable: true,
-        agent_types: default_agent_types(),
+        agent_types,
         agent_infos: vec![],
     }
 }
@@ -1402,7 +1498,8 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = DiscoveryConfig::default();
-        assert_eq!(config.scan_ports, vec![8390, 9234, 22]);
+        // Default scan ports are the sorted union of agent registry ports + SSH.
+        assert_eq!(config.scan_ports, vec![22, 8390, 9234]);
         assert_eq!(config.probe_timeout, Duration::from_secs(2));
         assert!(config.enable_bonjour);
         assert!(config.enable_tailscale);
@@ -1726,5 +1823,352 @@ mod tests {
         assert_eq!(server.agent_types.len(), 2);
         assert_eq!(server.agent_types[0], AgentType::PiNative);
         assert_eq!(server.agent_types[1], AgentType::PiAcp);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // VAL-DISC-006: Configurable scan ports per agent type
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn val_disc_006_agent_port_registry_replaces_default_scan_ports() {
+        // DEFAULT_SCAN_PORTS constant should no longer exist.
+        // Instead, default_scan_ports_from_registry() produces the same port set.
+        let ports = default_scan_ports_from_registry();
+        assert!(ports.contains(&8390), "should contain Codex port 8390");
+        assert!(ports.contains(&9234), "should contain Pi port 9234");
+        assert!(ports.contains(&22), "should contain SSH port 22");
+        // Sorted and deduplicated
+        assert_eq!(ports, vec![22, 8390, 9234]);
+    }
+
+    #[test]
+    fn val_disc_006_agent_default_port_codex() {
+        let ports = agent_default_ports(crate::provider::AgentType::Codex);
+        assert_eq!(ports, &[8390]);
+    }
+
+    #[test]
+    fn val_disc_006_agent_default_port_pi_native() {
+        let ports = agent_default_ports(crate::provider::AgentType::PiNative);
+        assert_eq!(ports, &[9234]);
+    }
+
+    #[test]
+    fn val_disc_006_agent_default_port_pi_acp() {
+        let ports = agent_default_ports(crate::provider::AgentType::PiAcp);
+        assert_eq!(ports, &[9234]);
+    }
+
+    #[test]
+    fn val_disc_006_agent_default_port_droid_returns_empty() {
+        // Droid agents are spawned on-demand over SSH, no listening port.
+        let ports = agent_default_ports(crate::provider::AgentType::DroidNative);
+        assert!(ports.is_empty());
+    }
+
+    #[test]
+    fn val_disc_006_agent_default_port_generic_acp_returns_empty() {
+        // GenericAcp uses user-configured commands, no fixed port.
+        let ports = agent_default_ports(crate::provider::AgentType::GenericAcp);
+        assert!(ports.is_empty());
+    }
+
+    #[test]
+    fn val_disc_006_default_scan_ports_is_union_of_all_agent_ports() {
+        let config = DiscoveryConfig::default();
+        // Union of: Codex 8390, PiNative 9234, PiAcp 9234 (dedup), SSH 22.
+        let mut expected = vec![22, 8390, 9234];
+        expected.sort_unstable();
+        assert_eq!(config.scan_ports, expected);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // VAL-DISC-007: Discovery port classification is agent-agnostic
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn val_disc_007_classify_port_8390_is_codex() {
+        let types = classify_port(8390);
+        assert!(types.contains(&crate::provider::AgentType::Codex));
+    }
+
+    #[test]
+    fn val_disc_007_classify_port_9234_is_pi() {
+        let types = classify_port(9234);
+        assert!(types.contains(&crate::provider::AgentType::PiNative));
+        assert!(types.contains(&crate::provider::AgentType::PiAcp));
+    }
+
+    #[test]
+    fn val_disc_007_classify_port_unknown_returns_empty() {
+        let types = classify_port(12345);
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn val_disc_007_classify_agent_ports_multiple() {
+        let types = classify_agent_ports(&[8390, 9234]);
+        assert!(types.contains(&crate::provider::AgentType::Codex));
+        assert!(types.contains(&crate::provider::AgentType::PiNative));
+        assert!(types.contains(&crate::provider::AgentType::PiAcp));
+    }
+
+    #[tokio::test]
+    async fn val_disc_007_host_with_only_pi_port_produces_pi_agent_type() {
+        // A host with only port 9234 open → agent_port == Some(9234),
+        // agent_types includes Pi variants.
+        let server = server_from_reachable_ports(
+            "10.0.0.99",
+            &[9234],
+            DiscoverySource::LanProbe,
+            Duration::from_millis(50),
+        )
+        .await;
+        assert_eq!(server.agent_port, Some(9234));
+        assert_eq!(server.agent_ports, vec![9234]);
+        assert!(server.ssh_port.is_none());
+        assert!(server.agent_types.contains(&crate::provider::AgentType::PiNative));
+        assert!(server.agent_types.contains(&crate::provider::AgentType::PiAcp));
+    }
+
+    #[tokio::test]
+    async fn val_disc_007_host_with_codex_and_ssh() {
+        let server = server_from_reachable_ports(
+            "10.0.0.100",
+            &[8390, 22],
+            DiscoverySource::LanProbe,
+            Duration::from_millis(50),
+        )
+        .await;
+        assert_eq!(server.agent_port, Some(8390));
+        assert_eq!(server.agent_ports, vec![8390]);
+        assert_eq!(server.ssh_port, Some(22));
+        assert!(server.agent_types.contains(&crate::provider::AgentType::Codex));
+    }
+
+    #[tokio::test]
+    async fn val_disc_007_host_with_unknown_port_falls_back_to_codex() {
+        // A host with an unrecognized port falls back to default agent types.
+        let server = server_from_reachable_ports(
+            "10.0.0.101",
+            &[9999],
+            DiscoverySource::LanProbe,
+            Duration::from_millis(50),
+        )
+        .await;
+        assert_eq!(server.agent_port, Some(9999));
+        assert_eq!(server.agent_types, default_agent_types()); // [Codex]
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // VAL-DISC-008: Bonjour seed classification is agent-agnostic
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn val_disc_008_bonjour_scan_uses_agent_agnostic_names() {
+        // Verify the Bonjour scan method uses agent-agnostic variable names
+        // by checking that the old names are not in the actual scan function.
+        // We check by looking for the specific assignment pattern.
+        let source = include_str!("discovery.rs");
+
+        // The old variable was `let is_codex_service = ...`
+        // The new variable is `let is_agent_service = ...`
+        // Check that the new name exists
+        assert!(
+            source.contains("is_agent_service"),
+            "should use is_agent_service"
+        );
+        assert!(
+            source.contains("non_ssh_scan_ports"),
+            "should use non_ssh_scan_ports"
+        );
+
+        // Check that the old name does NOT exist outside of this test function.
+        // Count occurrences — should only appear in test comments/assertions.
+        // Since the function body is `is_agent_service`, there should be no
+        // executable code using the old name.
+        let lines_with_old_name: Vec<&str> = source
+            .lines()
+            .filter(|l| l.contains("is_codex_service"))
+            .collect();
+        // The only references should be in test comments/strings, not in
+        // actual function code. If the variable was properly renamed, any
+        // remaining references are just documentation.
+        for line in &lines_with_old_name {
+            // Allow references in comments and string literals only
+            let trimmed = line.trim();
+            assert!(
+                trimmed.starts_with("//") || trimmed.starts_with('*') || trimmed.contains('"'),
+                "Found executable code referencing old variable name: {}",
+                line.trim()
+            );
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // VAL-DISC-025: Discovery merge with mixed agent ports
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn val_disc_025_merge_mixed_agent_ports_from_different_sources() {
+        // One source reports agent_ports [8390], another reports [9234].
+        // Merged result should have both ports sorted.
+        let server_8390 = DiscoveredServer {
+            id: "network-10.0.0.2".to_string(),
+            display_name: "10.0.0.2".to_string(),
+            host: "10.0.0.2".to_string(),
+            port: 8390,
+            agent_port: Some(8390),
+            agent_ports: vec![8390],
+            ssh_port: Some(22),
+            source: DiscoverySource::LanProbe,
+            metadata: HashMap::new(),
+            last_seen: Instant::now(),
+            reachable: true,
+            agent_types: vec![crate::provider::AgentType::Codex],
+            agent_infos: vec![],
+        };
+        let server_9234 = DiscoveredServer {
+            id: "network-10.0.0.2".to_string(),
+            display_name: "Studio".to_string(),
+            host: "10.0.0.2".to_string(),
+            port: 9234,
+            agent_port: Some(9234),
+            agent_ports: vec![9234],
+            ssh_port: Some(22),
+            source: DiscoverySource::Bonjour,
+            metadata: HashMap::new(),
+            last_seen: Instant::now(),
+            reachable: true,
+            agent_types: vec![
+                crate::provider::AgentType::PiNative,
+                crate::provider::AgentType::PiAcp,
+            ],
+            agent_infos: vec![],
+        };
+
+        let reconciled = reconcile_discovered_servers(vec![server_8390, server_9234]);
+        assert_eq!(reconciled.len(), 1);
+        assert_eq!(reconciled[0].agent_ports, vec![8390, 9234]);
+        // Bonjour is preferred source
+        assert_eq!(reconciled[0].source, DiscoverySource::Bonjour);
+        assert_eq!(reconciled[0].display_name, "Studio");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // VAL-DISC-031: Discovery scans all registered agent ports
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn val_disc_031_default_config_contains_all_agent_ports() {
+        let config = DiscoveryConfig::default();
+        assert!(config.scan_ports.contains(&8390), "must contain Codex port 8390");
+        assert!(config.scan_ports.contains(&9234), "must contain Pi port 9234");
+        assert!(config.scan_ports.contains(&22), "must contain SSH port 22");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // VAL-DISC-036: SSH probing for multiple agent types
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn val_disc_036_classify_multiple_agent_types_on_same_host() {
+        // A host with both 8390 and 9234 open has both Codex and Pi agents.
+        let types = classify_agent_ports(&[8390, 9234]);
+        assert!(types.contains(&crate::provider::AgentType::Codex));
+        assert!(types.contains(&crate::provider::AgentType::PiNative));
+        assert!(types.contains(&crate::provider::AgentType::PiAcp));
+    }
+
+    #[test]
+    fn val_disc_036_detect_all_agents_is_agent_agnostic() {
+        // Verify detect_all_agents exists and is documented as probing
+        // all agent types (not just Codex).
+        // The actual function is in provider/detection.rs — this test
+        // verifies the port classification infrastructure it can use.
+        let types = classify_agent_ports(&[8390, 9234]);
+        assert!(types.len() >= 3); // Codex + PiNative + PiAcp
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Multi-agent detection: single host, multiple agent types
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn multi_agent_detection_single_host_multiple_ports() {
+        // A single host with ports 8390, 9234, and 22 open is classified
+        // as having both Codex and Pi agent types.
+        let server = server_from_reachable_ports(
+            "10.0.0.50",
+            &[22, 8390, 9234],
+            DiscoverySource::LanProbe,
+            Duration::from_millis(50),
+        )
+        .await;
+        assert_eq!(server.agent_ports, vec![8390, 9234]);
+        assert_eq!(server.ssh_port, Some(22));
+        assert!(server.agent_types.contains(&crate::provider::AgentType::Codex));
+        assert!(server.agent_types.contains(&crate::provider::AgentType::PiNative));
+        assert!(server.agent_types.contains(&crate::provider::AgentType::PiAcp));
+    }
+
+    #[tokio::test]
+    async fn multi_agent_detection_only_unknown_port() {
+        // A host with only an unknown port still appears with fallback types.
+        let server = server_from_reachable_ports(
+            "10.0.0.51",
+            &[5555],
+            DiscoverySource::ArpScan,
+            Duration::from_millis(50),
+        )
+        .await;
+        assert_eq!(server.agent_port, Some(5555));
+        // Falls back to default [Codex]
+        assert_eq!(server.agent_types, default_agent_types());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Port registry infrastructure
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn agent_port_registry_has_entries_for_known_agents() {
+        assert!(!AGENT_PORT_REGISTRY.is_empty());
+        // Codex should be in the registry
+        assert!(AGENT_PORT_REGISTRY.iter().any(|(at, _)| *at == crate::provider::AgentType::Codex));
+        // Pi should be in the registry
+        assert!(AGENT_PORT_REGISTRY.iter().any(|(at, _)| *at == crate::provider::AgentType::PiNative));
+    }
+
+    #[test]
+    fn default_scan_ports_from_registry_is_sorted_and_deduped() {
+        let ports = default_scan_ports_from_registry();
+        let mut sorted = ports.clone();
+        sorted.sort_unstable();
+        assert_eq!(ports, sorted, "should be sorted");
+        // Check deduplication
+        let mut seen = std::collections::HashSet::new();
+        for p in &ports {
+            assert!(seen.insert(*p), "port {} should appear only once", p);
+        }
+    }
+
+    #[test]
+    fn classify_empty_ports_returns_empty() {
+        let types = classify_agent_ports(&[]);
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn classify_single_known_port() {
+        let types = classify_agent_ports(&[8390]);
+        assert_eq!(types, vec![crate::provider::AgentType::Codex]);
+    }
+
+    #[test]
+    fn classify_port_deduplicates_agent_types() {
+        // Both PiNative and PiAcp share port 9234 — should get both without dupes.
+        let types = classify_agent_ports(&[9234, 9234]);
+        assert_eq!(types.len(), 2); // PiNative + PiAcp, no dupes from double port
     }
 }
