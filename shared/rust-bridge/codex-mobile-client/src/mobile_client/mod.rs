@@ -803,6 +803,22 @@ impl MobileClient {
             ssh_credentials.host.as_str(),
         );
 
+        // Validate that the agent binary exists on the remote host before
+        // spawning the transport. This prevents confusing transport spawn
+        // failures with a clear "not found" error.
+        if let Err(error) = validate_agent_binary_on_host(&ssh_client, agent_type).await {
+            warn!(
+                "MobileClient: agent binary validation failed for agent_type={} server_id={}: {error}",
+                agent_type, server_id
+            );
+            ssh_client.disconnect().await;
+            self.app_store
+                .update_server_health(server_id.as_str(), ServerHealthSnapshot::Disconnected);
+            self.app_store
+                .update_server_connection_progress(server_id.as_str(), None);
+            return Err(error);
+        }
+
         // Build a provider config for the factory.
         let provider_config = crate::provider::ProviderConfig {
             agent_type,
@@ -2333,6 +2349,62 @@ impl MobileClient {
         });
 
         rx
+    }
+}
+
+/// Returns the binary name to check for a given agent type.
+///
+/// Maps each non-Codex agent type to the binary that must exist on the
+/// remote host for the transport to function. Returns `None` for `Codex`
+/// (which uses the standard bootstrap path, not a direct binary).
+pub fn agent_binary_name(agent_type: crate::provider::AgentType) -> Option<&'static str> {
+    match agent_type {
+        crate::provider::AgentType::PiNative | crate::provider::AgentType::PiAcp => Some("pi"),
+        crate::provider::AgentType::DroidNative | crate::provider::AgentType::DroidAcp => {
+            Some("droid")
+        }
+        crate::provider::AgentType::GenericAcp => None,
+        crate::provider::AgentType::Codex => None,
+    }
+}
+
+/// Validate that the agent binary exists on the remote host.
+///
+/// Uses `command -v <binary>` to check if the binary is on the remote PATH.
+/// Returns `Ok(())` if the binary is found, or a descriptive error if not.
+/// For agent types without a direct binary (GenericAcp, Codex), returns `Ok(())`.
+async fn validate_agent_binary_on_host(
+    ssh_client: &SshClient,
+    agent_type: crate::provider::AgentType,
+) -> Result<(), TransportError> {
+    let binary_name = match agent_binary_name(agent_type) {
+        Some(name) => name,
+        None => return Ok(()),
+    };
+
+    let command = format!("command -v {binary_name} 2>/dev/null");
+    match ssh_client.exec(&command).await {
+        Ok(result) if result.exit_code == 0 => {
+            let path = result.stdout.trim();
+            if path.is_empty() {
+                tracing::warn!(
+                    "Agent binary validation: command -v {binary_name} returned 0 but empty path"
+                );
+            } else {
+                tracing::info!(
+                    "Agent binary validation: {binary_name} found at {path} for agent_type={}",
+                    agent_type
+                );
+            }
+            Ok(())
+        }
+        _ => {
+            let msg = format!(
+                "{agent_type} agent not found on remote host — binary '{binary_name}' is not on PATH"
+            );
+            tracing::warn!("{msg}");
+            Err(TransportError::ConnectionFailed(msg))
+        }
     }
 }
 
