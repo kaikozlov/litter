@@ -1,0 +1,22 @@
+{
+  "featureId": "notification-to-provider-event-mapping",
+  "reviewedAt": "2026-04-14T18:30:00Z",
+  "commitId": "44cc490",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Exhaustive compile-time mapping from all upstream ServerNotification (52 variants) and ServerRequest (9 variants) to ProviderEvent, with no wildcard arms. 24 core notifications map to typed ProviderEvent variants; 28 secondary notifications map to ProviderEvent::Unknown with method names and serialized payloads. The AppServerEvent envelope mapping covers all 4 variants (ServerNotification, ServerRequest, Lagged, Disconnected). The implementation is correct and well-structured with a clean unknown_notification() helper.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/mapping.rs",
+        "line": 1149,
+        "severity": "non_blocking",
+        "description": "The secondary_notifications_map_to_unknown_with_data test covers 17 of 28 secondary notification variants. 11 secondary variants (HookStarted, HookCompleted, ItemGuardianApprovalReviewStarted, ItemGuardianApprovalReviewCompleted, RawResponseItemCompleted, CommandExecOutputDelta, TerminalInteraction, McpServerOauthLoginCompleted, McpServerStatusUpdated, ThreadRealtimeOutputAudioDelta) are mapped in the match block but not covered by the secondary_notifications test. Compile-time exhaustiveness is guaranteed since there are no wildcard arms, but runtime verification of their method name strings and payload serialization is missing."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "The implementation correctly and exhaustively maps all upstream ServerNotification and ServerRequest variants to ProviderEvent with compile-time exhaustiveness (no wildcard catch-all arms). The AppServerEvent envelope mapping is correct for all 4 variants. The Unknown fallback correctly captures method+payload. Test coverage is strong (40 mapping tests, 1044 total passing), though 11 of 28 secondary notification variants lack dedicated runtime test coverage for their Unknown mapping — a minor gap since the compiler enforces exhaustiveness."
+}

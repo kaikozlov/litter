@@ -1,13 +1,13 @@
 {
   "milestone": "provider-abstraction",
-  "round": 1,
+  "round": 2,
   "status": "pass",
   "validatorsRun": {
     "test": {
       "passed": true,
       "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib",
       "exitCode": 0,
-      "observation": "499 tests passed, 0 failed, 3 ignored. Tests ran with --lib flag to avoid pre-existing cdylib/V8 linking issue on Linux host."
+      "observation": "1139 tests passed, 0 failed, 9 ignored. Up from 499 in round 1 — new provider tests added."
     },
     "typecheck": {
       "passed": true,
@@ -16,82 +16,121 @@
       "observation": "Clean compilation with no errors."
     },
     "lint": {
-      "passed": false,
+      "passed": true,
       "command": "cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- -D warnings",
-      "exitCode": 101,
-      "observation": "30 clippy errors found. Verified these are ALL pre-existing (exist on pre-provider-abstraction commits). Errors include: collapsible_if, redundant_closure, await_holding_lock, too_many_arguments, type_complexity, useless_conversion, clone_on_copy, new_without_default, single_match, needless_borrow, redundant_slicing, needless_borrows_for_generic_args. None introduced by the provider-abstraction milestone."
+      "exitCode": 0,
+      "observation": "Zero clippy warnings. Was 30 pre-existing errors in round 1; all have been fixed."
     }
   },
   "reviewsSummary": {
-    "total": 4,
-    "passed": 4,
+    "total": 8,
+    "passed": 8,
     "failed": 0,
     "failedFeatures": []
   },
   "blockingIssues": [],
   "nonBlockingIssues": [
     {
-      "featureId": "codex-provider-refactor",
+      "featureId": "codex-provider-impl",
       "severity": "non_blocking",
-      "description": "connect_with_provider is missing spawn_post_connect_warmup. All other connect methods call it. Provider-backed sessions won't get thread list prefetching.",
-      "suggestedFix": "Add spawn_post_connect_warmup call after session insertion in connect_with_provider."
+      "description": "disconnect() sends ProviderCommand::Shutdown then immediately aborts the worker handle. The Shutdown command never executes — abort() preempts it. The abort path is valid cleanup, making the Shutdown send dead code in the disconnect flow.",
+      "suggestedFix": "Remove the Shutdown send from disconnect() and rely solely on abort(), or remove abort() and wait for graceful Shutdown processing."
     },
     {
-      "featureId": "codex-provider-refactor",
+      "featureId": "codex-provider-impl",
       "severity": "non_blocking",
-      "description": "ApprovalRequested and UserInputRequested events mapped as LegacyNotification rather than ServerEvent::Request. The approval resolution pipeline won't work through provider path yet.",
-      "suggestedFix": "Map these to ServerEvent::Request with reconstructed request types when provider-backed sessions need approval flows."
+      "description": "Tests exercise MockProvider rather than CodexProvider directly due to AppServerClient being difficult to mock. CodexProvider's specific disconnect logic (Shutdown + abort) is not directly tested.",
+      "suggestedFix": "Consider adding at least one integration test that exercises the real CodexProvider disconnect path if a real AppServerClient becomes available in test."
     },
     {
-      "featureId": "codex-provider-refactor",
+      "featureId": "codex-provider-impl",
       "severity": "non_blocking",
-      "description": "$resolve/$reject fallback in from_provider produces RpcError::Deserialization instead of being a no-op for CodexProvider-backed sessions.",
-      "suggestedFix": "Add RpcError::Deserialization to the fallback error catch, or route resolve/reject through ProviderCommand instead of generic send_request."
+      "description": "CodexProvider::new() sets connected=true immediately; connect() returns ConnectionFailed when not connected. Once disconnected, CodexProvider cannot be reconnected — a new instance must be created. This design limitation is documented in code comments but could be more prominent.",
+      "suggestedFix": "Add a doc comment on ProviderTransport::connect() explaining the no-reconnect contract for CodexProvider."
     },
     {
-      "featureId": "provider-error-handling",
+      "featureId": "provider-event-to-ui-event-pipeline",
       "severity": "non_blocking",
-      "description": "Reconnect retry loop logic (REMOTE_RECONNECT_MAX_ATTEMPTS=5) not yet adapted for provider trait. Currently reconnect_remote_client operates on AppServerClient directly.",
-      "suggestedFix": "Extend reconnect logic to work through ProviderTransport trait for non-Codex providers in future milestones."
+      "description": "FileChangeDelta maps to UiEvent::CommandOutputDelta, meaning the UI cannot distinguish file changes from command output at the UiEvent level. Both render as streaming text.",
+      "suggestedFix": "Acceptable for now. Consider a dedicated UiEvent::FileChangeDelta variant in future if typed file-change rendering is needed."
     },
     {
-      "featureId": "provider-error-handling",
+      "featureId": "provider-event-to-ui-event-pipeline",
       "severity": "non_blocking",
-      "description": "Config change rejection logic (model/reasoning_effort during streaming) lives only in ErrorMockProvider, not in real CodexProvider.",
-      "suggestedFix": "Add streaming_active check to CodexProvider.send_request when implementing config changes in future milestones."
+      "description": "ToolCallStarted/ToolCallUpdate params include the serde type discriminator tag because they use serde_json::to_value(event). Downstream consumers may not expect the 'type' field in params.",
+      "suggestedFix": "Consider stripping the type field or constructing params manually from variant fields."
     },
     {
-      "featureId": "provider-event-mapping",
+      "featureId": "notification-to-provider-event-mapping",
       "severity": "non_blocking",
-      "description": "~23 upstream ServerNotification variants map to ProviderEvent::Unknown via wildcard. No compile-time exhaustiveness guarantee when upstream changes.",
-      "suggestedFix": "Acceptable for initial implementation. Track unmapped variants in library docs. Add typed mappings as needed."
+      "description": "11 of 28 secondary notification variants lack dedicated runtime test coverage for their Unknown mapping. Compile-time exhaustiveness is guaranteed (no wildcard arms), but method name/payload verification is missing for those variants.",
+      "suggestedFix": "Add runtime test coverage for remaining secondary variants when convenient."
+    },
+    {
+      "featureId": "mobile-client-provider-integration",
+      "severity": "non_blocking",
+      "description": "The 'replace active session during connect' path is tested via direct method call but not end-to-end, because existing_active_session causes reuse instead of replacement.",
+      "suggestedFix": "Add an end-to-end test that forces replacement by making the first session appear disconnected while keeping it in the map."
+    },
+    {
+      "featureId": "mobile-client-provider-integration",
+      "severity": "non_blocking",
+      "description": "ProviderConfig construction test is structural (constructs config directly) rather than exercising the actual production code path inside connect_remote_over_ssh_with_agent_type.",
+      "suggestedFix": "Consider using a mock to intercept the config passed to create_provider_over_ssh for more robust verification."
+    },
+    {
+      "featureId": "provider-regression-tests",
+      "severity": "non_blocking",
+      "description": "regression_broadcast_lagged_handled_gracefully tests raw tokio broadcast channel rather than provider layer. Other two lagged tests do cover the provider path, so overall VAL-ABS-039 coverage is adequate.",
+      "suggestedFix": "Low priority — coverage is adequate via the other two lagged tests."
+    },
+    {
+      "featureId": "provider-regression-tests",
+      "severity": "non_blocking",
+      "description": "Thread-local storage (SENT_REQUESTS, SENT_NOTIFICATIONS) in mock providers relies on single-threaded test runtime default. Would break if test configuration changes to multi-threaded runtime.",
+      "suggestedFix": "Consider using Arc<Mutex<Vec<>>> instead of thread_local! for thread-safe tracking."
+    },
+    {
+      "featureId": "provider-milestone-build-gate",
+      "severity": "non_blocking",
+      "description": "AGENTS.md says 'make rust-test runs all 1037+ tests' but the actual count is now 1139. The test count threshold in AGENTS.md is stale.",
+      "suggestedFix": "Update AGENTS.md to reflect current test count."
     }
   ],
-  "appliedUpdates": [
-    {
-      "target": "library",
-      "description": "Updated .factory/library/provider-transport.md with upstream event mapping coverage details, broadcast channel behavior note, and updated future work section.",
-      "sourceFeature": "scrutiny-validator-provider-abstraction"
-    },
-    {
-      "target": "library",
-      "description": "Fixed .factory/library/architecture.md module paths to reflect actual flat file structure (codex.rs not codex/), added mapping.rs and error_handling.rs entries.",
-      "sourceFeature": "scrutiny-validator-provider-abstraction"
-    }
-  ],
+  "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
       "target": "AGENTS.md",
-      "suggestion": "Add note: ProviderTransport trait methods use async_trait for object safety. Workers should not add generic type parameters or impl Trait returns to trait methods as this breaks object safety.",
-      "evidence": "provider-transport-trait feature correctly uses async_trait pattern. Future workers implementing new providers should follow this pattern.",
+      "suggestion": "Update test count from '1037+' to '1139+' to reflect current actual count after provider abstraction milestone.",
+      "evidence": "provider-milestone-build-gate review notes the count discrepancy.",
       "isSystemic": false
     }
   ],
   "rejectedObservations": [
     {
-      "observation": "architecture.md should document provider event-to-server-event LegacyNotification mapping pattern.",
-      "reason": "Already adequately documented in provider-transport.md library file which is the appropriate place for this implementation detail."
+      "observation": "ProviderConfig is internal-only (no uniffi, no serde) — should be documented in AGENTS.md.",
+      "reason": "Already documented in .factory/library/provider-transport.md. Adding to AGENTS.md would duplicate and AGENTS.md is for normative guidance, not implementation details."
+    },
+    {
+      "observation": "Feature description in features.json mentions wrong AgentType variants (Claude, GPT, Gemini, Custom, Factory instead of actual Codex, PiAcp, PiNative, DroidAcp, DroidNative, GenericAcp).",
+      "reason": "Features.json is mission-level planning metadata, not code. The validation contract correctly specifies the actual variants. Not actionable for code quality."
+    },
+    {
+      "observation": "The $resolve/$reject magic method names in from_provider are not documented in library/.",
+      "reason": "Already noted in round 1 synthesis as a non-blocking issue. Provider-transport.md adequately describes the event mapping. Adding magic method documentation is low priority since it's an internal implementation detail."
+    },
+    {
+      "observation": "Duplicate mock implementations (TestProvider in mobile_client/tests.rs and TestMockProvider in session/connection.rs) are not documented.",
+      "reason": "Test mock duplication is normal for different testing scopes. Not guidance-worthy."
+    },
+    {
+      "observation": "Pre-existing broken iOS test methods (ConversationStreamingViewportPolicyTests) suggest iOS tests may not be regularly executed.",
+      "reason": "Valid observation but not actionable by the scrutiny validator. The build-gate worker already fixed the broken tests. Not a code quality issue for this milestone."
+    },
+    {
+      "observation": "Pre-existing LitterUITests.testCaptureScreenshots failure is a UI test infrastructure issue.",
+      "reason": "Known infrastructure issue unrelated to the provider milestone. Not actionable here."
     }
   ],
-  "previousRound": null
+  "previousRound": ".factory/validation/provider-abstraction/scrutiny/synthesis.json (round 1)"
 }

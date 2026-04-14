@@ -1,0 +1,26 @@
+{
+  "featureId": "server-session-from-provider",
+  "reviewedAt": "2026-04-14T17:45:00.000Z",
+  "commitId": "e3263f0",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The from_provider implementation (lines 1026-1225 of connection.rs) creates a fully wired ServerSession from any Box<dyn ProviderTransport>. It uses Arc<tokio::sync::Mutex<Box<dyn ProviderTransport>>> shared between an event bridge task and a command dispatch worker. The event task acquires the lock only briefly to call event_receiver(), then drops it before entering the recv() loop — eliminating deadlock risk. Command dispatch serializes ClientRequest/ClientNotification to JSON, extracts method+params, and routes through send_request/send_notification. ProviderEvents are correctly mapped to ServerEvents via provider_event_to_server_event (line 1565): Disconnected events update health but don't produce ServerEvents, Lagged events are swallowed with a warning, Error events become LegacyNotifications, and all others become LegacyNotifications with derived method names. The commit added 13 new tests (total 18 from_provider tests) covering all 7 validation assertions. The worker followed the TDD procedure from the skill — tests were written iteratively and all pass (1096 passed, 0 failed).",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The from_provider implementation uses magic method names ('$resolve', '$reject') for server request resolution through the generic ProviderTransport. This convention isn't documented in the architecture docs or AGENTS.md. Future provider implementors need to know about this convention if they want to support approval flows.",
+      "evidence": "connection.rs lines 1133-1173 — SessionCommand::Resolve sends '$resolve' and SessionCommand::Reject sends '$reject' as method names through send_request. The code comments explain it, but .factory/library/ doesn't document this convention."
+    },
+    {
+      "area": "conventions",
+      "observation": "The provider_event_method function (line 1597) maps each ProviderEvent variant to a specific wire method string (e.g., 'codex/event/turnStarted'). This mapping table is critical for event routing but exists only in code — no documentation in library/ or architecture.md covers the method naming convention.",
+      "evidence": "connection.rs lines 1597-1642 — the provider_event_method match block with 30+ method mappings. .factory/library/provider-transport.md discusses the trait but not the specific method name mapping convention."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS. The from_provider constructor is a well-structured implementation that correctly wires event bridging, health watching, and command dispatch through the ProviderTransport trait without downcasting. The Arc<Mutex<ProviderTransport>> design avoids deadlock by ensuring the event task only holds the lock briefly for event_receiver() and never during recv().await. 18 comprehensive tests cover all 7 validation assertions. No blocking issues found. Two minor knowledge gaps noted for documentation."
+}

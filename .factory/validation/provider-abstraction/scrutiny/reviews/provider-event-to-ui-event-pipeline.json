@@ -1,0 +1,34 @@
+{
+  "featureId": "provider-event-to-ui-event-pipeline",
+  "reviewedAt": "2026-04-14T17:35:00.000Z",
+  "commitId": "51f1ccbd3e3e2d9b45f4b91f0a6e8a6d7eb1c8f5",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The commit adds 39 new tests (71 total in the mapping module) covering the complete ProviderEvent → UiEvent pipeline. Every one of the 34 ProviderEvent variants has explicit mapping in `provider_event_to_ui_event()` and dedicated test coverage. The implementation is correct, well-structured, and follows existing patterns. Round-trip data fidelity, token accounting, error handling, realtime voice events, and streaming order preservation are all verified. All 71 mapping tests and 1148 total crate tests pass. No blocking issues found.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/mapping.rs",
+        "line": 581,
+        "severity": "non_blocking",
+        "description": "FileChangeDelta maps to UiEvent::CommandOutputDelta rather than a dedicated UiEvent::FileChangeDelta variant. This is intentional (FileChangeDelta is a type of command output for UI purposes) and is tested, but it means the UI cannot distinguish file change deltas from command execution deltas at the UiEvent level. Acceptable for now since both render as streaming text, but worth noting for future typed file-change rendering."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/mapping.rs",
+        "line": 592,
+        "severity": "non_blocking",
+        "description": "ToolCallStarted and ToolCallUpdate use `serde_json::to_value(event)` for params, which serializes the entire ProviderEvent with camelCase serde rename. This means params includes the `type` discriminator tag. Not a bug but could be surprising if downstream consumers expect only the variant's fields. Tested and verified to produce valid JSON."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/mapping.rs",
+        "line": 453,
+        "severity": "non_blocking",
+        "description": "`provider_event_to_ui_event` is `#[allow(dead_code)]` and `pub(crate)` — not yet called from production code. This is expected and documented with a TODO pointing to `ServerSession::from_provider` as the intended consumer. The function is exercised through tests and will be wired in when that feature lands."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "PASS. The ProviderEvent → UiEvent pipeline is comprehensively implemented and tested. All 34 ProviderEvent variants map explicitly to UiEvent variants (or return None for internal-only events like StreamingStarted/Completed and Lagged). Round-trip data fidelity is verified through 8 ServerNotification → ProviderEvent → UiEvent tests. Token accounting correctly computes used = input_tokens + output_tokens with limit from model_context_window. Error events produce UiEvent::Error with message and optional code. Realtime voice events (started/closed) flow through the full pipeline. Streaming delta order is preserved. The 39 new tests bring the mapping module to 71 total, and all pass along with the full crate test suite (1148 tests). Three non-blocking observations noted: FileChangeDelta reuses CommandOutputDelta variant, some RawNotification params include the serde type tag, and the function awaits production wiring in a future feature."
+}

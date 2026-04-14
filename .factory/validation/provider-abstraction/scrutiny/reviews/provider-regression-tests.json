@@ -1,0 +1,45 @@
+{
+  "featureId": "provider-regression-tests",
+  "reviewedAt": "2026-04-14T18:30:00.000Z",
+  "commitId": "4585b9b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Comprehensive regression test suite with 32 tests covering 14 VAL-ABS assertions plus 6 cross-cutting scenarios. Tests use well-structured mock providers (StreamingMockProvider, ResolutionTrackingProvider, CancelTrackingProvider, ThreadLifecycleProvider) alongside existing SequencedMockProvider, ErrorMockProvider, PiNativeTransport, and DroidNativeTransport mocks. Coverage is thorough for disconnect recovery, event ordering, approval flow, cancel semantics, lag handling, and API contract preservation. All tests verified passing (1139 total, 0 failures).",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/regression.rs",
+        "line": 757,
+        "severity": "non_blocking",
+        "description": "regression_broadcast_lagged_handled_gracefully tests raw tokio broadcast::channel lag behavior directly, not through a ProviderTransport implementation. It creates a bare broadcast channel and tests try_recv(). This is a valid tokio behavior test but doesn't verify the provider layer's handling of RecvError::Lagged in its event loop. The other two lagged tests (lines 794 and 835) do properly test through from_provider, so overall VAL-ABS-039 coverage is adequate."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/regression.rs",
+        "line": 1190,
+        "severity": "non_blocking",
+        "description": "regression_ipc_config_types_preserved is a #[test] (not async) that only verifies InProcessConfig struct construction. It doesn't verify IPC stream functionality through a provider-backed session. Since the feature description mentions 'IPC-based sessions work through the provider abstraction', this test is more of an API contract check than an IPC functional regression test. However, real IPC testing requires an in-process server, so this is a reasonable compromise documented by the test's own comments."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/regression.rs",
+        "line": 1675,
+        "severity": "non_blocking",
+        "description": "Thread-local storage (SENT_REQUESTS, SENT_NOTIFICATIONS) used by ResolutionTrackingProvider and CancelTrackingProvider assumes single-threaded test execution. If tokio::test runtime spawns work on different threads (which multi-threaded runtime can), thread-local state could be lost. In practice, #[tokio::test] uses a current-thread runtime by default, so this works correctly, but it's fragile if the test configuration ever changes."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The regression test file uses `#[cfg(test)] mod regression` in mod.rs rather than a `mod tests` block within the file. This is different from the convention stated in the mission AGENTS.md ('Tests go in #[cfg(test)] mod tests blocks within source files'). However, this matches the pattern used by other provider submodules (cross_provider.rs, error_handling.rs, codex.rs) which are also standalone test modules gated with #[cfg(test)].",
+      "evidence": "mod.rs line 442: `#[cfg(test)] mod regression;` — regression.rs is a standalone file in the provider directory, not a nested tests module"
+    },
+    {
+      "area": "knowledge",
+      "observation": "The regression tests verify that `ProviderEvent::Lagged` is swallowed by the `from_provider` event bridge and NOT forwarded as a `ServerEvent`. This behavior is documented in provider-transport.md but could be more explicit about WHY (UI layer should never see lag events).",
+      "evidence": "regression.rs:793-828, mapping.rs:711-713 — Lagged returns None from provider_event_to_ui_event"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS. The regression test suite is comprehensive and well-structured, covering all 14 VAL-ABS assertions and 6 cross-cutting scenarios with 32 distinct tests. The three non-blocking issues are: (1) one lagged test exercises raw broadcast channel rather than provider-layer handling (though the other two lagged tests do cover the provider path), (2) IPC tests are API contract checks rather than functional tests (reasonable given in-process server requirement), and (3) thread-local storage in mock providers relies on single-threaded test runtime default. The handoff's claim of '33 new tests' is slightly inaccurate — the actual file contains 32 test functions (the handoff listed a duplicate test name). All 1139 tests pass with zero clippy warnings. The connect_local, connect_remote, and SSH bootstrap API contract preservation tests (VAL-ABS-031/032/033) verify type constructibility rather than end-to-end flows, which is appropriate since those paths are not yet wrapped in ProviderTransport. The full Codex regression flow (VAL-ABS-029) is well-covered through both direct provider and from_provider paths."
+}

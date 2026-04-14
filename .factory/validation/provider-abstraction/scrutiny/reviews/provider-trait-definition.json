@@ -1,0 +1,39 @@
+{
+  "featureId": "provider-trait-definition",
+  "reviewedAt": "2026-04-14T19:30:00Z",
+  "commitId": "cb3c525",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The ProviderTransport trait and all associated types (AgentType, ProviderEvent, AgentPermissionPolicy, ProviderConfig, AgentInfo, SessionInfo) are well-defined, properly tested, and conform to the validation contract (VAL-ABS-001 through VAL-ABS-020). The worker verified that all types were already fully implemented, ran 45 targeted tests plus the full 1028-test suite, fixed one clippy warning (collapsible_if in pi detection), and confirmed UniFFI binding generation succeeds for both Swift and Kotlin. The only commit (cb3c525) is a minor clippy fix — the trait and types were pre-existing from prior work.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/mod.rs",
+        "line": 766,
+        "severity": "non_blocking",
+        "description": "provider_event_serde_roundtrip test only round-trips the MessageDelta variant. The comprehensive all-variants serde round-trip lives in mapping.rs (provider_event_uniffi_serde_round_trip_all_variants), which is adequate, but having only one variant tested in the mod.rs test is slightly misleading. Not a real issue since mapping.rs provides full coverage."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/mod.rs",
+        "line": 338,
+        "severity": "non_blocking",
+        "description": "ProviderConfig does not derive serde::Serialize/Deserialize, which means it cannot be serialized for persistence or logging. This is currently intentional (internal-only config struct), but if the upcoming generic-acp milestone needs to persist provider configs, serde will need to be added."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "ProviderConfig is an internal-only Rust type (no uniffi::Record, no serde derives) used solely for passing connection parameters to ProviderTransport::connect(). This pattern — internal config types without FFI exposure — is not documented in AGENTS.md but is a meaningful design decision that future workers should be aware of.",
+      "evidence": "shared/rust-bridge/codex-mobile-client/src/provider/mod.rs:338 — #[derive(Debug, Clone)] only, compared to AgentInfo/SessionInfo which have full uniffi::Record + serde derives"
+    },
+    {
+      "area": "knowledge",
+      "observation": "The feature description mentions AgentType variants 'Codex, Claude, GPT, Gemini, Custom, and Factory' but the actual implementation uses 'Codex, PiAcp, PiNative, DroidAcp, DroidNative, GenericAcp'. The validation contract (VAL-ABS-016) correctly lists the actual variants. The feature description in features.json appears to be a template that was not updated to match the actual design in architecture.md.",
+      "evidence": "Feature description: 'AgentType enum with all 6 variants: Codex, Claude, GPT, Gemini, Custom, and Factory' vs actual implementation in mod.rs: Codex, PiAcp, PiNative, DroidAcp, DroidNative, GenericAcp. Validation contract VAL-ABS-016 correctly specifies the actual variants."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS. The ProviderTransport trait is object-safe (dyn-compatible via #[async_trait], Send+Sync+'static), AgentType has exactly 6 variants with all required derives (Debug, Clone, Copy, PartialEq, Eq, Hash, serde, uniffi::Enum, Display), ProviderEvent has exactly 34 variants with proper internally-tagged serde (tag=\"type\", rename_all=\"camelCase\") and uniffi::Enum, ProviderConfig has sensible defaults (Codex agent type, litter/0.1.0 client identity, all optional fields None), and AgentInfo/SessionInfo are UniFFI-safe records with serde support. Test coverage is comprehensive: 45 targeted tests cover object safety, all enum variants, serde roundtrips for all 34 ProviderEvent variants (in mapping.rs), display formatting, config defaults, and record construction. The worker's commit (cb3c525) is a minor clippy fix; the core types were already implemented. Two minor non-blocking notes: the mod.rs serde test only covers one ProviderEvent variant (full coverage is in mapping.rs), and ProviderConfig lacks serde derives (intentionally internal-only but may need addition for generic-acp milestone)."
+}

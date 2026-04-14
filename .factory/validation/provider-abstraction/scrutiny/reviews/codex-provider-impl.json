@@ -1,0 +1,45 @@
+{
+  "featureId": "codex-provider-impl",
+  "reviewedAt": "2026-04-14T17:30:00.000Z",
+  "commitId": "c151c50",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The CodexProvider implementation is well-structured and correctly wraps AppServerClient behind the ProviderTransport trait. The worker task uses a clean tokio::select! loop for command dispatch and event forwarding. Disconnect is idempotent. Drop aborts the worker task. Tests cover all 7 validation assertions, though most tests exercise MockProvider rather than CodexProvider directly (acceptable since CodexProvider requires a real AppServerClient). Two non-blocking issues noted: (1) disconnect() sends Shutdown then immediately aborts — the Shutdown command never executes, and (2) tests primarily verify MockProvider behavior rather than CodexProvider-specific behavior.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/codex.rs",
+        "line": 233,
+        "severity": "non_blocking",
+        "description": "disconnect() sends ProviderCommand::Shutdown via command_tx.send() and then immediately calls handle.abort(). The Shutdown command is meant to gracefully shut down the worker by calling client.shutdown().await, but since abort() kills the task immediately afterward, the Shutdown command never actually executes. The abort() call wins the race. This is harmless in practice (abort is a valid cleanup path), but the Shutdown command is dead code during disconnect(). Either remove the Shutdown send and rely solely on abort(), or remove abort() and wait for the worker to process Shutdown gracefully."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/codex.rs",
+        "line": 618,
+        "severity": "non_blocking",
+        "description": "Most new tests (8 of 11) exercise MockProvider behavior rather than CodexProvider-specific behavior. For example, mock_provider_double_disconnect_is_safe tests MockProvider disconnect idempotency, but CodexProvider's disconnect() has different logic (it sends a Shutdown command + aborts the worker handle). The actual CodexProvider idempotent disconnect path is not directly tested. This is understandable since CodexProvider::new() requires a real AppServerClient that can't be easily mocked, but it's worth noting as a coverage gap. The codex_provider_drop_impl_exists test using std::mem::needs_drop is a reasonable workaround."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/codex.rs",
+        "line": 69,
+        "severity": "non_blocking",
+        "description": "CodexProvider::new() sets connected = true immediately, meaning the constructor assumes the client is already connected. This is documented in the code comments but the connect() trait method returns ConnectionFailed when self.connected is false, meaning once a CodexProvider is disconnected, it can never be reconnected via the trait interface. This is a design limitation worth documenting more explicitly — the only way to 'reconnect' is to create a new CodexProvider instance. This matches the feature description but could surprise consumers of the trait."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-backend-worker skill says 'Write Tests First (Red)' — write failing tests before implementation. The worker's transcript shows they analyzed existing code, then implemented the Drop impl, and then wrote tests. The skill procedure was followed loosely but not in strict TDD order. This is pragmatic for the small Drop impl addition but deviates from the skill's stated procedure.",
+      "evidence": "Transcript shows: Read code → Edit (Drop impl) → Edit (tests) rather than Edit (failing tests) → Edit (implementation). Handoff skillFeedback.followedProcedure is true."
+    },
+    {
+      "area": "knowledge",
+      "observation": "AppServerClient (from codex-app-server-client crate) cannot be easily mocked for unit testing. The worker discovered this and used MockProvider as a proxy for testing CodexProvider behavior patterns. Future workers implementing other providers that wrap AppServerClient will hit the same limitation. A note in the architecture docs about the testing strategy for AppServerClient wrappers would save exploration time.",
+      "evidence": "Transcript shows worker reading the upstream AppServerClient source to understand its interface, then falling back to MockProvider-based tests. Handoff tests section confirms all new tests use MockProvider."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "CodexProvider implementation passes review. The core architecture is sound: worker task with tokio::select! for command/event multiplexing, broadcast channel for event distribution, oneshot channels for request/response correlation, and idempotent disconnect with abort cleanup. Drop impl is correct. All 7 validation assertions (VAL-ABS-002/003/004/005/021/022/043) have corresponding tests and all 1039 tests pass. Three non-blocking issues noted: (1) disconnect() sends a Shutdown command that is immediately preempted by abort(), (2) tests primarily exercise MockProvider rather than CodexProvider directly due to AppServerClient being hard to mock, and (3) the no-reconnect design limitation could be documented more explicitly."
+}
