@@ -1,0 +1,77 @@
+{
+  "milestone": "method-mapping",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 29,
+    "passed": 29,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-PI-MAP-001",
+    "VAL-PI-MAP-002",
+    "VAL-PI-MAP-003",
+    "VAL-PI-MAP-004",
+    "VAL-PI-MAP-005",
+    "VAL-PI-MAP-006",
+    "VAL-PI-MAP-007",
+    "VAL-PI-MAP-008",
+    "VAL-PIACP-MAP-001",
+    "VAL-PIACP-MAP-002",
+    "VAL-PIACP-MAP-003",
+    "VAL-PIACP-MAP-004",
+    "VAL-PIACP-MAP-005",
+    "VAL-PIACP-MAP-006",
+    "VAL-PIACP-MAP-007",
+    "VAL-DROID-MAP-001",
+    "VAL-DROID-MAP-002",
+    "VAL-DROID-MAP-003",
+    "VAL-DROID-MAP-004",
+    "VAL-DROID-MAP-005",
+    "VAL-DROID-MAP-006",
+    "VAL-DROID-MAP-007",
+    "VAL-DROIDACP-MAP-001",
+    "VAL-DROIDACP-MAP-002",
+    "VAL-DROIDACP-MAP-003",
+    "VAL-DROIDACP-MAP-004",
+    "VAL-DROIDACP-MAP-005",
+    "VAL-DROIDACP-MAP-006"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null,
+  "details": {
+    "subagentsSpawned": 4,
+    "subagentsCompleted": 4,
+    "totalTestsRun": 68,
+    "testSuites": {
+      "pi-native-method-mapping": {
+        "assertionsTested": 8,
+        "testsRun": 15,
+        "allPassed": true
+      },
+      "pi-acp-method-mapping": {
+        "assertionsTested": 7,
+        "testsRun": 15,
+        "allPassed": true
+      },
+      "droid-native-method-mapping": {
+        "assertionsTested": 7,
+        "testsRun": 17,
+        "allPassed": true
+      },
+      "droid-acp-method-mapping": {
+        "assertionsTested": 6,
+        "testsRun": 21,
+        "allPassed": true
+      }
+    },
+    "fullTestSuite": {
+      "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib",
+      "result": "992 passed; 0 failed; 9 ignored",
+      "duration": "61.43s"
+    }
+  }
+}

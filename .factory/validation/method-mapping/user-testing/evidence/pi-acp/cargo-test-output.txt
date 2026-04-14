@@ -1,0 +1,20 @@
+
+running 15 tests
+test provider::pi::acp_transport::tests::pi_acp_codex_thread_start_no_text_returns_error ... ok
+test provider::pi::acp_transport::tests::pi_acp_codex_thread_read_missing_thread_id ... ok
+test provider::pi::acp_transport::tests::pi_acp_codex_thread_name_set_noop ... ok
+test provider::pi::acp_transport::tests::pi_acp_codex_thread_rollback_noop ... ok
+test provider::pi::acp_transport::tests::pi_acp_codex_turn_interrupt_with_session_id ... ok
+test provider::pi::acp_transport::tests::pi_acp_codex_turn_interrupt_calls_cancel ... ok
+test provider::pi::acp_transport::tests::pi_acp_codex_thread_read_calls_session_load ... ok
+test provider::pi::acp_transport::tests::pi_acp_codex_thread_list_calls_session_list ... ok
+test provider::pi::acp_transport::tests::pi_acp_codex_thread_list_empty ... ok
+test provider::pi::acp_transport::tests::pi_acp_codex_thread_start_calls_session_new_then_prompt ... ok
+test provider::pi::acp_transport::tests::pi_acp_codex_thread_start_text_from_content_field ... ok
+test provider::pi::acp_transport::tests::pi_acp_codex_turn_start_calls_prompt_only ... ok
+test provider::pi::acp_transport::tests::pi_acp_codex_turn_start_with_session_id ... ok
+test provider::pi::acp_transport::tests::pi_acp_codex_thread_archive_noop ... ok
+test provider::pi::acp_transport::tests::pi_acp_codex_collaboration_mode_list_empty ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 986 filtered out; finished in 0.11s
+

@@ -41,3 +41,22 @@
 - Cross-area assertions (VAL-CROSS-*) require either E2E SSH tests or manual verification
 - If gvps is unreachable, mark E2E assertions as "blocked" and note in synthesis
 - VAL-CROSS-008 (IPC isolation) is a Rust-only assertion — verify via unit test
+
+## Flow Validator Guidance: Rust Method Mapping Tests
+
+### Isolation Rules
+- Each test creates its own mock transport (MockPiChannel, MockAcpTransport, etc.)
+- No shared state between tests — safe to run concurrently
+- No services to start — all tests are pure unit tests against mock transports
+
+### Boundaries
+- Pi native tests: filter `pi_codex` in cargo test
+- Pi ACP tests: filter `pi_acp_codex` in cargo test
+- Droid native tests: filter `droid_codex` in cargo test
+- Droid ACP tests: filter `droid_acp_codex` in cargo test
+- Do NOT run the full `--lib` suite per subagent — use filtered runs to avoid overlap
+
+### Resource Cost
+- Very low: ~200MB RAM total for all 4 groups
+- Max concurrent validators: 5 (for method mapping tests specifically)
+- Typical runtime: <1 second per filtered group

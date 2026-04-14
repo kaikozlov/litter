@@ -1,0 +1,29 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.32s
+     Running unittests src/lib.rs (shared/rust-bridge/target/debug/deps/codex_mobile_client-6d8bc104bd384b85)
+
+running 14 tests
+test provider::pi::transport::tests::pi_codex_thread_list_returns_empty_threads ... ok
+test provider::pi::transport::tests::pi_codex_thread_read_delegates_to_get_state ... ok
+test provider::pi::transport::tests::pi_codex_thread_start_no_text_returns_error ... ok
+test provider::pi::transport::tests::pi_codex_turn_interrupt_idle_is_noop ... ok
+test provider::pi::transport::tests::pi_codex_unknown_method_returns_error ... ok
+test provider::pi::transport::tests::pi_codex_thread_name_set_noop ... ok
+test provider::pi::transport::tests::pi_codex_collaboration_mode_list_returns_empty ... ok
+test provider::pi::transport::tests::pi_codex_thread_start_extracts_text_from_items ... ok
+test provider::pi::transport::tests::pi_codex_thread_rollback_noop ... ok
+test provider::pi::transport::tests::pi_codex_thread_start_extracts_text_from_content_field ... ok
+test provider::pi::transport::tests::pi_codex_thread_start_extracts_text_from_text_field ... ok
+test provider::pi::transport::tests::pi_codex_turn_interrupt_calls_abort ... ok
+test provider::pi::transport::tests::pi_codex_thread_archive_noop ... ok
+test provider::pi::transport::tests::pi_codex_turn_start_extracts_text_from_items ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 987 filtered out; finished in 0.05s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.32s
+     Running unittests src/lib.rs (shared/rust-bridge/target/debug/deps/codex_mobile_client-6d8bc104bd384b85)
+
+running 1 test
+test provider::pi::transport::tests::pi_full_lifecycle_mapping ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1000 filtered out; finished in 0.10s
+

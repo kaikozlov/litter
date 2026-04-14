@@ -1,0 +1,208 @@
+{
+  "groupId": "pi-native-method-mapping",
+  "testedAt": "2026-04-13T20:15:00Z",
+  "isolation": {
+    "type": "cargo test",
+    "testsPerProcess": true,
+    "sharedState": "none — each test creates its own MockPiChannel"
+  },
+  "toolsUsed": ["cargo test"],
+  "assertions": [
+    {
+      "id": "VAL-PI-MAP-001",
+      "title": "thread/start maps to Pi prompt with text extraction",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pi_codex_thread_start_extracts_text_from_items",
+          "expected": "send_request('thread/start', {items: [{role:'user',content:'Hello Pi!'}]}) extracts text, sends prompt command, returns synthetic ThreadStart with thread ID",
+          "observed": "Test passed. Result contains 'id' and 'thread_id' string fields with 'pi-thread-' prefix. Mock captured prompt command with text='Hello Pi!'"
+        },
+        {
+          "action": "Run pi_codex_thread_start_extracts_text_from_content_field",
+          "expected": "send_request('thread/start', {content: 'Direct content text'}) extracts text from content field",
+          "observed": "Test passed. Mock captured prompt command with text='Direct content text'"
+        },
+        {
+          "action": "Run pi_codex_thread_start_extracts_text_from_text_field",
+          "expected": "send_request('thread/start', {text: 'Text field content'}) extracts text from text field",
+          "observed": "Test passed. Mock captured prompt command with text='Text field content'"
+        }
+      ],
+      "evidence": {
+        "testOutput": "method-mapping/user-testing/evidence/pi-native/pi-codex-tests-output.txt",
+        "testFile": "shared/rust-bridge/codex-mobile-client/src/provider/pi/transport.rs (lines 1513-1600)",
+        "allTestsPassed": true,
+        "testNames": [
+          "pi_codex_thread_start_extracts_text_from_items",
+          "pi_codex_thread_start_extracts_text_from_content_field",
+          "pi_codex_thread_start_extracts_text_from_text_field"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-MAP-002",
+      "title": "turn/start maps to Pi prompt",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pi_codex_turn_start_extracts_text_from_items",
+          "expected": "send_request('turn/start', {items: [{role:'user',content:'Follow-up question'}]}) extracts text and sends prompt command",
+          "observed": "Test passed. Result contains 'id' string field. Mock captured prompt command with text='Follow-up question'. Same mapping as thread/start since Pi doesn't distinguish thread/turn."
+        }
+      ],
+      "evidence": {
+        "testOutput": "method-mapping/user-testing/evidence/pi-native/pi-codex-tests-output.txt",
+        "testFile": "shared/rust-bridge/codex-mobile-client/src/provider/pi/transport.rs (lines 1605-1630)",
+        "allTestsPassed": true,
+        "testNames": ["pi_codex_turn_start_extracts_text_from_items"]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-MAP-003",
+      "title": "turn/interrupt maps to Pi abort",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pi_codex_turn_interrupt_calls_abort",
+          "expected": "send_request('turn/interrupt', null) calls abort() and returns Ok(Value::Null)",
+          "observed": "Test passed. Result is null. Mock captured abort command with type='abort'"
+        },
+        {
+          "action": "Run pi_codex_turn_interrupt_idle_is_noop",
+          "expected": "send_request('turn/interrupt', null) succeeds even when no prompt is active (idle state)",
+          "observed": "Test passed. Result is Ok — abort on idle succeeds as no-op"
+        }
+      ],
+      "evidence": {
+        "testOutput": "method-mapping/user-testing/evidence/pi-native/pi-codex-tests-output.txt",
+        "testFile": "shared/rust-bridge/codex-mobile-client/src/provider/pi/transport.rs (lines 1631-1664)",
+        "allTestsPassed": true,
+        "testNames": [
+          "pi_codex_turn_interrupt_calls_abort",
+          "pi_codex_turn_interrupt_idle_is_noop"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-MAP-004",
+      "title": "thread/list returns structured response",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pi_codex_thread_list_returns_empty_threads",
+          "expected": "send_request('thread/list', null) returns {threads: []}",
+          "observed": "Test passed. Response has 'threads' array field with length 0, compatible with Codex ThreadList format"
+        }
+      ],
+      "evidence": {
+        "testOutput": "method-mapping/user-testing/evidence/pi-native/pi-codex-tests-output.txt",
+        "testFile": "shared/rust-bridge/codex-mobile-client/src/provider/pi/transport.rs (lines 1665-1680)",
+        "allTestsPassed": true,
+        "testNames": ["pi_codex_thread_list_returns_empty_threads"]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-MAP-005",
+      "title": "thread/read delegates to Pi get_state",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pi_codex_thread_read_delegates_to_get_state",
+          "expected": "send_request('thread/read', {thread_id: 'some-thread'}) calls get_state() and returns result",
+          "observed": "Test passed. Mock queued get_state response {status:'idle', session_id:'sess-1'}. Transport returned matching result. Mock captured get_state command."
+        }
+      ],
+      "evidence": {
+        "testOutput": "method-mapping/user-testing/evidence/pi-native/pi-codex-tests-output.txt",
+        "testFile": "shared/rust-bridge/codex-mobile-client/src/provider/pi/transport.rs (lines 1681-1704)",
+        "allTestsPassed": true,
+        "testNames": ["pi_codex_thread_read_delegates_to_get_state"]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-MAP-006",
+      "title": "thread/archive, rollback, name/set return success no-op",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pi_codex_thread_archive_noop",
+          "expected": "send_request('thread/archive', {thread_id:'t1'}) returns {ok:true} without sending Pi command",
+          "observed": "Test passed. Response is {ok:true}. No commands sent to Pi (captured commands list is empty)."
+        },
+        {
+          "action": "Run pi_codex_thread_rollback_noop",
+          "expected": "send_request('thread/rollback', {thread_id:'t1'}) returns {ok:true} without sending Pi command",
+          "observed": "Test passed. Response is {ok:true}. No commands sent to Pi."
+        },
+        {
+          "action": "Run pi_codex_thread_name_set_noop",
+          "expected": "send_request('thread/name/set', {thread_id:'t1',name:'New Name'}) returns {ok:true} without sending Pi command",
+          "observed": "Test passed. Response is {ok:true}. No commands sent to Pi."
+        }
+      ],
+      "evidence": {
+        "testOutput": "method-mapping/user-testing/evidence/pi-native/pi-codex-tests-output.txt",
+        "testFile": "shared/rust-bridge/codex-mobile-client/src/provider/pi/transport.rs (lines 1705-1755)",
+        "allTestsPassed": true,
+        "testNames": [
+          "pi_codex_thread_archive_noop",
+          "pi_codex_thread_rollback_noop",
+          "pi_codex_thread_name_set_noop"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-MAP-007",
+      "title": "collaborationMode/list returns empty",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pi_codex_collaboration_mode_list_returns_empty",
+          "expected": "send_request('collaborationMode/list', null) returns {data:[]}",
+          "observed": "Test passed. Response is exactly {data:[]}. No commands sent to Pi."
+        }
+      ],
+      "evidence": {
+        "testOutput": "method-mapping/user-testing/evidence/pi-native/pi-codex-tests-output.txt",
+        "testFile": "shared/rust-bridge/codex-mobile-client/src/provider/pi/transport.rs (lines 1756-1774)",
+        "allTestsPassed": true,
+        "testNames": ["pi_codex_collaboration_mode_list_returns_empty"]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-PI-MAP-008",
+      "title": "unknown methods return method-not-found error (-32601)",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run pi_codex_unknown_method_returns_error",
+          "expected": "send_request('some/future/method', null) returns RpcError::Server with code -32601",
+          "observed": "Test passed. Result is Err(RpcError::Server { code: -32601, message }) where message contains 'some/future/method'."
+        }
+      ],
+      "evidence": {
+        "testOutput": "method-mapping/user-testing/evidence/pi-native/pi-codex-tests-output.txt",
+        "testFile": "shared/rust-bridge/codex-mobile-client/src/provider/pi/transport.rs (lines 1775-1792)",
+        "allTestsPassed": true,
+        "testNames": ["pi_codex_unknown_method_returns_error"]
+      },
+      "issues": null
+    }
+  ],
+  "lifecycleTest": {
+    "testName": "pi_full_lifecycle_mapping",
+    "status": "pass",
+    "description": "Verifies complete Pi event lifecycle from agent_start through agent_end, including thinking deltas, text deltas, tool execution with stdout, and all ProviderEvent mappings (StreamingStarted, TurnStarted, ReasoningDelta, MessageDelta, ToolCallStarted, CommandOutputDelta, StreamingCompleted, etc.)"
+  },
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 8 assertions (VAL-PI-MAP-001 through VAL-PI-MAP-008): all 8 passed. 14 individual unit tests plus 1 full lifecycle test all passed with no failures. Text extraction works from items array, content field, and text field. Abort is correctly dispatched and succeeds on idle. No-op methods return {ok:true} without sending Pi commands. Unknown methods correctly return -32601 error."
+}

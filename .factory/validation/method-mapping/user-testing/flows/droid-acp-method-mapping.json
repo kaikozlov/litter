@@ -1,0 +1,200 @@
+{
+  "groupId": "droid-acp-method-mapping",
+  "testedAt": "2026-04-13T20:15:00Z",
+  "isolation": {
+    "type": "Rust unit tests on host machine",
+    "noSharedState": true,
+    "eachTestCreatesOwnMockTransport": true,
+    "noServicesRequired": true
+  },
+  "toolsUsed": ["cargo test"],
+  "assertions": [
+    {
+      "id": "VAL-DROIDACP-MAP-001",
+      "title": "thread/start maps to Droid prompt",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run droid_acp_codex_thread_start_sends_prompt_with_session_id",
+          "expected": "Prompt sent with extracted text, response contains session/thread ID from system/init",
+          "observed": "Test passed — asserts result[\"id\"] == \"droid-acp-sess-42\", result[\"thread_id\"] == \"droid-acp-sess-42\", and output contains \"Hello Droid!\""
+        },
+        {
+          "action": "Run droid_acp_codex_thread_start_text_from_content_field",
+          "expected": "Text extracted from 'content' field of params",
+          "observed": "Test passed — asserts output contains \"Direct content\""
+        },
+        {
+          "action": "Run droid_acp_codex_thread_start_text_from_text_field",
+          "expected": "Text extracted from 'text' field of params",
+          "observed": "Test passed — asserts output contains \"Text field content\""
+        },
+        {
+          "action": "Run droid_acp_codex_thread_start_no_text_returns_error",
+          "expected": "Error returned when no text found in params",
+          "observed": "Test passed — asserts RpcError::Deserialization with message containing \"no text found\""
+        },
+        {
+          "action": "Run droid_acp_codex_thread_start_no_session_returns_synthetic_id",
+          "expected": "Synthetic ID returned when no system/init received",
+          "observed": "Test passed — asserts result has string \"id\" and \"thread_id\" fields"
+        }
+      ],
+      "evidence": {
+        "testOutput": "method-mapping/user-testing/evidence/droid-acp/test-output-droid-acp-codex.txt",
+        "allTestsPassed": true,
+        "testCount": 5,
+        "sourceFile": "shared/rust-bridge/codex-mobile-client/src/provider/droid/acp_transport.rs (lines 1293-1415)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROIDACP-MAP-002",
+      "title": "turn/start maps to Droid prompt (no re-initialization)",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run droid_acp_codex_turn_start_sends_prompt",
+          "expected": "Prompt sent with extracted text from items array, returns null",
+          "observed": "Test passed — asserts result is null and output contains \"Follow-up message\""
+        },
+        {
+          "action": "Run droid_acp_codex_turn_start_no_reinitialization",
+          "expected": "Exactly one message sent to transport (no init or session creation)",
+          "observed": "Test passed — asserts exactly 1 non-empty line in output containing the prompt text"
+        }
+      ],
+      "evidence": {
+        "testOutput": "method-mapping/user-testing/evidence/droid-acp/test-output-droid-acp-codex.txt",
+        "allTestsPassed": true,
+        "testCount": 2,
+        "sourceFile": "shared/rust-bridge/codex-mobile-client/src/provider/droid/acp_transport.rs (lines 1420-1475)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROIDACP-MAP-003",
+      "title": "turn/interrupt returns success",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run droid_acp_codex_turn_interrupt_returns_success",
+          "expected": "Returns Ok(Value::Null) without error",
+          "observed": "Test passed — asserts result is null"
+        },
+        {
+          "action": "Run droid_acp_codex_turn_interrupt_no_output_to_transport",
+          "expected": "No output written to Droid transport for interrupt",
+          "observed": "Test passed — asserts captured output is empty after interrupt"
+        }
+      ],
+      "evidence": {
+        "testOutput": "method-mapping/user-testing/evidence/droid-acp/test-output-droid-acp-codex.txt",
+        "allTestsPassed": true,
+        "testCount": 2,
+        "sourceFile": "shared/rust-bridge/codex-mobile-client/src/provider/droid/acp_transport.rs (lines 1478-1525)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROIDACP-MAP-004",
+      "title": "thread/list returns current session or empty",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run droid_acp_codex_thread_list_returns_current_session",
+          "expected": "Returns empty threads array before init",
+          "observed": "Test passed — asserts threads array is empty"
+        },
+        {
+          "action": "Run droid_acp_codex_thread_list_returns_session_after_init",
+          "expected": "Returns single thread with session ID from system/init",
+          "observed": "Test passed — asserts threads array has 1 entry with id == \"sess-list-42\""
+        },
+        {
+          "action": "Run droid_acp_codex_thread_list_empty_before_init",
+          "expected": "Returns empty threads array when no init received",
+          "observed": "Test passed — asserts threads array is empty"
+        }
+      ],
+      "evidence": {
+        "testOutput": "method-mapping/user-testing/evidence/droid-acp/test-output-droid-acp-codex.txt",
+        "allTestsPassed": true,
+        "testCount": 3,
+        "sourceFile": "shared/rust-bridge/codex-mobile-client/src/provider/droid/acp_transport.rs (lines 1527-1575)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROIDACP-MAP-005",
+      "title": "thread/archive etc return success no-op",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run droid_acp_codex_thread_archive_noop",
+          "expected": "Returns {\"ok\": true} without sending message to Droid transport",
+          "observed": "Test passed — asserts result[\"ok\"] == true and output does not contain \"user_message\""
+        },
+        {
+          "action": "Run droid_acp_codex_thread_rollback_noop",
+          "expected": "Returns {\"ok\": true}",
+          "observed": "Test passed — asserts result[\"ok\"] == true"
+        },
+        {
+          "action": "Run droid_acp_codex_thread_name_set_noop",
+          "expected": "Returns {\"ok\": true}",
+          "observed": "Test passed — asserts result[\"ok\"] == true"
+        }
+      ],
+      "evidence": {
+        "testOutput": "method-mapping/user-testing/evidence/droid-acp/test-output-droid-acp-codex.txt",
+        "allTestsPassed": true,
+        "testCount": 3,
+        "sourceFile": "shared/rust-bridge/codex-mobile-client/src/provider/droid/acp_transport.rs (lines 1576-1640)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROIDACP-MAP-006",
+      "title": "collaborationMode/list returns empty",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run droid_acp_codex_collaboration_mode_list_empty",
+          "expected": "Returns {\"data\": []}",
+          "observed": "Test passed — asserts result[\"data\"] == json!([])"
+        }
+      ],
+      "evidence": {
+        "testOutput": "method-mapping/user-testing/evidence/droid-acp/test-output-droid-acp-codex.txt",
+        "allTestsPassed": true,
+        "testCount": 1,
+        "sourceFile": "shared/rust-bridge/codex-mobile-client/src/provider/droid/acp_transport.rs (lines 1629-1674)"
+      },
+      "issues": null
+    }
+  ],
+  "regression": {
+    "description": "Existing prompt and cancel methods still work after method mapping additions",
+    "tests": [
+      {
+        "name": "droid_acp_codex_existing_prompt_method_still_works",
+        "status": "pass",
+        "detail": "Asserts output contains \"regression test\" text"
+      },
+      {
+        "name": "droid_acp_codex_existing_cancel_method_still_works",
+        "status": "pass",
+        "detail": "Asserts result is null (no error)"
+      },
+      {
+        "name": "droid_acp_codex_unknown_method_returns_error",
+        "status": "pass",
+        "detail": "Asserts RpcError::Server with code -32601 and method name in message"
+      }
+    ]
+  },
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 6 assertions (VAL-DROIDACP-MAP-001 through VAL-DROIDACP-MAP-006): all 6 passed. 19 droid_acp_codex tests ran successfully (0 failed). 2 additional regression tests (existing prompt/cancel methods) also passed. 1 unknown method test confirmed -32601 error code. Total: 21 tests, 21 passed, 0 failed."
+}

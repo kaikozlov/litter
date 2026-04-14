@@ -1,0 +1,40 @@
+$ cd /Users/kai/dev/projects/litter && cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- droid_acp_codex 2>&1
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.32s
+     Running unittests src/lib.rs (shared/rust-bridge/target/debug/deps/codex_mobile_client-6d8bc104bd384b85)
+
+running 19 tests
+test provider::droid::acp_transport::tests::droid_acp_codex_thread_rollback_noop ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_thread_list_returns_current_session ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_thread_name_set_noop ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_existing_cancel_method_still_works ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_thread_list_empty_before_init ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_thread_start_no_session_returns_synthetic_id ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_collaboration_mode_list_empty ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_turn_interrupt_returns_success ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_thread_start_no_text_returns_error ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_thread_list_returns_session_after_init ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_unknown_method_returns_error ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_turn_interrupt_no_output_to_transport ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_thread_archive_noop ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_existing_prompt_method_still_works ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_turn_start_sends_prompt ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_thread_start_text_from_text_field ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_thread_start_sends_prompt_with_session_id ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_thread_start_text_from_content_field ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_turn_start_no_reinitialization ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 982 filtered out; finished in 0.16s
+
+---
+
+$ cd /Users/kai/dev/projects/litter && cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- droid_acp_codex_existing 2>&1
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.32s
+     Running unittests src/lib.rs (shared/rust-bridge/target/debug/deps/codex_mobile_client-6d8bc104bd384b85)
+
+running 2 tests
+test provider::droid::acp_transport::tests::droid_acp_codex_existing_cancel_method_still_works ... ok
+test provider::droid::acp_transport::tests::droid_acp_codex_existing_prompt_method_still_works ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 999 filtered out; finished in 0.16s

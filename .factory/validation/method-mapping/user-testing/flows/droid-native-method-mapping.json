@@ -1,0 +1,191 @@
+{
+  "groupId": "droid-native-method-mapping",
+  "testedAt": "2026-04-13T00:00:00Z",
+  "isolation": {
+    "type": "Rust unit tests on host machine",
+    "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib -- droid_codex",
+    "sharedState": "None — each test creates its own mock transport"
+  },
+  "toolsUsed": ["cargo test"],
+  "assertions": [
+    {
+      "id": "VAL-DROID-MAP-001",
+      "title": "thread/start maps to initialize_session + add_user_message",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run droid_codex_thread_start_calls_initialize_then_add_message",
+          "expected": "Two Droid JSON-RPC calls: droid.initialize_session (with model, autonomy, working_dir) then droid.add_user_message with extracted text; result has thread ID",
+          "observed": "Test passed. Captured requests confirm initialize_session with correct params (model=claude-sonnet-4-20250514, autonomyLevel=normal, workingDirectory=/home/user/project), then add_user_message with content='Hello Droid!'. Result contains id starting with 'droid-thread-'."
+        },
+        {
+          "action": "Run droid_codex_thread_start_no_text_only_initializes",
+          "expected": "Only initialize_session called (no add_user_message when no text)",
+          "observed": "Test passed. Exactly 1 request sent: droid.initialize_session. No add_user_message."
+        },
+        {
+          "action": "Run droid_codex_thread_start_extracts_text_from_content_field",
+          "expected": "Text extracted from 'content' field and passed to add_user_message",
+          "observed": "Test passed. add_user_message called with content='Direct content text'."
+        },
+        {
+          "action": "Run droid_codex_thread_start_extracts_text_from_text_field",
+          "expected": "Text extracted from 'text' field and passed to add_user_message",
+          "observed": "Test passed. add_user_message called with content='Text field content'."
+        }
+      ],
+      "evidence": {
+        "testOutput": "All 4 tests passed: droid_codex_thread_start_calls_initialize_then_add_message, droid_codex_thread_start_no_text_only_initializes, droid_codex_thread_start_extracts_text_from_content_field, droid_codex_thread_start_extracts_text_from_text_field",
+        "consoleErrors": "none",
+        "sourceFile": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROID-MAP-002",
+      "title": "turn/start maps to add_user_message",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run droid_codex_turn_start_calls_add_user_message",
+          "expected": "Only add_user_message called (no initialize_session); text extracted from items array",
+          "observed": "Test passed. Exactly 1 request: droid.add_user_message with content='Follow-up question'. No initialize_session sent. Result is null (no synthetic thread ID)."
+        },
+        {
+          "action": "Run droid_codex_turn_start_extracts_text_from_content",
+          "expected": "Text extracted from 'content' field for turn/start",
+          "observed": "Test passed. add_user_message called with content='Direct content'."
+        }
+      ],
+      "evidence": {
+        "testOutput": "Both tests passed: droid_codex_turn_start_calls_add_user_message, droid_codex_turn_start_extracts_text_from_content",
+        "consoleErrors": "none",
+        "sourceFile": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROID-MAP-003",
+      "title": "turn/interrupt maps to droid.cancel",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run droid_codex_turn_interrupt_calls_cancel",
+          "expected": "droid.cancel sent, returns null",
+          "observed": "Test passed. Request droid.cancel sent. Result is null."
+        },
+        {
+          "action": "Run droid_codex_turn_interrupt_idle_is_noop",
+          "expected": "Cancel on idle succeeds without error",
+          "observed": "Test passed. Result is Ok — cancel on idle is a no-op."
+        }
+      ],
+      "evidence": {
+        "testOutput": "Both tests passed: droid_codex_turn_interrupt_calls_cancel, droid_codex_turn_interrupt_idle_is_noop",
+        "consoleErrors": "none",
+        "sourceFile": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROID-MAP-004",
+      "title": "thread/list maps to droid list_sessions with format conversion",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run droid_codex_thread_list_returns_sessions_as_threads",
+          "expected": "list_sessions called, response converted to Codex ThreadList format with threads array",
+          "observed": "Test passed. Response contains threads array with 2 entries, each with id, title. Correctly mapped from Droid session format."
+        },
+        {
+          "action": "Run droid_codex_thread_list_fallback_on_method_not_found",
+          "expected": "When list_sessions returns -32601, gracefully falls back to empty list",
+          "observed": "Test passed. On -32601 error, returns {\"threads\": []}."
+        },
+        {
+          "action": "Run droid_codex_thread_list_empty_when_no_sessions",
+          "expected": "Empty sessions list returns empty threads array",
+          "observed": "Test passed. Returns {\"threads\": []} when no sessions."
+        }
+      ],
+      "evidence": {
+        "testOutput": "All 3 tests passed: droid_codex_thread_list_returns_sessions_as_threads, droid_codex_thread_list_fallback_on_method_not_found, droid_codex_thread_list_empty_when_no_sessions",
+        "consoleErrors": "none",
+        "sourceFile": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROID-MAP-005",
+      "title": "thread/archive etc return success no-op",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run droid_codex_thread_archive_is_noop",
+          "expected": "Returns {\"ok\": true} without sending Droid command",
+          "observed": "Test passed. Result is {\"ok\": true}."
+        },
+        {
+          "action": "Run droid_codex_thread_rollback_is_noop",
+          "expected": "Returns {\"ok\": true} without sending Droid command",
+          "observed": "Test passed. Result is {\"ok\": true}."
+        },
+        {
+          "action": "Run droid_codex_thread_name_set_is_noop",
+          "expected": "Returns {\"ok\": true} without sending Droid command",
+          "observed": "Test passed. Result is {\"ok\": true}."
+        },
+        {
+          "action": "Run droid_codex_noop_methods_do_not_send_droid_commands",
+          "expected": "No Droid JSON-RPC output for all three no-op methods",
+          "observed": "Test passed. Captured output string is empty — no Droid commands were sent."
+        }
+      ],
+      "evidence": {
+        "testOutput": "All 4 tests passed: droid_codex_thread_archive_is_noop, droid_codex_thread_rollback_is_noop, droid_codex_thread_name_set_is_noop, droid_codex_noop_methods_do_not_send_droid_commands",
+        "consoleErrors": "none",
+        "sourceFile": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROID-MAP-006",
+      "title": "collaborationMode/list returns empty",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run droid_codex_collaboration_mode_list_returns_empty",
+          "expected": "Returns {\"data\": []} without sending Droid command",
+          "observed": "Test passed. Result is {\"data\": []}."
+        }
+      ],
+      "evidence": {
+        "testOutput": "Test passed: droid_codex_collaboration_mode_list_returns_empty",
+        "consoleErrors": "none",
+        "sourceFile": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROID-MAP-007",
+      "title": "unknown methods return method-not-found error (-32601)",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run droid_codex_unknown_method_returns_error",
+          "expected": "Returns RpcError::Server with code -32601 and message containing method name",
+          "observed": "Test passed. Error is RpcError::Server { code: -32601, message containing 'nonexistent/method' }."
+        }
+      ],
+      "evidence": {
+        "testOutput": "Test passed: droid_codex_unknown_method_returns_error",
+        "consoleErrors": "none",
+        "sourceFile": "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 7 assertions (17 tests total): all passed. Droid native method mapping is fully implemented and verified. thread/start correctly chains initialize_session + add_user_message, turn/start maps to add_user_message only, turn/interrupt maps to cancel, thread/list converts from list_sessions with -32601 fallback, no-op methods return success without Droid commands, collaborationMode/list returns empty, and unknown methods return -32601 error."
+}
