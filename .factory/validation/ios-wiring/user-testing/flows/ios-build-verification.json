@@ -1,0 +1,72 @@
+{
+  "groupId": "ios-build-verification",
+  "testedAt": "2026-04-13T00:00:00Z",
+  "isolation": {
+    "workingDirectory": "/Users/kai/dev/projects/litter/",
+    "concurrentTasks": "none — this is the only resource-heavy task"
+  },
+  "toolsUsed": ["make-ios-sim-fast", "cargo-test", "Grep"],
+  "assertions": [
+    {
+      "id": "VAL-IOS-004",
+      "title": "iOS builds with updated bindings",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Grep for agentType: AgentType? in generated Swift bindings",
+          "expected": "Parameter present in sshConnectRemoteServer and sshStartRemoteServerConnect",
+          "observed": "Found in 4 locations in codex_mobile_client.swift: lines 2988, 2992 (protocol methods), 3089, 3123 (class implementations)"
+        },
+        {
+          "action": "Run make ios-sim-fast",
+          "expected": "Build exits 0 with no compile errors",
+          "observed": "** BUILD SUCCEEDED ** — exit code 0. All Swift call sites compile with the new agentType parameter."
+        }
+      ],
+      "evidence": {
+        "generatedSwiftBindings": "agentType: AgentType? found in sshConnectRemoteServer (line 2988, 3089) and sshStartRemoteServerConnect (line 2992, 3123)",
+        "buildResult": "BUILD SUCCEEDED — exit code 0",
+        "consoleErrors": "none"
+      },
+      "tool": "make-ios-sim-fast",
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-005",
+      "title": "Codex connection unchanged when agent type is nil",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test --lib in codex-mobile-client",
+          "expected": "All existing tests pass (0 failures)",
+          "observed": "992 passed; 0 failed; 9 ignored; finished in 61.43s"
+        },
+        {
+          "action": "Review is_non_codex_agent() and ssh connect routing in ffi/ssh.rs",
+          "expected": "None and Some(AgentType::Codex) both return false from is_non_codex_agent(), routing to existing guided SSH connect path",
+          "observed": "is_non_codex_agent(None) returns false (line 928 test confirms). is_non_codex_agent(Some(AgentType::Codex)) returns false (line 933 test confirms). When is_non_codex_agent returns false, the code enters the 'else' branch (line 416): 'Codex (or None): existing guided SSH connect path unchanged.' which calls run_guided_ssh_connect() with the exact same parameters as before."
+        },
+        {
+          "action": "Review backward compatibility tests in ffi/ssh.rs",
+          "expected": "Tests confirm None agent_type follows guided SSH connect path",
+          "observed": "ssh_start_remote_server_connect_accepts_agent_type_param test (line 964) calls with agent_type: None and asserts Ok result. ssh_connect_remote_server_accepts_agent_type_none test (line 1073) confirms backward compatibility. Both tests pass."
+        }
+      ],
+      "evidence": {
+        "testResult": "992 passed; 0 failed; 9 ignored",
+        "codeReview": "is_non_codex_agent(None) = false → enters existing guided SSH connect path (run_guided_ssh_connect) unchanged. Same code path as pre-mission behavior.",
+        "regressionTests": [
+          "is_non_codex_agent_returns_false_for_none",
+          "is_non_codex_agent_returns_false_for_codex",
+          "ssh_start_remote_server_connect_accepts_agent_type_param",
+          "ssh_connect_remote_server_accepts_agent_type_none"
+        ]
+      },
+      "tool": "cargo-test + code-review",
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 2 assertions: 2 passed. VAL-IOS-004: iOS simulator build succeeds with updated bindings containing agentType: AgentType? parameter. VAL-IOS-005: All 992 Rust tests pass; code review confirms None/Codex agent_type routes to unchanged guided SSH connect path."
+}

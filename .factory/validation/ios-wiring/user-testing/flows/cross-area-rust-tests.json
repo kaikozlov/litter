@@ -1,0 +1,157 @@
+{
+  "groupId": "cross-area-rust-tests",
+  "testedAt": "2026-04-13T00:00:00Z",
+  "isolation": {
+    "type": "read-only code review + cargo test",
+    "workingDirectory": "/Users/kai/dev/projects/litter/",
+    "manifestPath": "shared/rust-bridge/codex-mobile-client/Cargo.toml"
+  },
+  "toolsUsed": ["cargo-test", "Grep", "Read"],
+  "assertions": [
+    {
+      "id": "VAL-CROSS-004",
+      "title": "Codex regression — no agent selection",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib",
+          "expected": "All 992 tests pass, 0 failures",
+          "observed": "992 passed, 0 failed, 9 ignored — all existing Codex connection tests pass"
+        },
+        {
+          "action": "Review connect_remote_over_ssh_with_agent_type routing for None/Codex",
+          "expected": "None and Some(Codex) delegate to existing connect_remote_over_ssh unchanged",
+          "observed": "Lines 749-758 of mobile_client/mod.rs: match agent_type { None | Some(AgentType::Codex) => return self.connect_remote_over_ssh(...).await } — delegates directly, no provider factory invocation"
+        },
+        {
+          "action": "Review FFI ssh_start_remote_server_connect for None agent_type",
+          "expected": "None agent_type uses guided SSH connect path (run_guided_ssh_connect)",
+          "observed": "ffi/ssh.rs is_non_codex_agent(None) returns false, so the else branch calls run_guided_ssh_connect — the full Codex bootstrap path unchanged"
+        },
+        {
+          "action": "Review VAL-ROUTE-001 and VAL-ROUTE-004 tests",
+          "expected": "Tests confirm Codex/None routes through existing SSH path without provider factory",
+          "observed": "codex_agent_type_delegates_to_existing_connect test verifies error message contains no 'provider factory' or 'unsupported agent type'; existing_connect_remote_over_ssh_unchanged test confirms same"
+        }
+      ],
+      "evidence": {
+        "cargoTest": "992 passed; 0 failed; 9 ignored — including tests codex_agent_type_delegates_to_existing_connect, existing_connect_remote_over_ssh_unchanged",
+        "codeReview": "mobile_client/mod.rs:749-758 — None|Some(Codex) delegates to connect_remote_over_ssh(); ffi/ssh.rs is_non_codex_agent(None)=false → run_guided_ssh_connect()"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-005",
+      "title": "Multiple connections to same host with different agents",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Review session storage in MobileClient",
+          "expected": "Sessions stored in HashMap keyed by serverId (String), not by host",
+          "observed": "sessions field is Arc<RwLock<HashMap<String, Arc<ServerSession>>>> — keyed by String (server_id). All insert calls use .insert(server_id.clone(), ...) across connect_local, connect_remote, connect_with_provider, connect_remote_over_ssh, and connect_remote_over_ssh_with_agent_type"
+        },
+        {
+          "action": "Review provider session creation for independent SSH clients",
+          "expected": "Each connection gets its own SshClient instance",
+          "observed": "connect_remote_over_ssh_with_agent_type creates a new Arc<SshClient> via SshClient::connect() for each call (line 781-793). ServerSession::from_provider receives Some(Arc::clone(&ssh_client)) as optional cleanup reference — each session owns its own SSH client"
+        },
+        {
+          "action": "Review factory for independent provider transports",
+          "expected": "Each factory call creates an independent provider transport",
+          "observed": "create_provider_over_ssh() creates a fresh exec_stream per invocation — no shared state between calls. Each transport wraps its own SSH channel stream"
+        },
+        {
+          "action": "Confirm no host-based deduplication exists",
+          "expected": "No host-based key or deduplication of sessions",
+          "observed": "existing_active_session() checks by server_id only. No lookup by host+port exists. Two server entries with same host but different server_ids will have independent sessions"
+        }
+      ],
+      "evidence": {
+        "codeReview": "sessions: HashMap<String, Arc<ServerSession>> keyed by server_id; each connect call creates independent SshClient + provider transport; no host-based deduplication"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-006",
+      "title": "Connection failure returns clear error",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Review factory error handling for missing remote binary",
+          "expected": "TransportError::ConnectionFailed with descriptive message when exec_stream fails or handshake times out",
+          "observed": "factory.rs: each create_* function wraps exec_stream errors as TransportError::ConnectionFailed(format!(\"exec_stream({command:?}): {e}\")). ACP handshake failures return TransportError::ConnectionFailed with specific messages like 'Pi ACP handshake failed: {e}' or 'Droid ACP init timed out after 30s'"
+        },
+        {
+          "action": "Review Codex agent type rejection in factory",
+          "expected": "Clear error for AgentType::Codex passed to provider factory",
+          "observed": "factory.rs:64-67 — AgentType::Codex returns Err(TransportError::ConnectionFailed(\"Codex provider must use the standard bootstrap_codex_server + WebSocket path\"))"
+        },
+        {
+          "action": "Review MobileClient error propagation from factory",
+          "expected": "Factory errors propagate as TransportError back to caller; SSH session cleaned up",
+          "observed": "mobile_client/mod.rs:810-823 — provider factory failure logs warning, calls ssh_client.disconnect().await, updates store health to Disconnected, clears connection progress, returns Err(error)"
+        },
+        {
+          "action": "Run cargo test for factory error handling",
+          "expected": "Tests confirm error types and messages",
+          "observed": "factory tests: factory_codex_returns_connection_failed, factory_generic_acp_returns_connection_failed, provider_connect_updates_health_on_ssh_failure all pass (included in 992 passed)"
+        },
+        {
+          "action": "Review FFI error propagation",
+          "expected": "TransportError converted to ClientError::Transport for iOS",
+          "observed": "ffi/ssh.rs run_provider_ssh_connect: .map_err(|e| ClientError::Transport(e.to_string())) — error string forwarded to iOS as ClientError::Transport with descriptive message"
+        }
+      ],
+      "evidence": {
+        "cargoTest": "992 passed including factory_codex_returns_connection_failed, factory_generic_acp_returns_connection_failed, provider_connect_updates_health_on_ssh_failure, pi_agent_types_route_through_provider_factory, droid_agent_types_route_through_provider_factory",
+        "codeReview": "factory.rs wraps all errors as TransportError::ConnectionFailed with descriptive messages; MobileClient cleans up SSH client and updates store on failure; FFI maps to ClientError::Transport"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-008",
+      "title": "IPC not attempted for provider sessions",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Review ServerSession::from_provider IPC initialization",
+          "expected": "ipc_stream_client set to None in from_provider constructor",
+          "observed": "session/connection.rs line 1221: from_provider() returns Self { ipc_stream_client: None, ssh_client, ssh_pid: None, ipc_ssh_client: None, ipc_stream_bridge_pid: None, ... } — no IPC fields initialized"
+        },
+        {
+          "action": "Review server_supports_ipc for provider sessions",
+          "expected": "Returns false for provider sessions without SSH client and without IPC",
+          "observed": "mobile_client/mod.rs:98: fn server_supports_ipc(session) = session.ssh_client().is_some() || session.has_ipc(). from_provider with ssh_client:None → ssh_client() returns None (since ssh_client field is the optional cleanup reference, but for provider sessions created via connect_remote_over_ssh_with_agent_type, ssh_client IS passed as Some). However, has_ipc() returns false because ipc_stream_client is None. In connect_with_provider (line 594) ssh_client is None, so server_supports_ipc returns false. In connect_remote_over_ssh_with_agent_type (line 835) ssh_client is Some, so server_supports_ipc returns true — BUT the upsert_server call (line 770) passes false for the ipc_enabled parameter"
+        },
+        {
+          "action": "Review FFI provider connect — ipc_socket_path_override hardcoded to None",
+          "expected": "run_provider_ssh_connect passes None for ipc_socket_path_override",
+          "observed": "ffi/ssh.rs line 905: None, // No IPC for provider-backed sessions — explicitly passes None as ipc_socket_path_override to connect_remote_over_ssh_with_agent_type"
+        },
+        {
+          "action": "Review connect_remote_over_ssh_with_agent_type IPC setup",
+          "expected": "No IPC client or bridge PID created in provider path",
+          "observed": "connect_remote_over_ssh_with_agent_type does NOT call start_remote_reconnecting_ipc_client — no IPC stream client, no IPC bridge PID, no spawn_ipc_reader, no spawn_ipc_connection_state_reader. Only the standard Codex path in finish_connect_remote_over_ssh has IPC setup"
+        },
+        {
+          "action": "Review upsert_server ipc_enabled for provider sessions",
+          "expected": "ipc_enabled passed as false for provider sessions",
+          "observed": "connect_with_provider (line 605): upsert_server with server_supports_ipc(&session) — since ssh_client is None and has_ipc is false, this is false. connect_remote_over_ssh_with_agent_type (line 770): upsert_server(..., false) — explicitly false regardless of server_supports_ipc result"
+        },
+        {
+          "action": "Run from_provider tests",
+          "expected": "from_provider tests pass confirming session behavior without IPC",
+          "observed": "Tests from_provider_creates_connected_session, from_provider_request_through_session, from_provider_events_forwarded, from_provider_disconnect_transitions_health, from_provider_notify_succeeds all pass (included in 992 passed)"
+        }
+      ],
+      "evidence": {
+        "cargoTest": "992 passed including from_provider_creates_connected_session, from_provider_request_through_session, from_provider_disconnect_transitions_health, from_provider_notify_succeeds",
+        "codeReview": "from_provider() sets ipc_stream_client: None; no spawn_ipc_reader/spawn_ipc_connection_state_reader calls in provider connect path; FFI hardcodes ipc_socket_path_override to None; upsert_server passes false for ipc_enabled"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 4 assertions: all 4 passed. VAL-CROSS-004: Codex regression confirmed — None/Codex delegates to existing connect_remote_over_ssh path (992 cargo tests pass). VAL-CROSS-005: Sessions keyed by serverId in HashMap<String, Arc<ServerSession>>, each connection creates independent SshClient + provider transport. VAL-CROSS-006: All error paths return TransportError::ConnectionFailed with descriptive messages; SSH cleanup and store health updates verified. VAL-CROSS-008: IPC is fully isolated from provider path — from_provider sets ipc_stream_client: None, FFI passes None for ipc_socket_path_override, no IPC readers spawned, upsert_server uses false for ipc_enabled."
+}

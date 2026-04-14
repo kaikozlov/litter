@@ -60,3 +60,72 @@
 - Very low: ~200MB RAM total for all 4 groups
 - Max concurrent validators: 5 (for method mapping tests specifically)
 - Typical runtime: <1 second per filtered group
+
+## Flow Validator Guidance: iOS Wiring Code Review
+
+### Isolation Rules
+- Code review is read-only — no shared mutable state
+- File reads are safe to parallelize
+- Do NOT modify any source files
+
+### Boundaries
+- VAL-IOS-001: Review `connectToServer()` in DiscoveryView.swift — verify `AgentSelectionStore.shared.selectedAgentType(for: server.id)` is read
+- VAL-IOS-002: Review `connectViaSSH()` — verify agent type parameter threading
+- VAL-IOS-003: Review `sshConnectAndConnectServer()` — verify agent type reaches `sshStartRemoteServerConnect` call
+- Do NOT overlap with Rust test groups or iOS build verification
+
+### Resource Cost
+- Very low: ~50MB RAM, read-only file access
+- Max concurrent validators: 5
+
+## Flow Validator Guidance: iOS Build Verification
+
+### Isolation Rules
+- Only ONE build validator at a time (Xcode/rustc resource-heavy)
+- Do NOT run any other cargo or Xcode commands concurrently
+
+### Boundaries
+- VAL-IOS-004: Run `make bindings && make ios-sim-fast` — must exit 0
+- VAL-IOS-005: Run `make rust-test` — verify all existing tests pass (Codex regression)
+- Check generated Swift binding for `agentType: AgentType?` parameter
+
+### Resource Cost
+- High: ~2-4GB RAM for Rust cross-compile + Xcode build
+- Max concurrent validators: 1
+- Typical runtime: 3-8 minutes
+
+## Flow Validator Guidance: Cross-Area Rust Tests
+
+### Isolation Rules
+- Each test uses mock transports — no shared state
+- Safe to run multiple filtered test groups concurrently
+- Do NOT run full `--lib` suite — use filtered runs
+
+### Boundaries
+- VAL-CROSS-004: Filter `codex_regression` or `connect_remote_over_ssh` in cargo test
+- VAL-CROSS-005: Manual-only — cannot test multiple connections without real server
+- VAL-CROSS-006: Filter `connection_failed` or `factory` in cargo test for error handling
+- VAL-CROSS-008: Filter `ipc` or `provider` in cargo test for IPC isolation
+
+### Resource Cost
+- Low: ~200MB RAM, <10 seconds per filtered group
+- Max concurrent validators: 3
+
+## Flow Validator Guidance: E2E SSH Cross-Area
+
+### Isolation Rules
+- E2E tests create real SSH connections to gvps — serialize or limit concurrency
+- Each test spawns a remote process on gvps
+- Clean up: verify no zombie processes after tests
+
+### Boundaries
+- VAL-CROSS-001: Pi native connection — `cargo test ... -- --ignored` with `pi_native` filter
+- VAL-CROSS-002: Droid native connection — `cargo test ... -- --ignored` with `droid_native` filter
+- VAL-CROSS-003: Pi ACP connection — `cargo test ... -- --ignored` with `pi_acp` filter
+- VAL-CROSS-007: Provider disconnect — verify cleanup after connection tests
+- If gvps is unreachable, mark assertions as blocked
+
+### Resource Cost
+- Medium: SSH connections, ~50MB RAM per connection
+- Max concurrent validators: 2 (limited by gvps capacity)
+- Typical runtime: 10-30 seconds per test

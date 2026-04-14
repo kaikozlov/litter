@@ -1,0 +1,76 @@
+{
+  "groupId": "ios-wiring-code-review",
+  "testedAt": "2026-04-13T00:00:00Z",
+  "isolation": {
+    "mode": "read-only-code-review",
+    "basePath": "/Users/kai/dev/projects/litter/"
+  },
+  "toolsUsed": ["Read", "Grep"],
+  "assertions": [
+    {
+      "id": "VAL-IOS-001",
+      "title": "DiscoveryView reads selected agent type before connecting",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Read apps/ios/Sources/Litter/Views/DiscoveryView.swift, locate connectToServer() method",
+          "expected": "In the .sshThenRemote case, code reads AgentSelectionStore.shared.selectedAgentType(for: server.id) and passes it to connectViaSSH",
+          "observed": "Found at line ~841: case .sshThenRemote(let host, let credentials): ... let agentType = AgentSelectionStore.shared.selectedAgentType(for: server.id) ... connectedServerId = try await connectViaSSH(server: server, host: host, credentials: credentials, agentType: agentType)"
+        }
+      ],
+      "evidence": {
+        "files": ["apps/ios/Sources/Litter/Views/DiscoveryView.swift"],
+        "lineRange": "~839-845",
+        "codeSnippet": "case .sshThenRemote(let host, let credentials):\n    startedAsyncBootstrap = true\n    let agentType = AgentSelectionStore.shared.selectedAgentType(for: server.id)\n    connectedServerId = try await connectViaSSH(server: server, host: host, credentials: credentials, agentType: agentType)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-002",
+      "title": "Agent type passed through connectViaSSH to sshConnectAndConnectServer",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Read connectViaSSH method in DiscoveryView.swift",
+          "expected": "Method accepts agentType: AgentType? = nil parameter and forwards it to sshConnectAndConnectServer()",
+          "observed": "Found at line ~855: private func connectViaSSH(server:host:credentials:agentType: AgentType? = nil) calls sshConnectAndConnectServer(..., agentType: agentType)"
+        }
+      ],
+      "evidence": {
+        "files": ["apps/ios/Sources/Litter/Views/DiscoveryView.swift"],
+        "lineRange": "~855-870",
+        "codeSnippet": "private func connectViaSSH(\n    server: DiscoveredServer,\n    host: String,\n    credentials: SSHCredentials,\n    agentType: AgentType? = nil\n) async throws -> String {\n    let serverId = try await sshConnectAndConnectServer(\n        serverId: server.id,\n        displayName: server.name,\n        host: host,\n        credentials: credentials,\n        port: server.resolvedSSHPort,\n        agentType: agentType\n    )"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-003",
+      "title": "Agent type reaches FFI sshStartRemoteServerConnect call",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Read sshConnectAndConnectServer method in DiscoveryView.swift",
+          "expected": "Method accepts agentType: AgentType? = nil and passes it to appModel.ssh.sshStartRemoteServerConnect() in BOTH .password and .key cases",
+          "observed": "Found at line ~973: method accepts agentType: AgentType? = nil. In .password case (line 990): passes agentType: agentType. In .key case (line 1005): passes agentType: agentType. Both branches confirmed."
+        },
+        {
+          "action": "Verify FFI method signature includes agentType parameter",
+          "expected": "Generated UniFFI SshBridge protocol declares sshStartRemoteServerConnect with agentType: AgentType? parameter",
+          "observed": "Confirmed in UniFFICodexClient.generated.swift line 2992: func sshStartRemoteServerConnect(..., agentType: AgentType?) async throws -> String"
+        }
+      ],
+      "evidence": {
+        "files": [
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift",
+          "apps/ios/Sources/Litter/Bridge/UniFFICodexClient.generated.swift"
+        ],
+        "lineRange": "~973-1018 (DiscoveryView), ~2992,3123 (UniFFI generated)",
+        "codeSnippet": "private func sshConnectAndConnectServer(\n    ..., agentType: AgentType? = nil\n) async throws -> String {\n    ...\n    case .password(let username, let password):\n        return try await appModel.ssh.sshStartRemoteServerConnect(\n            ..., agentType: agentType\n        )\n    case .key(let username, let privateKey, let passphrase):\n        return try await appModel.ssh.sshStartRemoteServerConnect(\n            ..., agentType: agentType\n        )\n}"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "All 3 assertions passed. The agent type selection flows correctly from AgentSelectionStore through connectToServer → connectViaSSH → sshConnectAndConnectServer → sshStartRemoteServerConnect (FFI) in both .password and .key credential branches."
+}
