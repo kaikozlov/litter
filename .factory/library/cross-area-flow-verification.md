@@ -24,8 +24,16 @@ End-to-end verification of cross-area flows spanning all four milestones (provid
 - VAL-CROSS-006: Multi-provider session filtering by agent type with correct badge types
 - VAL-CROSS-008: Saved server migration (legacy hasCodexServer/codexPorts/directCodex → new fields)
 
-## Build Verification
-- `make rust-test`: 1291 passed, 0 failed
+## Verification Run (Session f70aa3e7)
+All 12 VAL-CROSS assertions verified and marked passed in validation-state.json.
+
+### Full Build Gate Results
+- `cargo check`: exit 0
+- `make rust-test`: 1291 passed, 0 failed, 9 ignored
+- `make bindings`: exit 0 (Swift + Kotlin bindings regenerated)
 - `make ios-sim-fast`: BUILD SUCCEEDED
-- iOS unit tests: 240 passed, 0 failed
-- Xcode project regenerated via `make xcgen` after adding new test file
+- `xcodebuild test -only-testing:LitterTests`: 240 passed, 0 failed
+- `make test-ios`: UI test failure (testCaptureScreenshots requires real server at .203) — pre-existing, not related to cross-area verification
+
+### E2E Note
+Full E2E flows requiring real remote servers (Pi at gvps:9234, Droid via SSH) are verified at the component/mock level in both Rust and iOS tests. Live E2E requires manual testing against gvps (100.82.102.84:5132) or a network with real agent servers.
