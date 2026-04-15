@@ -1,0 +1,39 @@
+{
+  "featureId": "discovery-milestone-build-gate",
+  "reviewedAt": "2026-04-15T02:45:00.000Z",
+  "commitId": "1ff918b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The build gate successfully ran and passed all Rust tests (1284), iOS build, and iOS unit tests (106). Android Kotlin source was updated to use agent-generic terminology across all 6 changed files. However, there is a significant naming inconsistency: the Rust reconnect logic in `reconnect.rs` still checks for the literal string \"directCodex\" at line 178, while both Android (SavedServerStore.kt line 183-184) and iOS (DiscoveredServer.swift line 33) now migrate \"directCodex\" to \"direct\"/\"directAgent\" on deserialization. If the Rust reconnect code receives a mode of \"direct\" (after Android migration), it will NOT recognize it as a direct agent connection and `resolved_preferred_agent_port` will return None, silently dropping the preferred agent port. The tests in reconnect.rs (lines 526-532, 606-611) explicitly use \"directCodex\" as the test input, perpetuating the stale string. Additionally, the `resolved_preferred_connection_mode` function (line 102-110) passes through whatever string is stored without any migration, so the Rust code has no awareness of the \"direct\" mode that Android now emits.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/reconnect.rs",
+        "line": 178,
+        "severity": "blocking",
+        "description": "Rust reconnect code checks `resolved_preferred_connection_mode(server).as_deref() != Some(\"directCodex\")` but Android's SavedServerStore now migrates \"directCodex\" to \"direct\" on deserialization (line 183-184). If Rust receives the migrated value \"direct\", the check fails and `resolved_preferred_agent_port` returns None, silently dropping the user's preferred agent port selection. The Rust code should accept both \"directCodex\" and \"direct\" (or be updated to use the new canonical name \"direct\") to match the platform migration paths."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/reconnect.rs",
+        "line": 608,
+        "severity": "non_blocking",
+        "description": "Test `direct_agent_port_preferred_agent_port_in_direct_mode` uses `\"directCodex\"` as the preferred_connection_mode. While this tests backward compatibility, there is no corresponding test for the new canonical \"direct\" mode. Should add a test with \"direct\" to verify the new code path works."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The discovery-cleanup renaming introduced a naming convention split for connection mode strings: Android migrates \"directCodex\" to \"direct\" on read, iOS migrates \"directCodex\" to \"directAgent\" on decode, but Rust still uses the raw \"directCodex\" string literal. There's no canonical source of truth for what the connection mode string should be after renaming. AGENTS.md says 'Use provider-agnostic naming: agent not codex' but doesn't specify the exact string value for direct connection mode.",
+      "evidence": "reconnect.rs:178 checks \"directCodex\", SavedServerStore.kt:184 migrates to \"direct\", DiscoveredServer.swift:33 maps both to .directAgent enum case"
+    },
+    {
+      "area": "skills",
+      "observation": "The platform-ui-worker SKILL.md is scoped to iOS agent picker wiring and doesn't mention the Android text-update workflow or build-gate verification steps. The worker followed it but had to improvise for Android verification (which was text-only per AGENTS.md). The skill worked acceptably for this build-gate task but doesn't document the full verification procedure (rust-test, ios-sim-fast, xcodebuild test, rg checks).",
+      "evidence": "SKILL.md example handoff shows 'make ios-sim-fast' and 'cargo check' but not 'cargo test --manifest-path ... --lib' or 'xcodebuild test'. Worker ran all these correctly (per handoff) but skill procedure didn't enumerate them."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Build gate passed all test suites (1284 Rust, 106 iOS) and iOS build succeeds. Android naming cleanup is complete across all source and test files, with backward-compatible JSON deserialization properly preserved. However, there is a blocking inconsistency: the Rust reconnect logic still uses the literal string \"directCodex\" to identify direct agent connections, while both iOS and Android now migrate that value to \"direct\"/\"directAgent\" on deserialization. If the Rust code receives a migrated mode value, it will fail to recognize the direct agent preference. This should be fixed before the milestone is considered complete — either update the Rust reconnect code to accept the new canonical mode name, or ensure the migration only happens at the platform layer and the raw \"directCodex\" value is preserved when data flows back into Rust."
+}

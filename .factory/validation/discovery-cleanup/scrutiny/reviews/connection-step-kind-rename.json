@@ -1,0 +1,22 @@
+{
+  "featureId": "connection-step-kind-rename",
+  "reviewedAt": "2026-04-15T02:30:00.000Z",
+  "commitId": "03c6dbd",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature renames three AppConnectionStepKind enum variants from Codex-specific to provider-generic names: FindingCodex → FindingAgent, InstallingCodex → InstallingAgent, StartingAppServer → StartingAgent. The changes are limited to two files (store/snapshot.rs for the enum definition and initial step construction, ffi/ssh.rs for all 44 usage sites including function bodies, comments, and test assertions). The UniFFI bindings were regenerated and correctly expose the renamed variants (Swift: findingAgent/installingAgent/startingAgent, Kotlin: FINDING_AGENT/INSTALLING_AGENT/STARTING_AGENT). Android's SnapshotExtensions.kt already references the new variant names. No old variant names remain anywhere in the Rust codebase. All 1250 Rust tests pass, cargo check and clippy are clean.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/ffi/ssh.rs",
+        "line": 1043,
+        "severity": "non_blocking",
+        "description": "Comment says 'This skips all Codex-specific bootstrap steps (FindingAgent, InstallingAgent, StartingAgent, OpeningTunnel)' — the step names are now generic but the comment still calls them 'Codex-specific'. The comment could be updated to say 'agent-specific' or 'provider-specific' for consistency with the rename intent, though this is cosmetic and does not affect functionality."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Clean, well-scoped rename of AppConnectionStepKind variants from Codex-specific to provider-generic names. The worker followed the rust-backend-worker skill procedure correctly: verified baseline tests, performed systematic find-and-replace across all Rust references, updated comments and test assertion strings, regenerated UniFFI bindings, and ran full verification (cargo check, test, clippy). One minor cosmetic issue: a doc comment still calls the renamed steps 'Codex-specific' (line 1043 in ssh.rs), which is non-blocking. The Android Kotlin code already uses the new variant names, confirming binding regeneration was successful. No shared state gaps observed."
+}

@@ -1,0 +1,45 @@
+{
+  "featureId": "agent-aware-discovery-config",
+  "reviewedAt": "2026-04-15T02:30:00.000Z",
+  "commitId": "048815c",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The implementation replaces DEFAULT_SCAN_PORTS with AGENT_PORT_REGISTRY, adds port-to-agent-type classification, and updates Bonjour/LAN/Tailscale scan paths to classify agent types from detected ports. 26 new tests provide solid unit coverage. However, there is a blocking bug: merge_server merges agent_ports from multiple sources but never re-classifies agent_types from the merged port set, causing stale/incorrect agent_types after reconciliation. The VAL-DISC-025 test also does not assert agent_types after merge, so this gap is not caught by tests.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/discovery.rs",
+        "line": 1165,
+        "severity": "blocking",
+        "description": "merge_server() calls merge_agent_ports() to union the port lists, but never re-classifies existing.agent_types from the merged ports. After merging a server with agent_ports=[8390] (Codex) and one with agent_ports=[9234] (PiNative/PiAcp), agent_types will be [PiNative, PiAcp] (from the preferred Bonjour source), missing Codex entirely. The merged agent_ports is [8390, 9234] but agent_types is not recomputed to match. Fix: after merge_agent_ports(), add `existing.agent_types = classify_agent_ports(&existing.agent_ports); if existing.agent_types.is_empty() { existing.agent_types = default_agent_types(); }`"
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/discovery.rs",
+        "line": 2014,
+        "severity": "blocking",
+        "description": "VAL-DISC-025 test (val_disc_025_merge_mixed_agent_ports_from_different_sources) asserts merged agent_ports == [8390, 9234] but does NOT assert on agent_types after merge. Given the merge_server bug above, the merged result has agent_types == [PiNative, PiAcp] (wrong — should be [Codex, PiNative, PiAcp]). The test should assert `assert!(reconciled[0].agent_types.contains(&AgentType::Codex))` etc., which would fail and expose the merge bug."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/discovery.rs",
+        "line": 758,
+        "severity": "non_blocking",
+        "description": "collect_browser_mdns_seeds() only browses for `_codex._tcp.` and `_ssh._tcp.` service types. The is_agent_service check in scan_bonjour_seeds accepts `_agent.` prefixed services, but the browser never looks for them. This is a minor gap — platform layers can pass `_agent._tcp.` seeds directly — but the built-in browser will never find them. Consider adding `_agent._tcp.` to the browse list in a follow-up."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "Agent port registry maps each AgentType to a static port slice. The pattern of using `static &[(AgentType, &[u16])]` for registry data is a good pattern for this codebase but is not documented in AGENTS.md or the mission AGENTS.md. Future workers adding new agent types need to know to add entries to AGENT_PORT_REGISTRY.",
+      "evidence": "discovery.rs:28-32 — static AGENT_PORT_REGISTRY definition. No documentation elsewhere tells workers to update this registry when adding agent types."
+    },
+    {
+      "area": "skills",
+      "observation": "Worker followed the rust-backend-worker skill procedure correctly: read feature, ran tests, implemented, verified with cargo check/test/clippy, committed. The skill procedure was appropriate for this feature. No skill gaps identified.",
+      "evidence": "Transcript skeleton shows skill invocation → context gathering → implementation → verification → commit flow. skillFeedback.followedProcedure = true."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Implementation is mostly solid — AGENT_PORT_REGISTRY replaces DEFAULT_SCAN_PORTS cleanly, classification functions are well-tested, and Bonjour/LAN/Tailscale paths all classify agent types correctly at discovery time. However, there is a blocking bug in merge_server: when two DiscoveredServers with different agent ports are reconciled, the merged agent_ports list is correct but agent_types is NOT recomputed, leading to stale/missing agent types on merged results. The VAL-DISC-025 test also fails to assert agent_types after merge, so the bug is not caught. Fix: re-classify agent_types after merge_agent_ports in merge_server, and add the missing assertion to the VAL-DISC-025 test."
+}

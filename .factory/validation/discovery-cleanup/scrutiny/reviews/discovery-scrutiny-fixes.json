@@ -1,0 +1,28 @@
+{
+  "featureId": "discovery-scrutiny-fixes",
+  "reviewedAt": "2026-04-15T03:30:00.000Z",
+  "commitId": "714f545",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix adequately addresses all 3 blocking issues from the prior reviews of agent-aware-discovery-config and discovery-milestone-build-gate. (1) merge_server() now calls classify_agent_ports() after merge_agent_ports() to re-classify agent_types from the merged port set, with a guard against empty classification. (2) VAL-DISC-025 test now asserts all three agent types (Codex, PiNative, PiAcp) are present after merge. (3) reconnect.rs introduces is_direct_mode() helper that accepts both 'direct' and 'directCodex' mode strings, with a new test verifying the 'direct' string works. All 1285 Rust tests pass and clippy is clean.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/discovery.rs",
+        "line": 1183,
+        "severity": "non_blocking",
+        "description": "The guard `if !classified.is_empty() { existing.agent_types = classified; }` means that if classify_agent_ports returns an empty vec (e.g., all ports are unrecognized), the stale agent_types from before merge are preserved. This is a reasonable defensive choice (avoid clearing agent_types on unknown ports) but it does mean agent_types could become inconsistent with agent_ports in edge cases with unregistered ports. This is a minor concern — AGENT_PORT_REGISTRY should cover all known ports, and the original reviewer's suggested fix included the same guard pattern."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The connection mode string migration pattern is now split across three layers: Rust uses is_direct_mode() to accept both 'direct' and 'directCodex', Android SavedServerStore migrates to 'direct' on read, and iOS DiscoveredServer maps both to a .directAgent enum case. The mission AGENTS.md says 'Use provider-agnostic naming: agent not codex' but doesn't specify the canonical string value for direct mode or the migration compat strategy. Future workers adding new connection modes need to know to update is_direct_mode() and all platform migration paths.",
+      "evidence": "reconnect.rs:181-182 is_direct_mode(), SavedServerStore.kt:183-184 migrates 'directCodex' to 'direct', DiscoveredServer.swift:33 maps both to .directAgent enum. Mission AGENTS.md doesn't specify connection mode string values."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/discovery-cleanup/scrutiny/reviews/agent-aware-discovery-config.json",
+  "summary": "All 3 blocking issues from the prior scrutiny reviews are properly fixed. (1) merge_server() re-classifies agent_types after merge — verified in discovery.rs:1183-1186 with classify_agent_ports() call. (2) VAL-DISC-025 test asserts Codex, PiNative, and PiAcp in merged agent_types — verified in discovery.rs:2059-2071. (3) is_direct_mode() helper in reconnect.rs:181-182 accepts both 'direct' and 'directCodex' strings, with a new test at line 624 verifying the new 'direct' mode. The fix is minimal, focused, and well-tested with 1285 passing Rust tests and clean clippy. One non-blocking note: the empty-classification guard preserves stale agent_types if all merged ports are unregistered, which is a reasonable edge case tradeoff."
+}

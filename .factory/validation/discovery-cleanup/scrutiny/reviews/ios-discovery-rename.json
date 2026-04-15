@@ -1,0 +1,44 @@
+{
+  "featureId": "ios-discovery-rename",
+  "reviewedAt": "2026-04-15T01:35:00.000Z",
+  "commitId": "0be8545",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The commit comprehensively renames all iOS Swift discovery models to use agent-generic terminology (hasCodexServer → hasAgentServer, codexPorts → agentPorts, directCodex → directAgent, preferredCodexPort → preferredAgentPort, etc.). Codable backward compatibility is properly maintained in SavedServer and PreferredConnectionMode with custom decode that reads both old and new keys, and custom encode that writes only new keys. Connection step labels were updated to match the Rust-side renamed enum variants (findingCodex → findingAgent, installingCodex → installingAgent, startingAppServer → startingAgent). User-facing strings were updated from 'Codex' to 'Agent' in discovery UI dialogs. The ManualConnectionMode.codex enum case and its associated functions (submitManualCodexEntry, manualCodexURL) were intentionally left as-is since they refer specifically to the Codex WebSocket connection protocol, not a generic agent concept.",
+    "issues": [
+      {
+        "file": "apps/ios/Sources/Litter/Views/DiscoveryView.swift",
+        "line": 1176,
+        "severity": "non_blocking",
+        "description": "The submitManualCodexEntry() function contains a hardcoded instruction string mentioning 'codex app-server' in the form header. While this is technically the correct command name for the Codex agent type, it could confuse users who are connecting to a non-Codex agent. This is a UX consideration for a future multi-agent manual connection flow, not a bug."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/DiscoveryView.swift",
+        "line": 1440,
+        "severity": "non_blocking",
+        "description": "ManualConnectionMode.codex enum case retains the 'codex' name. This is intentional since it refers to the specific Codex WebSocket connection mode (not a generic agent concept), but could be renamed to 'directAgent' or similar in a follow-up pass if full consistency is desired."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The Codable migration pattern used in SavedServer (custom CodingKeys with legacy keys, custom init(from:) with fallback decoding, custom encode(to:) writing only new keys) is a well-executed pattern for persisted data migration. This pattern is documented in AGENTS.md as 'Codable migrations must decode BOTH old and new keys, encode only new keys' — the worker followed this correctly.",
+      "evidence": "SavedServer.swift: CodingKeys enum at line 56 includes both agentPorts and codexPorts; init(from:) at line 73 uses container.contains() fallback; encode(to:) at line 119 writes only new keys"
+    },
+    {
+      "area": "conventions",
+      "observation": "The PreferredConnectionMode enum's raw value is 'directAgent' but the backward-compatible decoder maps both 'directCodex' and 'directAgent' strings to the .directAgent case. However, since this enum has a custom init(from:) decoder, the auto-synthesized Encodable that would write the rawValue string is overridden — but actually there's no custom encode(to:) on PreferredConnectionMode. Since it's used as a property inside SavedServer which has its own encoder, and the rawValue is 'directAgent', the encoded output will correctly use 'directAgent'. This works but is fragile — if someone adds Encodable conformance explicitly, it could break.",
+      "evidence": "DiscoveredServer.swift:25-44 — PreferredConnectionMode has custom init(from:) but no custom encode(to:). The raw value of .directAgent is 'directAgent', so default encoding writes 'directAgent'. This is correct for forward migration."
+    },
+    {
+      "area": "skills",
+      "observation": "The platform-ui-worker skill's work procedure focuses heavily on AgentType/AgentSelectionStore wiring for the connection flow, which doesn't match the actual work done for this feature (a rename/refactor task). The skill says to verify bindings, implement iOS changes, and manually verify UI — the worker did verify the build and ran tests, which matches the spirit of the procedure even though the specific agent selection wiring steps were not applicable. skillFeedback.followedProcedure=true seems accurate.",
+      "evidence": "Worker transcript shows: build verification (make ios-sim-fast), test run (xcodebuild test), cargo check, and rg verification — matching the skill's verification steps despite different feature scope."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Thorough, well-executed rename of all iOS Swift discovery models to agent-generic terminology. The Codable backward compatibility implementation is correct — SavedServer reads both old and new keys during decode but writes only new keys during encode, and PreferredConnectionMode properly handles the directCodex→directAgent migration. All 106 iOS tests pass including the backward compatibility test that decodes legacy JSON with hasCodexServer. The only remaining 'codex' references in DiscoveryView are intentionally scoped to ManualConnectionMode (which refers specifically to the Codex WebSocket protocol) and the agent type references. Build succeeds, tests pass, ripgrep confirms no stale references outside backward compat code. No blocking issues found."
+}

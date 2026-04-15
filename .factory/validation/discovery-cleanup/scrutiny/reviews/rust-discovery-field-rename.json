@@ -1,0 +1,33 @@
+{
+  "featureId": "rust-discovery-field-rename",
+  "reviewedAt": "2026-04-14T22:50:00.000Z",
+  "commitId": "076b7a7",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Complete and correct rename of codex_port → agent_port across the Rust codebase. The commit touches 5 files (discovery.rs, discovery_uniffi.rs, reconnect.rs, ffi/reconnect.rs, codex-tui/app.rs) with 120 insertions and 120 deletions — a pure mechanical rename with no behavioral changes. All field names, function names, doc comments, and test fixtures have been consistently updated. No remaining codex_port references exist in the Rust codebase (verified via rg).",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/reconnect.rs",
+        "line": 178,
+        "severity": "non_blocking",
+        "description": "The string literal \"directCodex\" is preserved as a connection mode value. This is correct because it's a persisted preference string from platform storage, not a Rust field name. However, this should be tracked as a follow-up: the connection mode string should eventually be renamed to \"directAgent\" when platform-side migration is coordinated (likely in the ios-discovery-rename feature). The function was correctly renamed to resolved_preferred_agent_port."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The mission AGENTS.md already documents the naming convention: 'Use provider-agnostic naming: \"agent\" not \"codex\", \"agent_port\" not \"codex_port\"'. The worker correctly followed this convention. No gap here.",
+      "evidence": "Mission AGENTS.md line 34, worker's consistent application across all 5 files"
+    },
+    {
+      "area": "skills",
+      "observation": "The rust-backend-worker skill prescribes TDD (write failing tests first), but the worker did not add new tests, noting 'this is a pure rename — existing tests validate the renamed fields work correctly'. This is a reasonable deviation: 1250 existing tests exercise all the renamed fields, and the rename is mechanical with no behavioral change. Adding dedicated rename tests would be testing the rename itself rather than behavior.",
+      "evidence": "Handoff: tests.added is empty, handoff.tests.coverage explains reasoning. Skill SKILL.md section 'Write Tests First (Red)'. skillFeedback.followedProcedure is true."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS — Clean, complete rename of codex_port → agent_port (and related fields: codex_ports → agent_ports, has_codex_server → has_agent_server, preferred_codex_port → preferred_agent_port) across all Rust discovery and reconnect types. Five files modified with exactly 120 insertions / 120 deletions, all mechanical renames. All 1250 existing tests pass. No codex_port references remain in the Rust codebase. Serialization output correctly changes from codexPort/codexPorts to agentPort/agentPorts via the existing camelCase rename_all. The only non-blocking note is that the \"directCodex\" connection mode string literal is preserved (correct — it's a persisted platform value), which should be tracked for coordinated platform-side migration."
+}

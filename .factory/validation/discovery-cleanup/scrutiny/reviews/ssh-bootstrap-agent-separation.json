@@ -1,0 +1,45 @@
+{
+  "featureId": "ssh-bootstrap-agent-separation",
+  "reviewedAt": "2026-04-15T02:30:00.000Z",
+  "commitId": "03c7ac3",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature cleanly separates generic SSH bootstrap from Codex-specific installation. A new `ssh_connect_only()` method on SshBridge provides agent-agnostic SSH connections, while documentation clearly marks all Codex-specific methods on SshClient. The routing logic (`is_non_codex_agent`) correctly gates Codex vs provider paths. 8 well-structured tests cover structural separation, behavioral separation, and routing correctness.",
+    "issues": [
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/ffi/ssh.rs",
+        "line": 1804,
+        "severity": "non_blocking",
+        "description": "Test `ssh_bootstrap_separation_connect_only_is_generic` only verifies the method exists and fails without an SSH server (connection-refused). It does not verify that no Codex-specific code paths are exercised. A stronger test would use a mock SSH server to complete the handshake and assert no binary resolution/install calls occur. This is a minor coverage gap — the structural and routing tests compensate adequately."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/ffi/ssh.rs",
+        "line": 1976,
+        "severity": "non_blocking",
+        "description": "Test `ssh_bootstrap_separation_provider_path_validates_without_installing` does not assert GenericAcp behavior. `is_non_codex_agent` returns true for GenericAcp, but `agent_binary_name(GenericAcp)` returns None. The test only asserts Pi/Droid binary names and that Codex returns None. An explicit assertion for GenericAcp returning None from agent_binary_name would make the GenericAcp routing gap more visible."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/mobile_client/mod.rs",
+        "line": 2380,
+        "severity": "non_blocking",
+        "description": "`agent_binary_name` returns None for GenericAcp, meaning the provider factory path has no binary to validate on the remote host for GenericAcp agents. This is a potential gap in the separation story — the is_non_codex_agent routing sends GenericAcp through the provider path, but there's no binary validation. This may be intentional (GenericAcp uses a remote_command pattern), but is not documented or tested here."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The ssh_connect_only() method was added to SshBridge as a generic SSH entry point, but it is not documented in .factory/library/architecture.md. The architecture doc should capture the SSH connection method hierarchy: ssh_connect_only (generic) → ssh_connect_and_bootstrap (Codex-only) → ssh_start_remote_server_connect (agent-type-aware with routing).",
+      "evidence": "ssh_connect_only added at ffi/ssh.rs:257, but .factory/library/architecture.md has no reference to the SSH method hierarchy."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The is_non_codex_agent routing function and the two-path bootstrap design (guided vs provider) are key architectural decisions that should be documented in .factory/library/architecture.md or provider-transport.md for future workers.",
+      "evidence": "is_non_codex_agent at ffi/ssh.rs:1027 gates all SSH bootstrap routing but is not referenced in any library doc."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Clean separation of generic SSH bootstrap from Codex-specific installation. The new ssh_connect_only() method provides a true agent-agnostic SSH connection, existing Codex methods are clearly documented as Codex-specific, and the is_non_codex_agent routing function correctly splits the guided (Codex) and provider (non-Codex) paths. 8 tests comprehensively cover structural separation, behavioral guarantees (no auto-install, user-prompt gating), and routing correctness. Minor non-blocking issues: GenericAcp has no binary validation in the provider path, and the architecture docs should capture the SSH method hierarchy. Overall, the implementation fully satisfies all expected behaviors and verification criteria."
+}

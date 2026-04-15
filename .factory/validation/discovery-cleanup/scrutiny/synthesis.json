@@ -1,85 +1,62 @@
 {
   "milestone": "discovery-cleanup",
-  "round": 1,
-  "status": "fail",
+  "round": 2,
+  "status": "pass",
   "validatorsRun": {
     "test": { "passed": true, "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib", "exitCode": 0 },
     "typecheck": { "passed": true, "command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml", "exitCode": 0 },
     "lint": { "passed": true, "command": "cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml -- -D warnings", "exitCode": 0 }
   },
   "reviewsSummary": {
-    "total": 6,
-    "passed": 4,
-    "failed": 2,
-    "failedFeatures": ["agent-aware-discovery-config", "discovery-milestone-build-gate"]
+    "total": 7,
+    "passed": 7,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "agent-aware-discovery-config",
-      "severity": "blocking",
-      "description": "merge_server() in discovery.rs merges agent_ports from multiple sources but never re-classifies agent_types from the merged port set. After reconciling a server with ports [8390] (Codex) and [9234] (Pi), agent_types will be [PiNative, PiAcp] from the preferred Bonjour source, missing Codex entirely. Fix: after merge_agent_ports(), add `existing.agent_types = classify_agent_ports(&existing.agent_ports);`",
-      "file": "shared/rust-bridge/codex-mobile-client/src/discovery.rs",
-      "line": 1165
-    },
-    {
-      "featureId": "agent-aware-discovery-config",
-      "severity": "blocking",
-      "description": "VAL-DISC-025 test asserts merged agent_ports but does NOT assert agent_types after merge, so the merge_server bug is not caught. The test should assert agent_types contains all expected types after merge.",
-      "file": "shared/rust-bridge/codex-mobile-client/src/discovery.rs",
-      "line": 2014
-    },
-    {
-      "featureId": "discovery-milestone-build-gate",
-      "severity": "blocking",
-      "description": "Rust reconnect.rs:178 still checks for literal string \"directCodex\" to identify direct agent connections, but Android SavedServerStore.kt migrates \"directCodex\" → \"direct\" on deserialization and iOS DiscoveredServer.swift maps it to .directAgent. If Rust receives the migrated value \"direct\", resolved_preferred_agent_port returns None and silently drops the user's preferred agent port. Rust should accept both \"directCodex\" and \"direct\" (or use the new canonical name).",
-      "file": "shared/rust-bridge/codex-mobile-client/src/reconnect.rs",
-      "line": 178
-    }
-  ],
+  "blockingIssues": [],
   "nonBlockingIssues": [
     {
-      "featureId": "rust-discovery-field-rename",
-      "description": "The \"directCodex\" connection mode string literal is preserved in reconnect.rs as a persisted platform value. Should be tracked for coordinated rename when platform migration is complete.",
-      "file": "shared/rust-bridge/codex-mobile-client/src/reconnect.rs",
-      "line": 178
-    },
-    {
-      "featureId": "connection-step-kind-rename",
-      "description": "Comment at ssh.rs:1043 still calls the renamed steps 'Codex-specific' even though names are now generic. Cosmetic only.",
-      "file": "shared/rust-bridge/codex-mobile-client/src/ffi/ssh.rs",
-      "line": 1043
-    },
-    {
       "featureId": "agent-aware-discovery-config",
+      "severity": "non_blocking",
       "description": "collect_browser_mdns_seeds() only browses _codex._tcp. services, never _agent._tcp. even though classification logic accepts them.",
       "file": "shared/rust-bridge/codex-mobile-client/src/discovery.rs",
       "line": 758
     },
     {
       "featureId": "ssh-bootstrap-agent-separation",
+      "severity": "non_blocking",
       "description": "GenericAcp returns None from agent_binary_name(), meaning no binary validation occurs for GenericAcp agents in the provider path. May be intentional (remote_command pattern) but is undocumented.",
       "file": "shared/rust-bridge/codex-mobile-client/src/ffi/ssh.rs",
       "line": 1976
     },
     {
+      "featureId": "connection-step-kind-rename",
+      "severity": "non_blocking",
+      "description": "Comment at ssh.rs:1043 still calls the renamed steps 'Codex-specific' even though names are now generic. Cosmetic only.",
+      "file": "shared/rust-bridge/codex-mobile-client/src/ffi/ssh.rs",
+      "line": 1043
+    },
+    {
       "featureId": "ios-discovery-rename",
+      "severity": "non_blocking",
       "description": "ManualConnectionMode.codex enum case retains 'codex' name — intentional since it refers to Codex WebSocket protocol specifically, but could be renamed for full consistency.",
       "file": "apps/ios/Sources/Litter/Views/DiscoveryView.swift",
       "line": 1440
     },
     {
-      "featureId": "discovery-milestone-build-gate",
-      "description": "Test in reconnect.rs uses \"directCodex\" as preferred_connection_mode but there's no test for the new canonical \"direct\" mode.",
-      "file": "shared/rust-bridge/codex-mobile-client/src/reconnect.rs",
-      "line": 608
+      "featureId": "discovery-scrutiny-fixes",
+      "severity": "non_blocking",
+      "description": "The empty-classification guard `if !classified.is_empty()` preserves stale agent_types in the unlikely edge case of all unregistered ports after merge.",
+      "file": "shared/rust-bridge/codex-mobile-client/src/discovery.rs",
+      "line": 1183
     }
   ],
   "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
       "target": "AGENTS.md",
-      "suggestion": "Add canonical connection mode string names: specify that the preferred connection mode should be stored as \"direct\" (not \"directCodex\" or \"directAgent\") across all platforms. Rust, iOS, and Android should all agree on the canonical string value. The current split (Rust: \"directCodex\", Android: \"direct\", iOS: \".directAgent\" enum) causes cross-platform serialization mismatches.",
-      "evidence": "discovery-milestone-build-gate review found reconnect.rs:178 checks \"directCodex\" while Android migrates to \"direct\" and iOS uses enum .directAgent. This is a cross-platform consistency issue.",
+      "suggestion": "Add canonical connection mode string names: specify that the preferred connection mode should be stored as \"direct\" (not \"directCodex\" or \"directAgent\") across all platforms. Rust, iOS, and Android should all agree on the canonical string value. The current split (Rust: is_direct_mode() accepts both, Android: migrates to \"direct\", iOS: .directAgent enum) works but should converge on one canonical string.",
+      "evidence": "discovery-milestone-build-gate review found reconnect.rs:178 checks \"directCodex\" while Android migrates to \"direct\" and iOS uses enum .directAgent. The fix (discovery-scrutiny-fixes) added is_direct_mode() accepting both, but long-term convergence is still needed.",
       "isSystemic": true
     },
     {
@@ -99,7 +76,11 @@
     {
       "observation": "Worker did not add new tests for rust-discovery-field-rename (pure rename).",
       "reason": "already-documented — reviewer noted this is a reasonable deviation since 1250 existing tests exercise all renamed fields"
+    },
+    {
+      "observation": "platform-ui-worker skill doesn't document the full verification procedure (rust-test, ios-sim-fast, xcodebuild test, rg checks).",
+      "reason": "ambiguous — skill is scoped to agent picker wiring, not build gates. Worker improvised correctly. Skill procedure is adequate for its stated scope."
     }
   ],
-  "previousRound": null
+  "previousRound": ".factory/validation/discovery-cleanup/scrutiny/synthesis.json (round 1)"
 }
