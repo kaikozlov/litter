@@ -114,6 +114,7 @@ struct AgentBadgeView: View {
                     .foregroundColor(agentType.tintColor)
             }
         }
+        .accessibilityLabel("\(agentType.displayName) agent")
     }
 }
 
@@ -133,6 +134,7 @@ struct AgentTypePill: View {
         .padding(.vertical, 2)
         .background(agentType.tintColor.opacity(0.15))
         .clipShape(Capsule())
+        .accessibilityLabel("\(agentType.displayName) agent")
     }
 }
 
