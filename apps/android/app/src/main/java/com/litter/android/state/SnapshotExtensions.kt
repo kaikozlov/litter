@@ -89,9 +89,10 @@ val AppServerSnapshot.currentConnectionStep: AppConnectionStepSnapshot?
 val AppServerSnapshot.connectionProgressLabel: String?
     get() = when (currentConnectionStep?.kind) {
         AppConnectionStepKind.CONNECTING_TO_SSH -> "connecting"
-        AppConnectionStepKind.FINDING_CODEX -> "finding codex"
-        AppConnectionStepKind.INSTALLING_CODEX -> "installing"
-        AppConnectionStepKind.STARTING_APP_SERVER -> "starting"
+        AppConnectionStepKind.DETECTING_AGENTS -> "detecting agents"
+        AppConnectionStepKind.FINDING_AGENT -> "finding agent"
+        AppConnectionStepKind.INSTALLING_AGENT -> "installing"
+        AppConnectionStepKind.STARTING_AGENT -> "starting"
         AppConnectionStepKind.OPENING_TUNNEL -> "tunneling"
         AppConnectionStepKind.CONNECTED -> "connected"
         null -> null

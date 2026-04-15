@@ -24,7 +24,7 @@ class ServerConfigPersistenceTest {
                 port = 4096,
                 source = ServerSource.MANUAL,
                 backendKind = BackendKind.OPENCODE,
-                hasCodexServer = false,
+                hasAgentServer = false,
                 username = "opencode",
                 password = "secret",
                 directory = "/workspace/demo",
@@ -47,7 +47,7 @@ class ServerConfigPersistenceTest {
                 host = "127.0.0.1",
                 port = 8390,
                 source = "manual",
-                hasCodexServer = true,
+                hasAgentServer = true,
             ).toServerConfig()
 
         assertEquals(BackendKind.CODEX, restored.backendKind)

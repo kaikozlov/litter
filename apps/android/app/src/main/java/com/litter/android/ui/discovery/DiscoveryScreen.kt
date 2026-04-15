@@ -157,26 +157,26 @@ fun DiscoveryScreen(
             return when (
                 val wakeResult = waitForWakeSignal(
                     host = entry.hostname,
-                    preferredCodexPort = entry.directCodexPort ?: entry.availableDirectCodexPorts.firstOrNull(),
+                    preferredAgentPort = entry.directAgentPort ?: entry.availableDirectAgentPorts.firstOrNull(),
                     preferredSshPort = entry.sshPort ?: if (entry.canConnectViaSsh) entry.resolvedSshPort else null,
-                    timeoutMillis = if (entry.hasCodexServer) 12_000L else 18_000L,
+                    timeoutMillis = if (entry.hasAgentServer) 12_000L else 18_000L,
                     wakeMac = entry.wakeMAC,
                 )
             ) {
-                is WakeSignalResult.Codex -> entry.copy(
+                is WakeSignalResult.Agent -> entry.copy(
                     port = wakeResult.port,
-                    codexPorts = listOf(wakeResult.port) + entry.availableDirectCodexPorts.filter { it != wakeResult.port },
-                    hasCodexServer = true,
+                    agentPorts = listOf(wakeResult.port) + entry.availableDirectAgentPorts.filter { it != wakeResult.port },
+                    hasAgentServer = true,
                     preferredConnectionMode = entry.preferredConnectionMode,
-                    preferredCodexPort = wakeResult.port,
+                    preferredAgentPort = wakeResult.port,
                 ).normalizedForPersistence()
 
                 is WakeSignalResult.Ssh -> entry.copy(
                     port = wakeResult.port,
                     sshPort = wakeResult.port,
-                    hasCodexServer = false,
+                    hasAgentServer = false,
                     preferredConnectionMode = "ssh",
-                    preferredCodexPort = null,
+                    preferredAgentPort = null,
                 ).normalizedForPersistence()
 
                 WakeSignalResult.None -> entry
@@ -231,20 +231,20 @@ fun DiscoveryScreen(
                     connectionChoiceServer = prepared
                 }
 
-                prepared.prefersSshConnection || (!prepared.hasCodexServer && prepared.canConnectViaSsh) -> {
+                prepared.prefersSshConnection || (!prepared.hasAgentServer && prepared.canConnectViaSsh) -> {
                     sshServer = prepared.withPreferredConnection("ssh")
                 }
 
-                prepared.directCodexPort != null -> {
+                prepared.directAgentPort != null -> {
                     appModel.serverBridge.connectRemoteServer(
                         prepared.id,
                         prepared.name,
                         prepared.hostname,
-                        prepared.directCodexPort!!.toUShort(),
+                        prepared.directAgentPort!!.toUShort(),
                     )
                     SavedServerStore.remember(
                         context,
-                        prepared.withPreferredConnection("directCodex", prepared.directCodexPort),
+                        prepared.withPreferredConnection("direct", prepared.directAgentPort),
                     )
                     reloadSavedServers()
                     appModel.refreshSnapshot()
@@ -409,7 +409,7 @@ fun DiscoveryScreen(
                         connectionChoiceMessage(server),
                         color = LitterTheme.textSecondary,
                     )
-                    server.availableDirectCodexPorts.forEach { port ->
+                    server.availableDirectAgentPorts.forEach { port ->
                         TextButton(
                             onClick = {
                                 connectionChoiceServer = null
@@ -423,7 +423,7 @@ fun DiscoveryScreen(
                                         )
                                         SavedServerStore.remember(
                                             context,
-                                            server.withPreferredConnection("directCodex", port),
+                                            server.withPreferredConnection("direct", port),
                                         )
                                         reloadSavedServers()
                                         appModel.refreshSnapshot()
@@ -431,12 +431,12 @@ fun DiscoveryScreen(
                                     } catch (e: Exception) {
                                         LLog.e(
                                             logTag,
-                                            "direct codex connect failed",
+                                            "direct agent connect failed",
                                             e,
                                             fields = mapOf(
                                                 "serverId" to server.id,
                                                 "host" to server.hostname,
-                                                "codexPort" to port,
+                                                "agentPort" to port,
                                                 "os" to server.os,
                                             ),
                                         )
@@ -446,7 +446,7 @@ fun DiscoveryScreen(
                             },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Use Codex ($port)")
+                            Text("Use Direct ($port)")
                         }
                     }
                     if (server.canConnectViaSsh) {
@@ -585,11 +585,11 @@ fun DiscoveryScreen(
     snapshot?.servers?.firstOrNull { it.connectionProgress?.pendingInstall == true }?.let { serverSnapshot ->
         AlertDialog(
             onDismissRequest = {},
-            title = { Text("Install Codex?") },
+            title = { Text("Install Agent?") },
             text = {
                 Text(
                     serverSnapshot.connectionProgressDetail
-                        ?: "Codex was not found on the remote host. Install the latest stable release into ~/.litter?",
+                        ?: "An agent was not found on the remote host. Install the latest stable release into ~/.litter?",
                 )
             },
             confirmButton = {
@@ -666,9 +666,9 @@ private fun ServerRow(
                 append(" - ")
                 append(entry.os)
             }
-            if (entry.availableDirectCodexPorts.isNotEmpty()) {
-                append(" - codex ")
-                append(entry.availableDirectCodexPorts.joinToString(", "))
+            if (entry.availableDirectAgentPorts.isNotEmpty()) {
+                append(" - agent ")
+                append(entry.availableDirectAgentPorts.joinToString(", "))
             }
             if (entry.canConnectViaSsh) {
                 append(" - ssh ")
@@ -691,7 +691,7 @@ private fun ServerRow(
         Icon(
             imageVector = serverIcon,
             contentDescription = entry.os ?: entry.source,
-            tint = if (entry.hasCodexServer) LitterTheme.accent else LitterTheme.textMuted,
+            tint = if (entry.hasAgentServer) LitterTheme.accent else LitterTheme.textMuted,
             modifier = Modifier.size(20.dp),
         )
         Spacer(Modifier.width(10.dp))
@@ -769,7 +769,7 @@ private fun ManualEntryDialog(
     onSubmit: (ManualEntryAction) -> Unit,
 ) {
     var mode by remember { mutableStateOf(ManualConnectionMode.SSH) }
-    var codexUrl by remember { mutableStateOf("") }
+    var agentUrl by remember { mutableStateOf("") }
     var host by remember { mutableStateOf("") }
     var sshPort by remember { mutableStateOf("22") }
     var wakeMac by remember { mutableStateOf("") }
@@ -785,9 +785,9 @@ private fun ManualEntryDialog(
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
-                        selected = mode == ManualConnectionMode.CODEX,
-                        onClick = { mode = ManualConnectionMode.CODEX },
-                        label = { Text(ManualConnectionMode.CODEX.label) },
+                        selected = mode == ManualConnectionMode.AGENT,
+                        onClick = { mode = ManualConnectionMode.AGENT },
+                        label = { Text(ManualConnectionMode.AGENT.label) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = LitterTheme.accent.copy(alpha = 0.18f),
                             selectedLabelColor = LitterTheme.textPrimary,
@@ -804,19 +804,19 @@ private fun ManualEntryDialog(
                     )
                 }
 
-                if (mode == ManualConnectionMode.CODEX) {
+                if (mode == ManualConnectionMode.AGENT) {
                     OutlinedTextField(
-                        value = codexUrl,
+                        value = agentUrl,
                         onValueChange = {
-                            codexUrl = it
+                            agentUrl = it
                             errorMessage = null
                         },
-                        label = { Text("Codex URL") },
+                        label = { Text("Agent URL") },
                         placeholder = { Text("ws://host:8390 or host:8390") },
                         singleLine = true,
                     )
                     Text(
-                        text = "Run: codex app-server --listen ws://0.0.0.0:8390",
+                        text = "Run: codex app-server --listen ws://0.0.0.0:8390\nOr start any compatible agent.",
                         color = LitterTheme.textMuted,
                         fontSize = 11.sp,
                     )
@@ -864,7 +864,7 @@ private fun ManualEntryDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    errorMessage = when (val action = buildManualEntryAction(mode, codexUrl, host, sshPort, wakeMac)) {
+                    errorMessage = when (val action = buildManualEntryAction(mode, agentUrl, host, sshPort, wakeMac)) {
                         is ManualEntryBuild.Action -> {
                             onSubmit(action.action)
                             null
@@ -1118,14 +1118,14 @@ private fun mergeServers(
 
     fun mergeCandidate(existing: SavedServer, candidate: SavedServer): SavedServer {
         val betterSource = sourceRank(candidate.source) < sourceRank(existing.source)
-        val hasCodexUpgrade = candidate.hasCodexServer && !existing.hasCodexServer
-        val betterCodexPort = candidate.availableDirectCodexPorts.any { it !in existing.availableDirectCodexPorts }
+        val hasAgentUpgrade = candidate.hasAgentServer && !existing.hasAgentServer
+        val betterAgentPort = candidate.availableDirectAgentPorts.any { it !in existing.availableDirectAgentPorts }
         val betterName = existing.name == existing.hostname && candidate.name != candidate.hostname
-        val preferCandidate = betterSource || hasCodexUpgrade || betterCodexPort || betterName
+        val preferCandidate = betterSource || hasAgentUpgrade || betterAgentPort || betterName
 
-        val mergedCodexPorts = buildList {
-            addAll(existing.availableDirectCodexPorts)
-            addAll(candidate.availableDirectCodexPorts)
+        val mergedAgentPorts = buildList {
+            addAll(existing.availableDirectAgentPorts)
+            addAll(candidate.availableDirectAgentPorts)
         }.distinct()
 
         val mergedOs = if (candidate.sshBanner != null) candidate.os else (candidate.os ?: existing.os)
@@ -1134,10 +1134,10 @@ private fun mergeServers(
         val mergedServer = if (preferCandidate) {
             candidate.copy(
                 id = existing.id,
-                codexPorts = mergedCodexPorts,
+                agentPorts = mergedAgentPorts,
                 wakeMAC = candidate.wakeMAC ?: existing.wakeMAC,
                 preferredConnectionMode = existing.resolvedPreferredConnectionMode ?: candidate.resolvedPreferredConnectionMode,
-                preferredCodexPort = existing.resolvedPreferredCodexPort ?: candidate.resolvedPreferredCodexPort,
+                preferredAgentPort = existing.resolvedPreferredAgentPort ?: candidate.resolvedPreferredAgentPort,
                 sshPortForwardingEnabled = null,
                 websocketURL = candidate.websocketURL ?: existing.websocketURL,
                 os = mergedOs,
@@ -1145,11 +1145,11 @@ private fun mergeServers(
             )
         } else {
             existing.copy(
-                codexPorts = mergedCodexPorts,
+                agentPorts = mergedAgentPorts,
                 sshPort = existing.sshPort ?: candidate.sshPort,
                 wakeMAC = existing.wakeMAC ?: candidate.wakeMAC,
                 preferredConnectionMode = existing.resolvedPreferredConnectionMode ?: candidate.resolvedPreferredConnectionMode,
-                preferredCodexPort = existing.resolvedPreferredCodexPort ?: candidate.resolvedPreferredCodexPort,
+                preferredAgentPort = existing.resolvedPreferredAgentPort ?: candidate.resolvedPreferredAgentPort,
                 sshPortForwardingEnabled = null,
                 websocketURL = existing.websocketURL ?: candidate.websocketURL,
                 os = mergedOs,
@@ -1175,14 +1175,14 @@ private fun mergeServers(
 }
 
 private fun connectionChoiceMessage(server: SavedServer): String {
-    val directPorts = server.availableDirectCodexPorts.map(Int::toString)
+    val directPorts = server.availableDirectAgentPorts.map(Int::toString)
     if (directPorts.isEmpty()) {
-        return "Use SSH to bootstrap Codex on ${server.hostname}."
+        return "Use SSH to bootstrap an agent on ${server.hostname}."
     }
     if (server.canConnectViaSsh) {
-        return "Codex is available on ports ${directPorts.joinToString(", ")} and SSH is also available on port ${server.resolvedSshPort}."
+        return "An agent is available on ports ${directPorts.joinToString(", ")} and SSH is also available on port ${server.resolvedSshPort}."
     }
-    return "Choose a Codex app-server port on ${server.hostname}."
+    return "Choose an agent port on ${server.hostname}."
 }
 
 private sealed interface ManualEntryAction {
@@ -1199,22 +1199,22 @@ private enum class ManualConnectionMode(
     val label: String,
     val primaryButtonTitle: String,
 ) {
-    CODEX("Codex", "Connect"),
+    AGENT("Agent", "Connect"),
     SSH("SSH", "Continue to SSH Login"),
 }
 
 private fun buildManualEntryAction(
     mode: ManualConnectionMode,
-    codexUrl: String,
+    agentUrl: String,
     host: String,
     sshPort: String,
     wakeMac: String,
 ): ManualEntryBuild = when (mode) {
-    ManualConnectionMode.CODEX -> buildManualCodexEntry(codexUrl)
+    ManualConnectionMode.AGENT -> buildManualAgentEntry(agentUrl)
     ManualConnectionMode.SSH -> buildManualSshEntry(host, sshPort, wakeMac)
 }
 
-private fun buildManualCodexEntry(rawInput: String): ManualEntryBuild {
+private fun buildManualAgentEntry(rawInput: String): ManualEntryBuild {
     val raw = rawInput.trim()
     if (raw.isEmpty()) {
         return ManualEntryBuild.Error("Enter a ws:// URL or host:port.")
@@ -1234,11 +1234,11 @@ private fun buildManualCodexEntry(rawInput: String): ManualEntryBuild {
                             name = host,
                             hostname = host,
                             port = port ?: 0,
-                            codexPorts = port?.let(::listOf) ?: emptyList(),
+                            agentPorts = port?.let(::listOf) ?: emptyList(),
                             source = "manual",
-                            hasCodexServer = true,
-                            preferredConnectionMode = "directCodex",
-                            preferredCodexPort = port,
+                            hasAgentServer = true,
+                            preferredConnectionMode = "direct",
+                            preferredAgentPort = port,
                             websocketURL = raw,
                         ).normalizedForPersistence(),
                     ),
@@ -1258,11 +1258,11 @@ private fun buildManualCodexEntry(rawInput: String): ManualEntryBuild {
                 name = host,
                 hostname = host,
                 port = port,
-                codexPorts = listOf(port),
+                agentPorts = listOf(port),
                 source = "manual",
-                hasCodexServer = true,
-                preferredConnectionMode = "directCodex",
-                preferredCodexPort = port,
+                hasAgentServer = true,
+                preferredConnectionMode = "direct",
+                preferredAgentPort = port,
             ).normalizedForPersistence(),
         ),
     )
@@ -1298,7 +1298,7 @@ private fun buildManualSshEntry(
                 port = sshPort,
                 sshPort = sshPort,
                 source = "manual",
-                hasCodexServer = false,
+                hasAgentServer = false,
                 wakeMAC = normalizedWakeMac,
                 preferredConnectionMode = "ssh",
             ).normalizedForPersistence(),
@@ -1333,19 +1333,19 @@ private fun parseBareHostAndPort(raw: String): Pair<String, Int>? {
 }
 
 private sealed interface WakeSignalResult {
-    data class Codex(val port: Int) : WakeSignalResult
+    data class Agent(val port: Int) : WakeSignalResult
     data class Ssh(val port: Int) : WakeSignalResult
     data object None : WakeSignalResult
 }
 
 private suspend fun waitForWakeSignal(
     host: String,
-    preferredCodexPort: Int?,
+    preferredAgentPort: Int?,
     preferredSshPort: Int?,
     timeoutMillis: Long,
     wakeMac: String?,
 ): WakeSignalResult = withContext(Dispatchers.IO) {
-    val codexPorts = orderedCodexPorts(preferredCodexPort)
+    val agentPorts = orderedAgentPorts(preferredAgentPort)
     val sshPorts = orderedSshPorts(preferredSshPort)
     val deadline = System.currentTimeMillis() + maxOf(timeoutMillis, 500L)
     var lastWakePacketAt = 0L
@@ -1357,9 +1357,9 @@ private suspend fun waitForWakeSignal(
             lastWakePacketAt = now
         }
 
-        for (port in codexPorts) {
+        for (port in agentPorts) {
             if (isPortOpen(host, port, 700)) {
-                return@withContext WakeSignalResult.Codex(port)
+                return@withContext WakeSignalResult.Agent(port)
             }
         }
 
@@ -1375,7 +1375,7 @@ private suspend fun waitForWakeSignal(
     WakeSignalResult.None
 }
 
-private fun orderedCodexPorts(preferred: Int?): List<Int> = buildList {
+private fun orderedAgentPorts(preferred: Int?): List<Int> = buildList {
     preferred?.let(::add)
     addAll(listOf(8390, 9234, 4222))
 }.filter { it in 1..65535 }.distinct()

@@ -9,21 +9,21 @@ import org.junit.Test
 
 class SavedServerTransportTest {
     @Test
-    fun codexAndSshDiscoveryRequiresChoiceUntilPreferenceIsSet() {
+    fun agentAndSshDiscoveryRequiresChoiceUntilPreferenceIsSet() {
         val server =
             SavedServer(
                 id = "server-1",
                 name = "Studio",
                 hostname = "192.168.1.203",
                 port = 8390,
-                codexPorts = listOf(8390),
+                agentPorts = listOf(8390),
                 sshPort = 22,
-                hasCodexServer = true,
+                hasAgentServer = true,
             )
 
         assertFalse(server.prefersSshConnection)
         assertTrue(server.requiresConnectionChoice)
-        assertNull(server.directCodexPort)
+        assertNull(server.directAgentPort)
     }
 
     @Test
@@ -34,14 +34,14 @@ class SavedServerTransportTest {
                 name = "SSH Tunnel",
                 hostname = "10.0.0.5",
                 port = 8390,
-                codexPorts = listOf(8390),
+                agentPorts = listOf(8390),
                 sshPort = 22,
-                hasCodexServer = true,
+                hasAgentServer = true,
                 preferredConnectionMode = "ssh",
             )
 
         assertTrue(server.prefersSshConnection)
-        assertNull(server.directCodexPort)
+        assertNull(server.directAgentPort)
         assertEquals(22, server.resolvedSshPort)
     }
 
@@ -53,30 +53,30 @@ class SavedServerTransportTest {
                 name = "Old Saved Host",
                 hostname = "192.168.1.203",
                 port = 8390,
-                codexPorts = listOf(8390),
+                agentPorts = listOf(8390),
                 sshPort = 22,
-                hasCodexServer = true,
+                hasAgentServer = true,
                 sshPortForwardingEnabled = true,
             )
 
         assertTrue(server.prefersSshConnection)
-        assertNull(server.directCodexPort)
+        assertNull(server.directAgentPort)
         assertEquals(22, server.resolvedSshPort)
     }
 
     @Test
-    fun codexOnlyHostUsesDirectTransport() {
+    fun agentOnlyHostUsesDirectTransport() {
         val server =
             SavedServer(
                 id = "server-4",
-                name = "Codex",
+                name = "Agent",
                 hostname = "10.0.0.4",
                 port = 9234,
-                codexPorts = listOf(9234),
-                hasCodexServer = true,
+                agentPorts = listOf(9234),
+                hasAgentServer = true,
             )
 
         assertFalse(server.prefersSshConnection)
-        assertEquals(9234, server.directCodexPort)
+        assertEquals(9234, server.directAgentPort)
     }
 }

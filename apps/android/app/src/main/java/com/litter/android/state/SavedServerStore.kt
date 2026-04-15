@@ -17,13 +17,13 @@ data class SavedServer(
     val name: String,
     val hostname: String,
     val port: Int,
-    val codexPorts: List<Int> = emptyList(),
+    val agentPorts: List<Int> = emptyList(),
     val sshPort: Int? = null,
     val source: String = "manual", // local, bonjour, tailscale, lanProbe, arpScan, ssh, manual
-    val hasCodexServer: Boolean = false,
+    val hasAgentServer: Boolean = false,
     val wakeMAC: String? = null,
-    val preferredConnectionMode: String? = null, // directCodex or ssh
-    val preferredCodexPort: Int? = null,
+    val preferredConnectionMode: String? = null, // direct or ssh
+    val preferredAgentPort: Int? = null,
     val sshPortForwardingEnabled: Boolean? = null, // legacy migration only
     val websocketURL: String? = null,
     val os: String? = null,
@@ -49,13 +49,13 @@ data class SavedServer(
         put("name", name)
         put("hostname", hostname)
         put("port", port)
-        put("codexPorts", JSONArray(availableDirectCodexPorts))
+        put("agentPorts", JSONArray(availableDirectAgentPorts))
         sshPort?.let { put("sshPort", it) }
         put("source", source)
-        put("hasCodexServer", hasCodexServer)
+        put("hasAgentServer", hasAgentServer)
         wakeMAC?.let { put("wakeMAC", it) }
         preferredConnectionMode?.let { put("preferredConnectionMode", it) }
-        preferredCodexPort?.let { put("preferredCodexPort", it) }
+        preferredAgentPort?.let { put("preferredAgentPort", it) }
         sshPortForwardingEnabled?.let { put("sshPortForwardingEnabled", it) }
         websocketURL?.let { put("websocketURL", it) }
         os?.let { put("os", it) }
@@ -63,18 +63,18 @@ data class SavedServer(
         put("rememberedByUser", rememberedByUser)
     }
 
-    val availableDirectCodexPorts: List<Int>
+    val availableDirectAgentPorts: List<Int>
         get() {
             val ordered = buildList {
-                if (hasCodexServer && port > 0) add(port)
-                addAll(codexPorts.filter { it > 0 })
+                if (hasAgentServer && port > 0) add(port)
+                addAll(agentPorts.filter { it > 0 })
             }
             return ordered.distinct()
         }
 
     val resolvedPreferredConnectionMode: String?
         get() = when (preferredConnectionMode) {
-            "directCodex" -> if (availableDirectCodexPorts.isNotEmpty() || websocketURL != null) "directCodex" else null
+            "direct", "directCodex" -> if (availableDirectAgentPorts.isNotEmpty() || websocketURL != null) "direct" else null
             "ssh" -> if (canConnectViaSsh) "ssh" else null
             else -> if (sshPortForwardingEnabled == true) "ssh" else null
         }
@@ -86,18 +86,18 @@ data class SavedServer(
         get() = websocketURL == null && (
             sshPort != null ||
                 source == "ssh" ||
-                (!hasCodexServer && resolvedSshPort > 0) ||
+                (!hasAgentServer && resolvedSshPort > 0) ||
                 preferredConnectionMode == "ssh" ||
                 sshPortForwardingEnabled == true
         )
 
     val resolvedSshPort: Int
-        get() = sshPort ?: port.takeIf { !hasCodexServer && it > 0 } ?: 22
+        get() = sshPort ?: port.takeIf { !hasAgentServer && it > 0 } ?: 22
 
-    val resolvedPreferredCodexPort: Int?
+    val resolvedPreferredAgentPort: Int?
         get() = when {
-            resolvedPreferredConnectionMode != "directCodex" -> null
-            preferredCodexPort != null && availableDirectCodexPorts.contains(preferredCodexPort) -> preferredCodexPort
+            resolvedPreferredConnectionMode != "direct" -> null
+            preferredAgentPort != null && availableDirectAgentPorts.contains(preferredAgentPort) -> preferredAgentPort
             else -> null
         }
 
@@ -105,32 +105,32 @@ data class SavedServer(
         get() = websocketURL == null &&
             resolvedPreferredConnectionMode == null &&
             (
-                availableDirectCodexPorts.size > 1 ||
-                    (availableDirectCodexPorts.isNotEmpty() && canConnectViaSsh)
+                availableDirectAgentPorts.size > 1 ||
+                    (availableDirectAgentPorts.isNotEmpty() && canConnectViaSsh)
             )
 
-    val directCodexPort: Int?
+    val directAgentPort: Int?
         get() = when {
             websocketURL != null -> null
             prefersSshConnection -> null
-            resolvedPreferredCodexPort != null -> resolvedPreferredCodexPort
+            resolvedPreferredAgentPort != null -> resolvedPreferredAgentPort
             requiresConnectionChoice -> null
-            availableDirectCodexPorts.isNotEmpty() -> availableDirectCodexPorts.first()
+            availableDirectAgentPorts.isNotEmpty() -> availableDirectAgentPorts.first()
             else -> null
         }
 
-    fun withPreferredConnection(mode: String?, codexPort: Int? = null): SavedServer =
+    fun withPreferredConnection(mode: String?, agentPortValue: Int? = null): SavedServer =
         copy(
             port = when (mode) {
-                "directCodex" -> codexPort ?: directCodexPort ?: availableDirectCodexPorts.firstOrNull() ?: port
+                "direct" -> agentPortValue ?: directAgentPort ?: availableDirectAgentPorts.firstOrNull() ?: port
                 "ssh" -> resolvedSshPort
                 else -> port
             },
-            codexPorts = availableDirectCodexPorts,
+            agentPorts = availableDirectAgentPorts,
             sshPort = sshPort ?: if (canConnectViaSsh) resolvedSshPort else null,
             preferredConnectionMode = mode,
-            preferredCodexPort = if (mode == "directCodex") {
-                codexPort ?: directCodexPort ?: availableDirectCodexPorts.firstOrNull()
+            preferredAgentPort = if (mode == "direct") {
+                agentPortValue ?: directAgentPort ?: availableDirectAgentPorts.firstOrNull()
             } else {
                 null
             },
@@ -139,7 +139,7 @@ data class SavedServer(
 
     fun normalizedForPersistence(): SavedServer = withPreferredConnection(
         mode = resolvedPreferredConnectionMode,
-        codexPort = resolvedPreferredCodexPort ?: availableDirectCodexPorts.firstOrNull(),
+        agentPortValue = resolvedPreferredAgentPort ?: availableDirectAgentPorts.firstOrNull(),
     )
 
     companion object {
@@ -166,8 +166,8 @@ data class SavedServer(
             name = obj.optString("name", ""),
             hostname = obj.optString("hostname", ""),
             port = obj.optInt("port", 0),
-            codexPorts = buildList {
-                val ports = obj.optJSONArray("codexPorts")
+            agentPorts = buildList {
+                val ports = obj.optJSONArray("agentPorts") ?: obj.optJSONArray("codexPorts")
                 if (ports != null) {
                     for (index in 0 until ports.length()) {
                         add(ports.optInt(index))
@@ -176,10 +176,20 @@ data class SavedServer(
             },
             sshPort = if (obj.has("sshPort")) obj.getInt("sshPort") else null,
             source = obj.optString("source", "manual"),
-            hasCodexServer = obj.optBoolean("hasCodexServer", false),
+            hasAgentServer = obj.optBoolean("hasAgentServer", obj.optBoolean("hasCodexServer", false)),
             wakeMAC = if (obj.has("wakeMAC")) obj.getString("wakeMAC") else null,
-            preferredConnectionMode = obj.optString("preferredConnectionMode").ifBlank { null },
-            preferredCodexPort = if (obj.has("preferredCodexPort")) obj.getInt("preferredCodexPort") else null,
+            preferredConnectionMode = obj.optString("preferredConnectionMode").ifBlank { null }
+                ?.let { mode ->
+                    // Migrate legacy "directCodex" to "direct"
+                    if (mode == "directCodex") "direct" else mode
+                },
+            preferredAgentPort = if (obj.has("preferredAgentPort")) {
+                obj.getInt("preferredAgentPort")
+            } else if (obj.has("preferredCodexPort")) {
+                obj.getInt("preferredCodexPort")
+            } else {
+                null
+            },
             sshPortForwardingEnabled = if (obj.has("sshPortForwardingEnabled")) {
                 obj.optBoolean("sshPortForwardingEnabled")
             } else {
@@ -199,8 +209,8 @@ data class SavedServer(
             id = server.id,
             name = server.displayName,
             hostname = server.host,
-            port = server.codexPort?.toInt() ?: server.port.toInt(),
-            codexPorts = server.codexPorts.map { it.toInt() },
+            port = server.agentPort?.toInt() ?: server.port.toInt(),
+            agentPorts = server.agentPorts.map { it.toInt() },
             sshPort = server.sshPort?.toInt(),
             source = when (server.source) {
                 AppDiscoverySource.BONJOUR -> "bonjour"
@@ -210,7 +220,7 @@ data class SavedServer(
                 AppDiscoverySource.MANUAL -> "manual"
                 AppDiscoverySource.LOCAL -> "local"
             },
-            hasCodexServer = server.codexPort != null || server.codexPorts.isNotEmpty(),
+            hasAgentServer = server.agentPort != null || server.agentPorts.isNotEmpty(),
             os = if (server.sshBanner != null) server.os else server.os,
             sshBanner = server.sshBanner,
         )
@@ -222,13 +232,13 @@ fun SavedServer.toRecord() = SavedServerRecord(
     name = name,
     hostname = hostname,
     port = port.toUShort(),
-    codexPorts = codexPorts.map { it.toUShort() },
+    agentPorts = agentPorts.map { it.toUShort() },
     sshPort = sshPort?.toUShort(),
     source = source,
-    hasCodexServer = hasCodexServer,
+    hasAgentServer = hasAgentServer,
     wakeMac = wakeMAC,
     preferredConnectionMode = preferredConnectionMode,
-    preferredCodexPort = preferredCodexPort?.toUShort(),
+    preferredAgentPort = preferredAgentPort?.toUShort(),
     sshPortForwardingEnabled = sshPortForwardingEnabled,
     websocketUrl = websocketURL,
     rememberedByUser = rememberedByUser,
