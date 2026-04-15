@@ -370,6 +370,22 @@ struct InlineAgentSelectorView: View {
             .padding(.vertical, 8)
         }
         .disabled(!compatible)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(inlineAgentRowAccessibilityLabel(info: info, agentType: agentType, compatible: compatible, isSelected: agentType == selectedAgentType))
+        .accessibilityHint(compatible ? "Double tap to select \(info.displayName)" : "")
+        .accessibilityAddTraits(compatible ? .isButton : .isStaticText)
+    }
+
+    private func inlineAgentRowAccessibilityLabel(info: AgentInfo, agentType: AgentType, compatible: Bool, isSelected: Bool) -> String {
+        var parts: [String] = [info.displayName]
+        parts.append("\(agentType.transportLabel) transport")
+        if !compatible {
+            parts.append("unavailable")
+        }
+        if isSelected {
+            parts.append("selected")
+        }
+        return parts.joined(separator: ", ")
     }
 }
 
@@ -430,6 +446,8 @@ struct AgentPickerSheet: View {
                         }
                         .listRowBackground(LitterTheme.surface.opacity(0.6))
                         .disabled(!compatible)
+                        .accessibilityLabel(pickerSheetRowLabel(info: info, agentType: agentType, compatible: compatible))
+                        .accessibilityHint(compatible ? "Double tap to select \(info.displayName) agent" : "Unavailable")
                     }
 
                     // MARK: ACP Profiles section (when GenericAcp available)
@@ -515,6 +533,19 @@ struct AgentPickerSheet: View {
         .padding(.vertical, 4)
     }
 
+    private func pickerSheetRowLabel(info: AgentInfo, agentType: AgentType, compatible: Bool) -> String {
+        var parts: [String] = [info.displayName]
+        if compatible {
+            parts.append(contentsOf: info.detectedTransports.map { $0.transportLabel })
+            if !info.capabilities.isEmpty {
+                parts.append(info.capabilities.joined(separator: ", "))
+            }
+        } else {
+            parts.append("unavailable")
+        }
+        return parts.joined(separator: ", ")
+    }
+
     // MARK: - ACP Profiles Section
 
     @ViewBuilder
@@ -530,6 +561,9 @@ struct AgentPickerSheet: View {
                     } label: {
                         acpProfileRow(profile)
                     }
+                    .accessibilityLabel("ACP profile: \(profile.displayName)")
+                    .accessibilityHint("Double tap to configure and connect with \(profile.displayName)")
+                    .accessibilityValue(profile.remoteCommand)
                 }
 
                 if acpProfiles.count > 1 {
@@ -552,10 +586,11 @@ struct AgentPickerSheet: View {
                         .padding(.vertical, 4)
                     }
                     .listRowBackground(LitterTheme.surface.opacity(0.6))
+                    .accessibilityLabel("Enter custom command")
+                    .accessibilityHint("Double tap to enter a custom ACP agent command")
                 }
             } header: {
                 SectionHeader(label: "ACP Providers")
-            }
         } else {
             // No profiles configured — offer a configure link
             Section {
@@ -765,6 +800,7 @@ struct PiThinkingLevelPicker: View {
             Image(systemName: "brain")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundColor(.purple)
+                .accessibilityHidden(true)
             ForEach(levels, id: \.1) { label, value in
                 Button {
                     thinkingLevel = value
@@ -778,8 +814,13 @@ struct PiThinkingLevelPicker: View {
                         .background(thinkingLevel == value ? Color.purple : LitterTheme.surfaceLight)
                         .clipShape(Capsule())
                 }
+                .accessibilityLabel("Pi thinking level: \(label)")
+                .accessibilityHint("Set thinking level to \(label)")
+                .accessibilityAddTraits(thinkingLevel == value ? .isSelected : [])
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Pi thinking level, currently \(levels.first(where: { $0.1 == thinkingLevel })?.0 ?? "Balanced")")
     }
 }
 

@@ -151,6 +151,10 @@ struct SettingsView: View {
                     }
                 }
                 .listRowBackground(LitterTheme.surface.opacity(0.6))
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(agentType.displayName) permissions")
+                .accessibilityValue(currentPolicy.displayName)
+                .accessibilityHint("Change permission policy for \(agentType.displayName) agent")
             }
 
             // Per-agent transport preference rows
@@ -196,6 +200,10 @@ struct SettingsView: View {
                     }
                 }
                 .listRowBackground(LitterTheme.surface.opacity(0.6))
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(agentType.displayName) transport preference")
+                .accessibilityValue(transportPreferenceLabel(currentTransport))
+                .accessibilityHint("Change transport preference for \(agentType.displayName) agent")
             }
         } header: {
             Text("Agent Settings")
@@ -234,6 +242,10 @@ struct SettingsView: View {
                 }
             }
             .listRowBackground(LitterTheme.surface.opacity(0.6))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("ACP Providers")
+            .accessibilityValue("\(ACPProfileStore.shared.profiles().count) profile\(ACPProfileStore.shared.profiles().count == 1 ? "" : "s")")
+            .accessibilityHint("Manage ACP-compatible agent provider profiles")
         } header: {
             Text("Custom Agents")
                 .foregroundColor(LitterTheme.textSecondary)

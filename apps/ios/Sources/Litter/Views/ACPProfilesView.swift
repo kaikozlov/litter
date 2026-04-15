@@ -89,6 +89,10 @@ struct ACPProfilesView: View {
                     profileRow(profile)
                 }
                 .listRowBackground(LitterTheme.surface.opacity(0.6))
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("ACP profile: \(profile.displayName)")
+                .accessibilityValue(profile.remoteCommand)
+                .accessibilityHint("Double tap to edit \(profile.displayName) profile")
             }
         } header: {
             Text("Profiles")
@@ -133,6 +137,8 @@ struct ACPProfilesView: View {
                     .font(.system(size: 14))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Delete \(profile.displayName) profile")
+            .accessibilityHint("Double tap to delete this ACP provider profile")
         }
     }
 
@@ -153,6 +159,8 @@ struct ACPProfilesView: View {
                 }
             }
             .listRowBackground(LitterTheme.surface.opacity(0.6))
+            .accessibilityLabel("Add ACP provider")
+            .accessibilityHint("Double tap to create a new ACP provider profile")
         }
     }
 
@@ -233,6 +241,8 @@ private struct ACPEditProfileView: View {
                 .foregroundColor(LitterTheme.textPrimary)
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
+                .accessibilityLabel("Display name")
+                .accessibilityHint("Enter a short name to identify this ACP provider")
         } header: {
             Text("Display Name")
                 .foregroundColor(LitterTheme.textSecondary)
@@ -250,6 +260,8 @@ private struct ACPEditProfileView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .font(.system(.subheadline, design: .monospaced))
+                .accessibilityLabel("Remote command")
+                .accessibilityHint("Enter the shell command to launch the ACP agent over SSH")
         } header: {
             Text("Remote Command")
                 .foregroundColor(LitterTheme.textSecondary)
