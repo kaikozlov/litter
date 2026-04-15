@@ -1,0 +1,33 @@
+{
+  "featureId": "ios-activitykit-rename",
+  "reviewedAt": "2026-04-15T12:00:00.000Z",
+  "commitId": "76920e2",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Clean rename-only refactor across 13 files. All ActivityKit attribute types, widget structs, and their references have been consistently renamed from Codex-specific to agent-generic names. The 'Codex speaking' user-facing string was correctly replaced with 'Agent speaking'. Build passes, 106 tests pass, and no stale Codex-specific references remain in the iOS source tree.",
+    "issues": [
+      {
+        "file": "apps/ios/Sources/Litter/Models/TurnLiveActivityController.swift",
+        "line": 17,
+        "severity": "non_blocking",
+        "description": "Backward compatibility for in-progress Live Activities: `cleanupStaleActivities()` iterates `Activity<TurnAttributes>.activities` and ends them. After this rename, any Live Activities created before the app update with the old `CodexTurnAttributes` type will not appear in `Activity<TurnAttributes>.activities` — they will be orphaned. This is an inherent ActivityKit limitation: attribute type renames break continuity with in-flight activities. The handoff correctly notes this depends on device testing, but the feature's expectedBehavior says 'Backward compatibility maintained for in-progress Live Activities'. In practice, the only mitigation is that Live Activities expire after 8 hours or on device reboot, and the cleanup code handles stale activities for the new type. No code change is needed unless the team wants explicit orphan-cleanup for the old type name."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The AGENTS.md coding conventions mention 'provider-agnostic naming: agent not codex, agent_port not codex_port' but do not mention the ActivityKit attribute naming convention. The rename from CodexTurnAttributes → TurnAttributes and CodexVoiceCallAttributes → VoiceCallAttributes establishes a pattern where ActivityKit attributes drop the provider prefix entirely. This should be documented so future ActivityKit additions follow the same convention.",
+      "evidence": "Mission AGENTS.md has general naming guidance but no ActivityKit-specific convention"
+    },
+    {
+      "area": "skills",
+      "observation": "Worker's skillFeedback.suggestedChanges notes that the platform-ui-worker skill is primarily written for agent-selection wiring and would benefit from an ActivityKit-specific variant. The worker followed the procedure correctly despite this gap, so the skill deficiency did not block completion but could slow future ActivityKit work.",
+      "evidence": "Transcript shows worker reading the skill, then proceeding with the rename using standard code modification workflow. skillFeedback.followedProcedure = true."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "The rename is thorough and consistent across all 13 files: attribute struct definitions (TurnAttributes, VoiceCallAttributes), widget implementations (TurnLiveActivity, VoiceCallLiveActivity), the widget bundle, project.yml source paths, and all consuming code (TurnLiveActivityController, VoiceRuntimeController, VoiceSessionModels, LockScreenCardView, LiveActivityPreview, VoiceCallLockScreenCardView). The user-facing 'Codex speaking' string was correctly changed to 'Agent speaking'. Grep confirms zero remaining Codex-specific ActivityKit references. The only note is that in-progress Live Activities from before the update will be orphaned due to the ActivityKit type rename, which is an inherent platform limitation rather than a code defect. Build and tests pass cleanly."
+}

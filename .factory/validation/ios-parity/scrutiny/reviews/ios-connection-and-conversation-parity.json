@@ -1,0 +1,57 @@
+{
+  "featureId": "ios-connection-and-conversation-parity",
+  "reviewedAt": "2026-04-15T06:30:00.000Z",
+  "commitId": "442f9a7",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The commit makes two small but correct production code changes to remove hardcoded 'CODEX' strings from InlineVoiceStatusStrip (replaced with an `agentLabel` parameter) and VoiceCallView (fallback changed from 'CODEX' to 'Agent'). It also adds 28 unit tests covering VAL-IOS-028 through VAL-IOS-038 and a knowledge library doc. The production changes are targeted and correct. The tests are reasonable smoke tests for a parity feature — they verify the data model and store logic is provider-agnostic — though several tests for VAL-IOS-032/033/034 are thin (checking hardcoded string literals rather than verifying actual UI rendering or code paths). The validation contract acknowledges these items require manual/screenshot verification, so the unit test coverage is acceptable as a complement.",
+    "issues": [
+      {
+        "file": "apps/ios/Sources/Litter/Views/InlineVoiceStatusStrip.swift",
+        "line": 5,
+        "severity": "non_blocking",
+        "description": "The `agentLabel` parameter was added to InlineVoiceStatusStrip, but there are zero call sites for this view anywhere in the codebase. The struct is defined but never instantiated. This means the parameter change is correct but has no runtime effect. The view may be intended for future use or may be instantiated from generated/derived code not visible in the repo. Not a bug, but worth noting that this change cannot be verified at runtime."
+      },
+      {
+        "file": "apps/ios/Tests/LitterTests/ConnectionConversationParityTests.swift",
+        "line": 168,
+        "severity": "non_blocking",
+        "description": "testConversationStatusEnumDoesNotReferenceProvider only asserts `XCTAssertNotNil(status)` on enum cases, which is always true for Swift enums. The test name suggests it's verifying provider-agnosticism, but it doesn't actually check anything meaningful about the enum's behavior or naming. A better approach would be to iterate the enum's debugDescription or reflection to verify no case name contains 'Codex'."
+      },
+      {
+        "file": "apps/ios/Tests/LitterTests/ConnectionConversationParityTests.swift",
+        "line": 189,
+        "severity": "non_blocking",
+        "description": "testTypingIndicatorTextIsGeneric checks a hardcoded local string literal `\"Thinking\"` against `\"Codex\"`. This doesn't verify the actual TypingIndicator view text — it's a tautological test. Similarly, testAgentDisplayLabelUsesNicknameOrRole checks a local `\"Agent\"` string literal. These tests provide no meaningful coverage of the actual view code. However, the actual view code (ConversationView.swift:2847 and :2927) was manually verified to use provider-generic text."
+      },
+      {
+        "file": "apps/ios/Tests/LitterTests/ConnectionConversationParityTests.swift",
+        "line": 249,
+        "severity": "non_blocking",
+        "description": "testConnectionErrorMessageIsGeneric tests three hardcoded string literals that never appear in actual code — they are not sourced from any error message constant or localized string. The test is documenting an intent rather than verifying actual error message content. Should ideally reference the actual error message constants or NSLocalizedString keys."
+      },
+      {
+        "file": "apps/ios/Tests/LitterTests/ConnectionConversationParityTests.swift",
+        "line": 417,
+        "severity": "non_blocking",
+        "description": "The private `connectionStepLabel` helper duplicates the production logic from `AppServerSnapshot+UI.swift` connectionProgressLabel. This means the test verifies the test's own copy, not the production code. If the production mapping changes, this test won't catch the regression. Consider importing and calling the production method directly (e.g., constructing an AppServerSnapshot and calling connectionProgressLabel)."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The InlineVoiceStatusStrip view has zero call sites in the codebase despite being included in the Xcode project and having parameters added. AGENTS.md doesn't document which views are currently wired vs. prepared for future use. This made it unclear whether the agentLabel change was actually testable at runtime.",
+      "evidence": "Grep for 'StatusStrip(' across all Swift files returns no matches. The view is only referenced in its own definition and project.pbxproj."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The worker added .factory/library/ios-connection-parity.md documenting the provider-agnostic patterns, key files, and test coverage. This is useful and well-structured. It correctly maps VAL-IOS items to their test locations and key implementation files.",
+      "evidence": ".factory/library/ios-connection-parity.md — 37 lines covering connection flow, conversation rendering, voice UI, and provider-agnostic patterns."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS with non-blocking observations. The production code changes are minimal, correct, and well-targeted: two hardcoded 'CODEX' strings replaced with provider-generic alternatives. The 28 tests provide reasonable structural coverage of the data model and store logic for VAL-IOS-028 through VAL-IOS-038, though several tests for conversation rendering parity (VAL-IOS-032/033/034) are tautological — they check local string literals rather than actual production code paths. The validation contract explicitly calls for manual/screenshot verification for these items, so the unit tests serve as supplementary smoke tests rather than primary verification. The InlineVoiceStatusStrip.agentLabel change is correct but has no call sites, meaning it has no runtime effect. The knowledge library doc is a good addition. Overall the implementation is sound and the build passes (1285 Rust tests + 161 iOS tests), but the test depth for conversation rendering parity could be improved in future iterations by testing actual view text output or using snapshot testing."
+}

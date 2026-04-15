@@ -1,0 +1,50 @@
+{
+  "featureId": "ios-agent-badge-and-picker",
+  "reviewedAt": "2026-04-15T09:15:00Z",
+  "commitId": "16c071b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The worker correctly identified that most of the agent badge/picker functionality was already implemented by prior milestones (generic-acp and discovery-cleanup). The commit adds two accessibility labels (to AgentBadgeView and AgentTypePill) and a comprehensive 35-test suite (AgentBadgePickerTests.swift) covering VAL-IOS-010 through VAL-IOS-019. The implementation is clean, follows project conventions, and all 106 iOS tests and 1285 Rust tests pass.",
+    "issues": [
+      {
+        "file": "apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+        "line": 118,
+        "severity": "non_blocking",
+        "description": "Variable `uniqueTypes` is misleadingly named — `Array(types)` from `flatMap` does NOT deduplicate. If two AgentInfo records share the same detectedTransport (e.g., both have `.codex`), duplicates will appear in the array. In practice, DiscoveryView uses `server.agentTypes` (from the DiscoveredServer model) for picker logic rather than this path, so this is not a functional bug, but the name should be `allTypes` or the array should use a Set for actual uniqueness."
+      },
+      {
+        "file": "apps/ios/Tests/LitterTests/AgentBadgePickerTests.swift",
+        "line": 263,
+        "severity": "non_blocking",
+        "description": "The accessibility label test (`testAllAgentTypesHaveAccessibilityLabels`) only verifies the computed string label, not that VoiceOver actually picks it up from the SwiftUI view hierarchy. This is the standard pattern for XCTest unit tests (can't inspect accessibility in unit tests), but it means VAL-IOS-012 is verified at the string-construction level only, not at the actual VoiceOver integration level."
+      },
+      {
+        "file": "apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+        "line": 159,
+        "severity": "non_blocking",
+        "description": "The `testAgentTypesCacheUpdateAndRetrieve` and `testSSHCapabilityCache` tests write to the shared singleton's in-memory caches without defer cleanup. This is acceptable because they use unique test-server IDs and these caches are not persisted to UserDefaults, but it does leave residual entries in the shared singleton's memory for the test run lifetime."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "AGENTS.md states 'All agent types must be supported in badge/picker/filter UI — no Codex-only fallbacks'. The worker correctly followed this by testing all six AgentType variants across badge rendering, transport labels, accessibility labels, and Codable round-trips. However, the `AgentBadgeView` tint colors for Pi variants (`Color.purple`) vs Pi ACP (`Color.purple`) are identical — same for Droid variants (`Color.orange`). The validation contract VAL-IOS-010 says 'distinct SF Symbol icon and tint color' for each agent type, but the implementation gives the same tint to transport variants of the same agent family. This is a deliberate design choice (distinguishing by agent family, not transport) that matches the contract's intent, but the wording could be clarified.",
+      "evidence": "AgentBadgeView.swift:23-31 — piAcp/piNative both return Color.purple; droidAcp/droidNative both return Color.orange"
+    },
+    {
+      "area": "skills",
+      "observation": "The platform-ui-worker skill describes wiring agent type selection through the iOS connection flow (DiscoveryView). The worker found that this wiring was already done by prior milestones and only needed to add accessibility labels and tests. The skill procedure accurately describes the expected work pattern for new features; in this case the feature was mostly pre-existing. The worker correctly followed the skill procedure (cargo check, make ios-sim-fast, run tests) and skillFeedback.followedProcedure is true.",
+      "evidence": "Handoff salientSummary: 'The ios-agent-badge-and-picker feature was already fully implemented by prior milestones'; transcript shows worker read AgentBadgeView.swift, AgentPickerView.swift, DiscoveryView.swift, SessionsScreen.swift and verified existing implementation before adding accessibility labels and tests."
+    },
+    {
+      "area": "services",
+      "observation": "No new services or commands needed. The worker used standard commands already documented in services.yaml (ios-build, ios-test, cargo check, cargo test).",
+      "evidence": "Transcript shows: cargo check, make ios-sim-fast, xcodebuild test, cargo test — all documented in services.yaml"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "This feature was primarily about verifying and completing pre-existing agent badge/picker infrastructure from prior milestones. The worker's commit (16c071b) correctly identified the gap (missing accessibility labels on AgentBadgeView and AgentTypePill) and addressed it with two one-line additions. The 35 new tests provide thorough coverage of badge rendering properties, accessibility labels, agent selection persistence, auto-selection logic, picker show/hide logic, Codable serialization, and ACP profile/command persistence. All validation contract assertions (VAL-IOS-010 through VAL-IOS-019) are covered by the tests. Build verification passed (iOS build + 106 unit tests + 1285 Rust tests). The only non-blocking issue is a misleadingly named variable `uniqueTypes` in AgentSelectionStore.updateAgentInfos that doesn't actually deduplicate. Overall: clean, well-tested implementation that follows project conventions."
+}

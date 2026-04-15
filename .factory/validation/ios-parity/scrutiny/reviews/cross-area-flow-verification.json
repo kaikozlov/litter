@@ -1,0 +1,50 @@
+{
+  "featureId": "cross-area-flow-verification",
+  "reviewedAt": "2026-04-15T09:30:00.000Z",
+  "commitId": "592bb7e0797587aea22e0a88ea5865c1688a7c0e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "This was a verification-only session — no new production code was implemented. The worker verified that all 12 VAL-CROSS assertions (VAL-CROSS-001 through VAL-CROSS-012) are covered by existing Rust tests (cross_provider.rs, ~2000 lines with ~25 test functions) and iOS tests (CrossAreaFlowTests.swift, 27KB with 23 component-level tests). The only code change was updating the library documentation file (.factory/library/cross-area-flow-verification.md) with build gate results. All build gates passed: cargo check (exit 0), cargo test (1291 passed, 0 failed), make bindings (exit 0), make ios-sim-fast (BUILD SUCCEEDED), xcodebuild test -only-testing:LitterTests (240 passed, 0 failed). The pre-existing UI test failure (testCaptureScreenshots requiring a real server) was correctly identified as unrelated.",
+    "issues": [
+      {
+        "file": "apps/ios/Tests/LitterTests/CrossAreaFlowTests.swift",
+        "line": 281,
+        "severity": "non_blocking",
+        "description": "testMultiProviderSessionFiltering uses exact agent type match for filtering (agentTypeFilter: .piNative matches only piNative sessions, not piAcp). The test comment notes this behavior ('But the filter uses exact agent type match, so only piNative matches'), but the validation contract (VAL-CROSS-006) says 'filter by type' which could reasonably imply all Pi variants. This is a design decision rather than a bug, but worth confirming that the filtering UX intentionally uses exact variant match rather than grouping by provider family (Pi/PiAcp both showing under a 'Pi' filter)."
+      },
+      {
+        "file": "apps/ios/Tests/LitterTests/CrossAreaFlowTests.swift",
+        "line": 48,
+        "severity": "non_blocking",
+        "description": "Tests use @MainActor attribute on the test class, and several tests manipulate shared singleton stores (AgentSelectionStore.shared, ACPProfileStore.shared, AgentPermissionStore.shared). Tests include defer blocks for cleanup, which is good practice. However, since these are singleton stores, running tests in parallel could cause state interference. This is a minor concern since Xcode typically runs tests serially by default, but it's worth noting for future test scalability."
+      },
+      {
+        "file": "shared/rust-bridge/codex-mobile-client/src/provider/cross_provider.rs",
+        "line": 79,
+        "severity": "non_blocking",
+        "description": "The COLLECT_TIMEOUT_MS is set to 200ms for collecting broadcast events in tests. While this works for mock tests, it could cause flaky failures on heavily loaded CI machines. The timeout is a pragmatic trade-off for test speed, but a longer timeout or retry mechanism might improve reliability in CI."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The cross_provider.rs file contains 2098 lines in a single test file with 25+ test functions spanning multiple validation assertion IDs (VAL-CROSS-001 through VAL-CROSS-021, VAL-PROV-017, VAL-PROV-020, VAL-ACP-110 through VAL-ACP-112). The file header comment lists specific assertion IDs covered, which is good practice. However, the library documentation (cross-area-flow-verification.md) has a mapping table that would benefit from being kept in sync with the file header comments when new tests are added.",
+      "evidence": "cross_provider.rs header: 'VAL-CROSS-001, VAL-CROSS-002, VAL-CROSS-006, VAL-CROSS-008, VAL-CROSS-010, VAL-CROSS-012, VAL-CROSS-013, VAL-CROSS-016, VAL-CROSS-017, VAL-CROSS-018, VAL-CROSS-019, VAL-CROSS-020, VAL-CROSS-021, VAL-PROV-017, VAL-PROV-020' — the library docs only list VAL-CROSS-001 through VAL-CROSS-012."
+    },
+    {
+      "area": "conventions",
+      "observation": "The project convention for iOS test cleanup with shared singleton stores (AgentSelectionStore.shared, ACPProfileStore.shared) uses defer blocks for cleanup. This pattern works but isn't documented in AGENTS.md. It might be worth noting since future test writers need to know about singleton store cleanup requirements.",
+      "evidence": "CrossAreaFlowTests.swift repeatedly uses patterns like 'defer { store.setSelectedAgentType(nil, for: serverId); store.updateAgentTypes([], for: serverId) }' to clean up shared state after each test."
+    },
+    {
+      "area": "skills",
+      "observation": "The platform-ui-worker skill focuses heavily on implementing iOS view changes (DiscoveryView, agent type parameter threading). This verification session was primarily about running build gates and checking test coverage, which is a different workflow than what the skill describes. The worker followed the skill correctly (verified bindings, ran iOS build, ran cargo check), but the skill doesn't have specific guidance for 'verification-only' sessions where no code changes are needed. The worker adapted appropriately.",
+      "evidence": "Transcript shows worker invoked platform-ui-worker skill, then proceeded to verify existing tests rather than implement new iOS UI changes. skillFeedback.followedProcedure is true."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS — This was a verification-only session confirming that all 12 VAL-CROSS assertions (VAL-CROSS-001 through VAL-CROSS-012) are adequately covered by existing test infrastructure. The single commit (592bb7e) only updated the library documentation with build gate results. The test coverage is comprehensive: Rust has ~25 cross-provider tests in cross_provider.rs covering provider trait behavior (connect/stream/disconnect/reconnect), multi-provider isolation, session ID collision, transport fallback, large response handling, and discovery port mapping. iOS has 23 component-level tests in CrossAreaFlowTests.swift covering agent type attributes, selection persistence, ACP profile configuration, settings propagation, session filtering, saved server migration (legacy field compatibility), and provider switching. All build gates passed cleanly (1291 Rust tests, 240 iOS tests). No blocking issues found. Three non-blocking observations: (1) session filtering uses exact agent type match rather than family grouping, (2) singleton store tests rely on serial execution, (3) 200ms event collection timeout could cause flaky CI failures. The validation-state.json was correctly updated to mark all VAL-CROSS assertions as passed."
+}

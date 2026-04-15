@@ -1,0 +1,105 @@
+{
+  "milestone": "ios-parity",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "cargo test --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml --lib", "exitCode": 0, "detail": "1291 passed; 0 failed; 9 ignored" },
+    "typecheck": { "passed": true, "command": "cargo check --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml", "exitCode": 0 },
+    "lint": { "passed": true, "command": "cargo clippy --manifest-path shared/rust-bridge/codex-mobile-client/Cargo.toml -- -D warnings", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 7,
+    "passed": 7,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "nonBlockingIssues": [
+    {
+      "featureId": "ios-codex-string-removal",
+      "severity": "non_blocking",
+      "description": "CarPlayVoiceManager.swift:150 still has user-facing string 'On-device Codex' — CarPlay directory was outside the worker's search scope (Views/ and Models/ only)."
+    },
+    {
+      "featureId": "ios-activitykit-rename",
+      "severity": "non_blocking",
+      "description": "In-progress Live Activities created before the app update with old CodexTurnAttributes type will be orphaned. This is an inherent ActivityKit platform limitation — activities expire after 8 hours anyway."
+    },
+    {
+      "featureId": "ios-agent-badge-and-picker",
+      "severity": "non_blocking",
+      "description": "Misleadingly named `uniqueTypes` variable in AgentSelectionStore.updateAgentInfos does not actually deduplicate."
+    },
+    {
+      "featureId": "ios-connection-and-conversation-parity",
+      "severity": "non_blocking",
+      "description": "Several tests for VAL-IOS-032/033/034 are tautological — they check local hardcoded string literals rather than actual production code paths. The validation contract calls for manual/screenshot verification for these items."
+    },
+    {
+      "featureId": "ios-connection-and-conversation-parity",
+      "severity": "non_blocking",
+      "description": "InlineVoiceStatusStrip.agentLabel parameter added but has zero call sites in the codebase — no runtime effect."
+    },
+    {
+      "featureId": "ios-connection-and-conversation-parity",
+      "severity": "non_blocking",
+      "description": "testConnectionStepLabelsUseGenericNames duplicates production logic in a private helper instead of testing the actual production code."
+    },
+    {
+      "featureId": "ios-accessibility-parity",
+      "severity": "non_blocking",
+      "description": "Accessibility tests reconstruct strings instead of querying actual SwiftUI views — tests verify naming conventions but wouldn't catch accidental removal of accessibility modifiers."
+    },
+    {
+      "featureId": "ios-accessibility-parity",
+      "severity": "non_blocking",
+      "description": "testAllAgentTypesHaveDistinctBadgeLabels only checks 4 of 6 AgentType variants without documenting why piNative and droidNative are excluded."
+    },
+    {
+      "featureId": "cross-area-flow-verification",
+      "severity": "non_blocking",
+      "description": "200ms COLLECT_TIMEOUT_MS in cross_provider.rs tests could cause flaky CI failures on heavily loaded machines."
+    },
+    {
+      "featureId": "cross-area-flow-verification",
+      "severity": "non_blocking",
+      "description": "Session filtering uses exact agent type match rather than grouping by provider family (Pi/PiAcp under 'Pi' filter)."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add guideline: When performing sweeping string replacements across the iOS codebase, search ALL subdirectories under Sources/Litter/ (including CarPlay/, Helpers/, Extensions/) — not just Views/ and Models/.",
+      "evidence": "ios-codex-string-removal worker searched Views/ and Models/ but missed CarPlayVoiceManager.swift:150 which still contains 'On-device Codex'.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add guideline: iOS unit tests for UI text parity should test actual production code paths (e.g., import and call production methods) rather than duplicating string literals in test bodies. Tautological tests that check local string literals against hardcoded expectations provide no regression protection.",
+      "evidence": "ios-connection-and-conversation-parity tests for VAL-IOS-032/033/034 construct local strings and compare against hardcoded values — if production code changes, these tests won't catch regressions. Similar pattern in accessibility tests that reconstruct label strings instead of querying views.",
+      "isSystemic": true
+    },
+    {
+      "target": "skills/platform-ui-worker",
+      "suggestion": "Broaden the platform-ui-worker skill description to cover general iOS UI implementation work (SessionsScreen, AppState, accessibility labeling, string cleanup) rather than being narrowly scoped to DiscoveryView and agent-selection wiring. Multiple features in ios-parity milestone used this skill for work outside its described scope.",
+      "evidence": "ios-session-filter-and-settings, ios-accessibility-parity, ios-codex-string-removal, and ios-activitykit-rename all used the platform-ui-worker skill but worked on files/patterns not described in the skill. Workers adapted but the skill's narrow scope adds friction.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "The ConversationStatus enum changed recently (completed → ready) — should be documented.",
+      "reason": "already-documented — the worker fixed it and it's captured in the review. Not a systemic pattern worth adding to AGENTS.md."
+    },
+    {
+      "observation": "Singleton store tests (AgentSelectionStore.shared, ACPProfileStore.shared) rely on serial test execution.",
+      "reason": "duplicate — Xcode runs tests serially by default. This is a well-known XCTest pattern, not a knowledge gap worth documenting."
+    },
+    {
+      "observation": "The SWIFT_STRICT_CONCURRENCY: minimal setting was added to the test target in project.yml.",
+      "reason": "already-documented — this is a project-level decision visible in project.yml. Not a pattern that needs AGENTS.md documentation."
+    }
+  ],
+  "previousRound": null
+}

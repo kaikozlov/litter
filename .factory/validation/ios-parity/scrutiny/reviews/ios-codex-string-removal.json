@@ -1,0 +1,33 @@
+{
+  "featureId": "ios-codex-string-removal",
+  "reviewedAt": "2026-04-15T04:45:00.000Z",
+  "commitId": "fb0437a",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The commit correctly replaces 21 hardcoded 'Codex' strings across 11 Swift files with agent-generic equivalents. Voice labels become 'Agent', permission/settings descriptions use 'the agent', the splash screen says 'agents on your phone', and the manual connection form header reads 'App Server'. All 106 existing iOS unit tests pass and the app builds successfully. The changes are well-scoped and consistent.",
+    "issues": [
+      {
+        "file": "apps/ios/Sources/Litter/CarPlay/CarPlayVoiceManager.swift",
+        "line": 150,
+        "severity": "non_blocking",
+        "description": "User-facing string 'On-device Codex' in CarPlay voice session detail text was not updated. This is a user-visible label in the CarPlay interface that still says 'Codex' when it could say 'Agent' for consistency with the rest of the UI. This is a minor gap — the CarPlay view may be considered a separate surface that wasn't explicitly in scope, but it violates the principle that all user-facing strings should be agent-generic."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The skill file (platform-ui-worker/SKILL.md) is focused on wiring agent selection through the iOS connect flow, but doesn't mention string replacement or user-facing text conventions. The worker performed string replacement correctly without specific guidance. If multi-agent string conventions become a pattern, a guideline about using agent-generic terminology in UI strings could be useful.",
+      "evidence": "Worker replaced strings in 11 files following an ad-hoc but consistent pattern (Agent/agent/App Server) without a documented convention for how to name agent-generic strings."
+    },
+    {
+      "area": "knowledge",
+      "observation": "CarPlay/ directory contains user-facing Swift code that may be missed when sweeping the main Views/ and Models/ directories. The worker searched Views/, Models/, and Bridge/ but not CarPlay/ or other subdirectories under Sources/Litter/.",
+      "evidence": "CarPlayVoiceManager.swift:150 still contains 'On-device Codex' — a user-facing string that was not caught by the worker's search patterns which targeted Views/ and Models/ directories."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "The ios-codex-string-removal feature is well-implemented. All 11 modified files have correct, consistent replacements. The worker correctly identified and preserved legitimate Codex references (AgentType.codex display names, theme names, Codable backward-compat keys, ActivityKit attributes, generated FFI bindings, Bonjour service type, preview data). The only gap is a single user-facing string 'On-device Codex' in CarPlayVoiceManager.swift that was missed, but this is a non-blocking issue in a peripheral UI surface. The feature fulfills VAL-IOS-001 through VAL-IOS-005."
+}

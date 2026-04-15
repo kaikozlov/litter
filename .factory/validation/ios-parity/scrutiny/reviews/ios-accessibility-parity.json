@@ -1,0 +1,50 @@
+{
+  "featureId": "ios-accessibility-parity",
+  "reviewedAt": "2026-04-15T08:30:00.000Z",
+  "commitId": "a46d2ca",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The commit adds VoiceOver accessibility labels to the key iOS UI elements introduced by the multi-provider architecture: AgentBadgeView, AgentTypePill, AgentCapabilityBadge, InlineAgentSelectorView, AgentPickerSheet, DroidAutonomyControl, PiThinkingLevelPicker, and the session filter. It also includes 26 comprehensive unit tests covering all four VAL assertions (039–042). Additionally, the worker fixed two pre-existing issues: a missing closing brace in AgentPickerView.swift that broke builds, and an incorrect enum case in ConnectionConversationParityTests.swift. All tests pass (1285 Rust + 217 iOS).",
+    "issues": [
+      {
+        "file": "apps/ios/Tests/LitterTests/AccessibilityParityTests.swift",
+        "line": 25,
+        "severity": "non_blocking",
+        "description": "Several tests simulate the accessibility label logic by reconstructing string concatenation in the test body rather than instantiating actual SwiftUI views and reading their accessibility properties via XCTest's accessibility APIs. For example, testAgentBadgeAccessibilityLabelForAllTypes constructs `\"\\(agentType.displayName) agent\"` directly instead of creating an AgentBadgeView and checking its accessibilityLabel. This tests the string convention rather than the actual view implementation. While this provides value for verifying the naming convention, it would miss regressions if someone accidentally removed the .accessibilityLabel modifier from the view. A more robust approach would use XCUITest or SwiftUI Preview-based testing to verify actual view accessibility labels."
+      },
+      {
+        "file": "apps/ios/Tests/LitterTests/AccessibilityParityTests.swift",
+        "line": 215,
+        "severity": "non_blocking",
+        "description": "The testAccessibilitySummaryDoesNotContainProviderSpecificText hard-codes the summary construction logic rather than extracting it from the actual CollapsedTurnCard's accessibilitySummary computed property. If the implementation changes (e.g., a new field is added), the test won't catch provider-specific text leakage from the actual view. Consider extracting the accessibility summary logic to a testable function."
+      },
+      {
+        "file": "apps/ios/Tests/LitterTests/AccessibilityParityTests.swift",
+        "line": 305,
+        "severity": "non_blocking",
+        "description": "The testAllAgentTypesHaveDistinctBadgeLabels only checks 4 of the 6 AgentType variants (codex, piAcp, droidAcp, genericAcp). It omits piNative and droidNative. While these share display names with their ACP counterparts (by design), the test set should document why these are intentionally excluded rather than appearing to be an oversight."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The worker discovered and fixed a pre-existing build-breaking syntax error in AgentPickerView.swift (missing closing brace for ACP profiles Section header) and a pre-existing test compilation error in ConnectionConversationParityTests.swift (ConversationStatus.completed → .ready). Neither of these issues was documented in AGENTS.md or the library. The ConversationStatus enum appears to have changed recently, which could affect other tests or code.",
+      "evidence": "Handoff notes: 'Fixed pre-existing build-breaking syntax error in AgentPickerView.swift (missing closing brace for ACP profiles Section header)' and 'Fixed pre-existing test compilation error in ConnectionConversationParityTests.swift (ConversationStatus.completed → .ready)'. Both fixes are in the commit diff at a46d2ca."
+    },
+    {
+      "area": "conventions",
+      "observation": "The codebase has a consistent accessibility labeling pattern across SwiftUI views: .accessibilityElement(children: .combine/.ignore/.contain) + .accessibilityLabel() + .accessibilityHint() + .accessibilityValue(). This pattern is applied consistently across AgentBadgeView, AgentPickerView, SessionsScreen, SettingsView, ACPProfilesView, and ConversationView, but it's not documented in AGENTS.md as a project convention.",
+      "evidence": "Grep for 'accessibilityLabel|accessibilityHint|accessibilityValue|accessibilityElement' across apps/ios/Sources/Litter/Views/ shows consistent usage in AgentBadgeView.swift, AgentPickerView.swift, SessionsScreen.swift, SettingsView.swift, ACPProfilesView.swift, and ConversationView.swift."
+    },
+    {
+      "area": "skills",
+      "observation": "The platform-ui-worker SKILL.md describes specific work items (DiscoveryView.swift modifications, sshStartRemoteServerConnect signature changes) that are specific to the original provider-routing features. The skill was used here for accessibility labeling work which doesn't match the skill's described scope. The worker followed the general procedure (verify bindings, implement, build, test) but the skill's example work items are stale. Consider updating the skill description to be more general for iOS UI work.",
+      "evidence": "SKILL.md says 'Features that involve: iOS SwiftUI views for agent selection connection wiring, UniFFI binding consumption in Swift, Threading agent type parameters through iOS connect flow' but this feature was about adding accessibility labels, which doesn't match the described scope. Worker followed procedure anyway (skillFeedback.followedProcedure = true)."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS — The commit successfully adds VoiceOver accessibility labels to all major iOS UI elements introduced by the multi-provider architecture: agent badges (AgentBadgeView, AgentTypePill, AgentCapabilityBadge), agent picker rows (InlineAgentSelectorView, AgentPickerSheet, ACP profile rows), session filter controls, per-agent settings fields, and agent-specific controls (PiThinkingLevelPicker, DroidAutonomyControl). The implementation follows SwiftUI best practices with .accessibilityElement(children:), .accessibilityLabel(), .accessibilityHint(), .accessibilityValue(), and .accessibilityAddTraits(). The CollapsedTurnCard's accessibilitySummary is already provider-agnostic by design. All four VAL assertions (039–042) are covered by 26 unit tests. The worker also fixed two pre-existing bugs (build-breaking missing brace and stale enum case). The tests are logic-level rather than view-level (reconstructing strings instead of querying actual SwiftUI views), which is a non-blocking concern — the tests verify the naming conventions but wouldn't catch accidental removal of accessibility modifiers from views."
+}
