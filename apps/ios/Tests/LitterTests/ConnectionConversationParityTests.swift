@@ -158,7 +158,7 @@ final class ConnectionConversationParityTests: XCTestCase {
     func testConversationStatusEnumDoesNotReferenceProvider() {
         // Verify ConversationStatus cases are provider-agnostic
         // .thinking, .idle, .completed, etc. should not reference any provider
-        let statuses: [ConversationStatus] = [.idle, .thinking, .completed]
+        let statuses: [ConversationStatus] = [.idle, .thinking, .ready]
         for status in statuses {
             // Just verifying the enum values compile and are accessible
             XCTAssertNotNil(status)

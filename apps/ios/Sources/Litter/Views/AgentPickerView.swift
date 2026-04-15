@@ -591,6 +591,7 @@ struct AgentPickerSheet: View {
                 }
             } header: {
                 SectionHeader(label: "ACP Providers")
+            }
         } else {
             // No profiles configured — offer a configure link
             Section {
@@ -842,6 +843,7 @@ struct DroidAutonomyControl: View {
             Image(systemName: "robot")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundColor(.orange)
+                .accessibilityHidden(true)
             ForEach(levels, id: \.1) { label, value in
                 Button {
                     autonomyLevel = value
@@ -855,8 +857,13 @@ struct DroidAutonomyControl: View {
                         .background(autonomyLevel == value ? .orange : LitterTheme.surfaceLight)
                         .clipShape(Capsule())
                 }
+                .accessibilityLabel("Droid autonomy level: \(label)")
+                .accessibilityHint("Set autonomy level to \(label)")
+                .accessibilityAddTraits(autonomyLevel == value ? .isSelected : [])
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Droid autonomy level, currently \(levels.first(where: { $0.1 == autonomyLevel })?.0 ?? "Normal")")
     }
 }
 

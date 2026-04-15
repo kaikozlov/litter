@@ -206,6 +206,7 @@ struct AgentCapabilityBadge: View {
         .padding(.vertical, 1.5)
         .background(tint.opacity(0.12))
         .clipShape(Capsule())
+        .accessibilityLabel(labelForCapability + " capability")
     }
 
     private var iconForCapability: String {
