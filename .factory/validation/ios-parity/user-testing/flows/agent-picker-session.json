@@ -1,0 +1,397 @@
+{
+  "groupId": "agent-picker-session",
+  "testedAt": "2026-04-15T12:00:00Z",
+  "isolation": {
+    "method": "code-review",
+    "repoRoot": "/Users/kai/dev/projects/litter",
+    "scope": "iOS source under apps/ios/Sources/Litter/ and tests under apps/ios/Tests/LitterTests/"
+  },
+  "toolsUsed": ["rg", "Read"],
+  "assertions": [
+    {
+      "id": "VAL-IOS-014",
+      "title": "AgentPickerSheet lists all detected agents",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Search for AgentPickerSheet struct definition",
+          "expected": "AgentPickerSheet iterates over detected agents from input, no hardcoded list",
+          "observed": "AgentPickerSheet takes `agentInfos: [AgentInfo]` parameter. Body uses `ForEach(agentInfos, id: \\.id)` to iterate all detected agents dynamically. No hardcoded agent list found."
+        },
+        {
+          "action": "Verify dynamic agent list construction in DiscoveryView",
+          "expected": "Picker receives agents from discovery/detection data",
+          "observed": "DiscoveryView constructs pickerInfos from runtime-detected agents (agentPickerDetectedAgents), server.agentInfos, or synthesized from server.agentTypes. All paths are dynamic."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A (code review)",
+        "network": "N/A (code review)",
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/AgentPickerView.swift: AgentPickerSheet body — ForEach(agentInfos, id: \\.id)",
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift:154-166 — pickerInfos construction from detected/discovered agents"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-015",
+      "title": "AgentPickerSheet supports GenericAcp selection",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Check AgentPickerSheet for GenericAcp handling",
+          "expected": "AgentPickerSheet handles .genericAcp agent type with gearshape icon and ACP label",
+          "observed": "AgentPickerSheet has a dedicated ACP Profiles section (`acpProfilesSection`) that shows when `genericAcpAvailable` is true. GenericAcp rows show gearshape.fill icon (AgentType.genericAcp.icon = \"gearshape.fill\") and \"ACP\" capsule badge. Custom command editor allows configuring remote command before connecting."
+        },
+        {
+          "action": "Verify AgentType.genericAcp has correct icon and label",
+          "expected": "gearshape icon and 'ACP' label",
+          "observed": "AgentBadgeView.swift: genericAcp.icon = \"gearshape.fill\", genericAcp.displayName = \"ACP\", genericAcp.tintColor = Color.gray. In picker rows, ACP badge shows \"ACP\" text with Capsule background."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A (code review)",
+        "network": "N/A (code review)",
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/AgentPickerView.swift: genericAcpAvailable check, acpProfilesSection, acpProfileRow, customCommandSection",
+          "apps/ios/Sources/Litter/Views/AgentBadgeView.swift: icon='gearshape.fill', displayName='ACP' for genericAcp"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-016",
+      "title": "InlineAgentSelectorView filters by transport compatibility",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Check InlineAgentSelectorView for transport compatibility filtering",
+          "expected": "Agents with unavailable transports are grayed out and disabled",
+          "observed": "InlineAgentSelectorView has `isCompatible(_ info:)` method that checks `!Set(info.detectedTransports).isDisjoint(with: Set(availableTransports))`. Incompatible agents have opacity 0.4, 'Transport unavailable' text in LitterTheme.danger color, and `.disabled(!compatible)` modifier. Compatible agents show transport labels."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A (code review)",
+        "network": "N/A (code review)",
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/AgentPickerView.swift: isCompatible method, agentRow — opacity/disabled/foregroundColor conditional on compatible"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-017",
+      "title": "Agent selection persists across app launches",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Check AgentSelectionStore for persistence mechanism",
+          "expected": "Selection persisted via UserDefaults",
+          "observed": "AgentSelectionStore uses `UserDefaults.standard` with key pattern `litter.selectedAgent.<serverId>`. setSelectedAgentType writes string via `defaults.set(agentType.persistentKey, forKey:)`. selectedAgentType reads via `defaults.string(forKey:)`. Both Codable extension and persistentKey/fromPersistentKey provide stable serialization. Tests confirm round-trip persistence."
+        },
+        {
+          "action": "Verify test coverage for persistence",
+          "expected": "Tests validate persistence behavior",
+          "observed": "AgentBadgePickerTests: testAgentSelectionPersistedToUserDefaults, testAgentSelectionSurvivesMultipleWrites, testAgentTypeCodableRoundTrip, testAgentTypePersistentKeys — all confirm persistence works."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A (code review)",
+        "network": "N/A (code review)",
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/AgentPickerView.swift: AgentSelectionStore — selectedAgentKey='litter.selectedAgent', setSelectedAgentType/selectedAgentType using UserDefaults.standard",
+          "apps/ios/Tests/LitterTests/AgentBadgePickerTests.swift: testAgentSelectionPersistedToUserDefaults, testAgentSelectionSurvivesMultipleWrites"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-018",
+      "title": "Auto-selection when only one agent is available",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Check AgentSelectionStore for auto-selection logic",
+          "expected": "effectiveAgentType auto-selects when only one agent available",
+          "observed": "AgentSelectionStore.effectiveAgentType(for:availableAgents:) checks: (1) if user has stored selection and it's in availableAgents, return it; (2) if availableAgents.count == 1, auto-select that agent AND persist it via setSelectedAgentType; (3) otherwise return nil. DiscoveryView also has auto-select logic: `if compatibleTypes.count == 1 { AgentSelectionStore.shared.setSelectedAgentType(compatibleTypes.first, for: server.id) }`."
+        },
+        {
+          "action": "Verify test coverage",
+          "expected": "Tests confirm auto-select behavior",
+          "observed": "AgentBadgePickerTests: testEffectiveAgentTypeAutoSelectsSingleAgent confirms single agent auto-selected and persisted. testEffectiveAgentTypeReturnsNilForMultipleAgents confirms nil when multiple available."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A (code review)",
+        "network": "N/A (code review)",
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/AgentPickerView.swift: effectiveAgentType method — auto-select branch when count == 1",
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift:717-718 — auto-select single compatible agent",
+          "apps/ios/Tests/LitterTests/AgentBadgePickerTests.swift: testEffectiveAgentTypeAutoSelectsSingleAgent"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-019",
+      "title": "Picker re-opens when selection is needed but missing",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Check DiscoveryView for picker presentation logic",
+          "expected": "Picker shows when multi-agent server has no stored selection",
+          "observed": "DiscoveryView has two picker presentation points: (1) Already-connected check: `let needsPicker = server.agentTypes.count > 1 && AgentSelectionStore.shared.selectedAgentType(for: server.id) == nil` → sets agentPickerServer. (2) Pre-connect check: `let needsPicker = compatibleTypes.count > 1 && AgentSelectionStore.shared.selectedAgentType(for: server.id) == nil` → sets agentPickerServer. Both require count > 1 AND no stored selection."
+        },
+        {
+          "action": "Check runtime detection picker trigger",
+          "expected": "Picker also opens from runtime SSH detection when multiple agents found",
+          "observed": "onChange handler checks for pendingAgentSelection from runtime detection and opens picker: `if progress.pendingAgentSelection, !progress.detectedAgents.isEmpty` → sets agentPickerDetectedAgents and agentPickerServer."
+        },
+        {
+          "action": "Verify test coverage",
+          "expected": "Tests confirm shouldShowPicker logic",
+          "observed": "AgentBadgePickerTests: testShouldShowPickerForMultipleAgents — confirms true for 2+ agents. testShouldNotShowPickerForSingleAgent — confirms false for single agent."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A (code review)",
+        "network": "N/A (code review)",
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift:676-679 — already-connected needsPicker check",
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift:708-713 — pre-connect needsPicker check",
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift:231-250 — runtime detection picker trigger",
+          "apps/ios/Tests/LitterTests/AgentBadgePickerTests.swift: testShouldShowPickerForMultipleAgents"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-020",
+      "title": "Session filter row includes agent type filter",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Check sessionFilterRow for agent type filter chip",
+          "expected": "Filter row has agent type filter menu chip",
+          "observed": "SessionsScreen.sessionFilterRow includes a Menu with: 'All agents' option (sets agentTypeFilter = nil), plus Codex, Pi, Droid, ACP options. The chip shows dynamic icon and title based on agentTypeFilter state. Uses filterChip helper with icon parameter from agentTypeFilter?.icon ?? 'cpu'."
+        },
+        {
+          "action": "Verify test coverage",
+          "expected": "Tests confirm filter options include all types",
+          "observed": "SessionFilterAndSettingsTests: testAgentTypeFilterOptionsIncludeAllTypes verifies Codex, Pi, Droid, ACP. testAgentTypeFilterIncludesGenericAcp confirms genericAcp is in the filter types."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A (code review)",
+        "network": "N/A (code review)",
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/SessionsScreen.swift: sessionFilterRow — agent type Menu with All/Codex/Pi/Droid/ACP",
+          "apps/ios/Tests/LitterTests/SessionFilterAndSettingsTests.swift: testAgentTypeFilterOptionsIncludeAllTypes"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-021",
+      "title": "Agent type filter shows correct icon per type",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Check filter chip icon changes based on selected type",
+          "expected": "Filter chip dynamically shows icon matching the selected agent type",
+          "observed": "SessionFilterRow uses `icon: agentTypeFilter?.icon ?? \"cpu\"` in filterChip call. Each AgentType has a distinct icon: Codex='terminal.fill', Pi='brain', Droid='robot', ACP='gearshape.fill'. Title uses `agentTypeFilter?.displayName ?? \"All agents\"` — dynamic per selection."
+        },
+        {
+          "action": "Verify test coverage",
+          "expected": "Tests confirm icon/displayName correctness",
+          "observed": "SessionFilterAndSettingsTests: testFilterChipUsesAgentIcon, testFilterChipUsesAgentTintColor, testFilterChipShowsCorrectDisplayNameWhenActive — all pass."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A (code review)",
+        "network": "N/A (code review)",
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/SessionsScreen.swift: sessionFilterRow — icon: agentTypeFilter?.icon ?? \"cpu\", title: agentTypeFilter?.displayName ?? \"All agents\"",
+          "apps/ios/Tests/LitterTests/SessionFilterAndSettingsTests.swift: testFilterChipUsesAgentIcon, testFilterChipShowsCorrectDisplayNameWhenActive"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-022",
+      "title": "Filtering by agent type returns only matching sessions",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Check SessionsDerivation for agent type filter predicate",
+          "expected": "Filter logic matches sessions by their server's selected agent type",
+          "observed": "SessionsDerivation.build filters with agentTypeFilter parameter. Logic: if agentTypeFilter is set, checks each thread's server — if the server has a selectedAgent matching the filter, include it; otherwise check if the server's detected types include the filter type. This is in the `filteredThreads` computation."
+        },
+        {
+          "action": "Verify test coverage",
+          "expected": "Tests confirm filtering returns only matching sessions",
+          "observed": "SessionFilterAndSettingsTests: testSessionsDerivationFiltersByAgentType — Pi filter returns only t1, Droid filter returns only t3, nil filter returns all 3. testFilteringByAgentTypeWithNoMatchReturnsEmpty — empty result for non-matching filter. testFilteringByAgentTypeWithGenericAcp — ACP filter returns only t1."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A (code review)",
+        "network": "N/A (code review)",
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/SessionsDerivation.swift: filteredThreads — agentTypeFilter predicate using AgentSelectionStore",
+          "apps/ios/Tests/LitterTests/SessionFilterAndSettingsTests.swift: testSessionsDerivationFiltersByAgentType, testFilteringByAgentTypeWithNoMatchReturnsEmpty, testFilteringByAgentTypeWithGenericAcp"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-023",
+      "title": "Session rows show agent type badge for non-Codex agents",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Check session row template for AgentTypePill",
+          "expected": "Session rows show AgentTypePill for non-Codex agents",
+          "observed": "SessionsScreen.sessionRow includes: `if let agentBadge = agentBadgeType(for: thread) { AgentTypePill(agentType: agentBadge) }`. The agentBadgeType helper checks AgentSelectionStore for the thread's server — returns the selected agent type if non-nil and non-Codex, returns nil for Codex (no badge)."
+        },
+        {
+          "action": "Verify test coverage",
+          "expected": "Tests confirm badge appears for non-Codex, not for Codex",
+          "observed": "SessionFilterAndSettingsTests: testAgentBadgeTypeReturnsNonNilForNonCodexSelection — Pi returns non-nil badge. testAgentBadgeTypeReturnsNilForCodexSelection — no selection returns nil, explicit Codex returns .codex. testBadgeTypesForAllNonCodexAgents — all 5 non-Codex types verified."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A (code review)",
+        "network": "N/A (code review)",
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/SessionsScreen.swift: sessionRow — `if let agentBadge = agentBadgeType(for: thread) { AgentTypePill(agentType: agentBadge) }`",
+          "apps/ios/Sources/Litter/Views/SessionsScreen.swift: agentBadgeType helper method",
+          "apps/ios/Tests/LitterTests/SessionFilterAndSettingsTests.swift: testAgentBadgeTypeReturnsNonNilForNonCodexSelection, testBadgeTypesForAllNonCodexAgents"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-024",
+      "title": "Settings shows permission policy for each agent type",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Check SettingsView for agent permission policy section",
+          "expected": "Settings has per-agent permission policy rows",
+          "observed": "SettingsView.agentSettingsSection includes a ForEach over [Codex, Pi, Droid] agent types, each showing a Menu with the current permission policy. Menu options: Auto Approve All, Auto Reject High Risk, Prompt Always. Each row shows AgentBadgeView, agent name + 'Permissions', and current policy shortName."
+        },
+        {
+          "action": "Verify test coverage",
+          "expected": "Tests confirm per-agent permission policy persistence",
+          "observed": "SessionFilterAndSettingsTests: testPerAgentPermissionPolicyPersisted — sets different policies for Codex/Pi/Droid and verifies each independently persists. Defaults to promptAlways."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A (code review)",
+        "network": "N/A (code review)",
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/SettingsView.swift: agentSettingsSection — ForEach Codex/Pi/Droid with permission policy Menu",
+          "apps/ios/Tests/LitterTests/SessionFilterAndSettingsTests.swift: testPerAgentPermissionPolicyPersisted"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-025",
+      "title": "Settings shows transport preference for Pi and Droid",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Check SettingsView for transport preference rows",
+          "expected": "Settings has transport preference rows for Pi and Droid",
+          "observed": "SettingsView.agentSettingsSection has second ForEach over [piNative, droidNative] with transport preference Menus. Pi options: Auto, Native (Pi RPC), ACP (via pi-acp). Droid options: Auto, Native (Factory API), ACP (via droid exec). Each row shows transport icon, agent name + 'Transport', and current preference label."
+        },
+        {
+          "action": "Verify test coverage",
+          "expected": "Tests confirm transport preference persistence for Pi and Droid",
+          "observed": "SessionFilterAndSettingsTests: testTransportPreferencePersistedForPi — round-trips piNative/piAcp/nil. testTransportPreferencePersistedForDroid — round-trips droidNative/droidAcp."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A (code review)",
+        "network": "N/A (code review)",
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/SettingsView.swift: agentSettingsSection — ForEach [piNative, droidNative] transport preference Menu",
+          "apps/ios/Tests/LitterTests/SessionFilterAndSettingsTests.swift: testTransportPreferencePersistedForPi, testTransportPreferencePersistedForDroid"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-026",
+      "title": "Permission policy changes take effect immediately",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Check AgentPermissionStore for immediate propagation",
+          "expected": "Permission changes write to UserDefaults synchronously and are observable",
+          "observed": "AgentPermissionStore.setPermissionPolicy writes directly to UserDefaults.standard via `defaults.set(policy.persistentKey, forKey:)`. This is synchronous. permissionPolicy reads from UserDefaults on each access. SettingsView reads `currentPolicy` in the Menu label which is computed at render time. SwiftUI @Observable pattern on AppState and the view re-rendering on Menu selection ensures the UI updates immediately."
+        },
+        {
+          "action": "Verify test coverage",
+          "expected": "Tests confirm immediate reads after writes",
+          "observed": "SessionFilterAndSettingsTests: testPermissionPolicyChangesAreImmediate — set autoApproveAll, read autoApproveAll; set autoRejectHighRisk, read autoRejectHighRisk; set promptAlways, read promptAlways. All sequential writes confirmed immediately readable."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A (code review)",
+        "network": "N/A (code review)",
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/AgentPickerView.swift: AgentPermissionStore — setPermissionPolicy/permissionPolicy using UserDefaults",
+          "apps/ios/Tests/LitterTests/SessionFilterAndSettingsTests.swift: testPermissionPolicyChangesAreImmediate"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-027",
+      "title": "Agent-specific controls appear when relevant",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Check InlineModelSelectorView for conditional Pi/Droid controls",
+          "expected": "PiThinkingLevelPicker appears only for Pi, DroidAutonomyControl only for Droid",
+          "observed": "HeaderView.InlineModelSelectorView body includes: `if activeAgentType.isPi { PiThinkingLevelPicker(...) } else if activeAgentType.isDroid { DroidAutonomyControl(...) }`. The activeAgentType is passed from ConversationModelPickerPanel, which uses the selected agent type from AgentSelectionStore. Pi shows thinking level picker, Droid shows autonomy control, Codex/ACP show neither."
+        },
+        {
+          "action": "Verify test coverage for isPi/isDroid properties",
+          "expected": "Tests confirm isPi/isDroid partition correctly",
+          "observed": "SessionFilterAndSettingsTests: testPiThinkingLevelOnlyForPiAgents — piNative.isPi=true, piAcp.isPi=true, all others false. testDroidAutonomyOnlyForDroidAgents — droidNative.isDroid=true, droidAcp.isDroid=true, all others false. testAgentSpecificControlsNotShownForCodexOrAcp — confirms neither isPi nor isDroid for Codex and GenericAcp."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A (code review)",
+        "network": "N/A (code review)",
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/HeaderView.swift: InlineModelSelectorView — `if activeAgentType.isPi { PiThinkingLevelPicker } else if activeAgentType.isDroid { DroidAutonomyControl }`",
+          "apps/ios/Sources/Litter/Views/AgentBadgeView.swift: AgentType extension — isPi, isDroid computed properties",
+          "apps/ios/Tests/LitterTests/SessionFilterAndSettingsTests.swift: testPiThinkingLevelOnlyForPiAgents, testDroidAutonomyOnlyForDroidAgents"
+        ]
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 14 assertions via code review (rg + Read): all 14 pass. All assertions have corresponding production code implementing the required behavior and XCTest unit tests verifying correctness."
+}

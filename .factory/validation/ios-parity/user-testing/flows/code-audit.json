@@ -1,0 +1,252 @@
+{
+  "groupId": "code-audit",
+  "testedAt": "2026-04-15T10:30:00Z",
+  "isolation": {
+    "method": "static code analysis via ripgrep + file reads",
+    "repoRoot": "/Users/kai/dev/projects/litter",
+    "scope": "apps/ios/Sources/Litter/",
+    "noBuild": true
+  },
+  "toolsUsed": ["rg", "Read"],
+  "assertions": [
+    {
+      "id": "VAL-IOS-001",
+      "title": "AgentBadgeView uses provider-agnostic display names",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Read AgentBadgeView.swift",
+          "expected": "displayName extension on AgentType handles all 6 variants with no hardcoded Codex fallback for non-Codex agents",
+          "observed": "AgentType.displayName switch covers all 6 cases: .codex→\"Codex\", .piAcp/.piNative→\"Pi\", .droidAcp/.droidNative→\"Droid\", .genericAcp→\"ACP\". Each case returns the correct provider-specific name. No case returns \"Codex\" for non-Codex agents."
+        }
+      ],
+      "evidence": {
+        "file": "apps/ios/Sources/Litter/Views/AgentBadgeView.swift",
+        "lineRange": "29-44",
+        "codeSnippet": "var displayName: String { switch self { case .codex: return \"Codex\"; case .piAcp, .piNative: return \"Pi\"; case .droidAcp, .droidNative: return \"Droid\"; case .genericAcp: return \"ACP\" } }"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-002",
+      "title": "VoiceCallView speaker labels are provider-agnostic",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Read VoiceCallView.swift speaker label logic",
+          "expected": "Speaker labels use generic terms like 'You' and 'Agent', not hardcoded 'Codex'",
+          "observed": "CompactSpeakerIndicator uses title: \"You\" and title: \"Agent\" for the two speakers. VoiceTranscriptEntry uses AgentLabelFormatter.format() for assistant entries which returns dynamic labels based on nickname/role. Live transcript uses \"Agent\" or \"You\" as speaker labels. No hardcoded \"Codex\" found."
+        }
+      ],
+      "evidence": {
+        "files": [
+          "apps/ios/Sources/Litter/Views/VoiceCallView.swift",
+          "apps/ios/Sources/Litter/Views/RealtimeVoiceScreen.swift"
+        ],
+        "relevantLines": "VoiceCallView topBar: CompactSpeakerIndicator(title: \"You\"...) and CompactSpeakerIndicator(title: \"Agent\"...). VoiceTranscriptEntry.live(from:) uses \"Agent\" and \"You\" as speaker labels."
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-003",
+      "title": "VoiceRuntimeController defaults are provider-agnostic",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Search VoiceRuntimeController for default model/label strings",
+          "expected": "No hardcoded 'Codex' defaults for model or label",
+          "observed": "VoiceRuntimeController.swift uses 'Agent' as fallback display name (line: model.isEmpty ? 'Agent' : resolvedModel). VoiceSessionState.initial() uses model.isEmpty ? \"Agent\" : model. No \"Codex\" defaults found in VoiceRuntimeController or VoiceSessionModels."
+        }
+      ],
+      "evidence": {
+        "files": [
+          "apps/ios/Sources/Litter/Models/VoiceRuntimeController.swift",
+          "apps/ios/Sources/Litter/Models/VoiceSessionModels.swift"
+        ],
+        "relevantCode": "VoiceSessionState.initial: model.isEmpty ? \"Agent\" : model. voiceSpeakerLabel returns \"You\" / \"Agent\"."
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-004",
+      "title": "DiscoveryView manual connection labels are provider-agnostic",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Search DiscoveryView for 'Codex Server', 'Install Codex' strings",
+          "expected": "No 'Codex Server' header or 'Install Codex?' alert text",
+          "observed": "DiscoveryView alert uses 'Install Agent?' (not 'Install Codex?'). Manual entry form header uses 'App Server' for codex mode (not 'Codex Server'). Manual connection mode label uses 'Codex' for the tab picker segment, but the form header is 'App Server' — this is the correct transport name, not a hardcoded header. The alert message says 'The agent was not found on the remote host.' (provider-agnostic)."
+        }
+      ],
+      "evidence": {
+        "file": "apps/ios/Sources/Litter/Views/DiscoveryView.swift",
+        "relevantLines": "Line 326: alert title \"Install Agent?\". Line 1452: formHeader for .codex is \"App Server\". Line 1448: label for .codex is \"Codex\" (tab segment name, acceptable)."
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-005",
+      "title": "Connection choice dialog uses provider-agnostic text",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Search DiscoveryView confirmationDialog for connection choice strings",
+          "expected": "No 'Use Codex' or 'Codex is available' strings",
+          "observed": "confirmationDialog button text is \"Use Agent ({port})\" (not 'Use Codex'). connectionChoiceMessage returns \"Agent is available on ports...\" (not 'Codex is available'). Dialog title is \"Connect to {server.name}\" (provider-agnostic)."
+        }
+      ],
+      "evidence": {
+        "file": "apps/ios/Sources/Litter/Views/DiscoveryView.swift",
+        "relevantLines": "Line 197: Button \"Use Agent ({port})\". Line 1388-1394: connectionChoiceMessage uses \"Agent is available on ports...\" and \"Use SSH to bootstrap an agent on...\"."
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-008",
+      "title": "Live Activity displays provider-agnostic content",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Search TurnLiveActivity, LockScreenCardView, LiveActivityPreview for hardcoded 'Codex'",
+          "expected": "No hardcoded 'Codex' in live activity views",
+          "observed": "TurnLiveActivity.swift has zero matches for 'Codex'. LockScreenCardView.swift has zero matches for 'Codex'. LiveActivityPreview.swift has zero matches for 'Codex'. The live activity shows the prompt text, model name (from thread data), and phase badges — all dynamic, no hardcoded provider names."
+        }
+      ],
+      "evidence": {
+        "files": [
+          "apps/ios/Sources/LitterLiveActivity/TurnLiveActivity.swift",
+          "apps/ios/Sources/Litter/Views/LockScreenCardView.swift",
+          "apps/ios/Sources/Litter/Views/LiveActivityPreview.swift"
+        ],
+        "searchResults": "rg 'Codex' on all three files returned zero matches."
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-009",
+      "title": "Voice call Live Activity uses provider-agnostic attributes",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Search VoiceCallLiveActivity and VoiceCallLockScreenCardView for hardcoded 'Codex'",
+          "expected": "Voice call live activity uses dynamic data from VoiceCallAttributes, not 'Codex'",
+          "observed": "VoiceCallLiveActivity.swift has zero matches for 'Codex'. VoiceCallLockScreenCardView.swift has zero matches for 'Codex'. The live activity uses context.attributes.threadTitle (dynamic), context.state.phase.rawValue, and context.state.routeLabel — all from VoiceCallAttributes populated with actual session data. VoiceCallAttributes stores threadTitle and model from the session, no hardcoded agent names."
+        }
+      ],
+      "evidence": {
+        "files": [
+          "apps/ios/Sources/LitterLiveActivity/VoiceCallLiveActivity.swift",
+          "apps/ios/Sources/LitterLiveActivity/VoiceCallLockScreenCardView.swift",
+          "apps/ios/Sources/Litter/Models/VoiceCallAttributes.swift"
+        ],
+        "searchResults": "rg 'Codex' on VoiceCallLiveActivity and VoiceCallLockScreenCardView returned zero matches. VoiceCallAttributes stores threadTitle, model, and startDate — all dynamic."
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-012",
+      "title": "AgentBadgeView is accessible",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Search AgentBadgeView and AgentTypePill for .accessibilityLabel modifiers",
+          "expected": "Both views have .accessibilityLabel that includes agent display name",
+          "observed": "AgentBadgeView has .accessibilityLabel(\"\\(agentType.displayName) agent\") at the end of its body. AgentTypePill has .accessibilityLabel(\"\\(agentType.displayName) agent\"). Both use the dynamic displayName property which returns the correct name per agent type."
+        }
+      ],
+      "evidence": {
+        "file": "apps/ios/Sources/Litter/Views/AgentBadgeView.swift",
+        "relevantLines": "AgentBadgeView body ends with .accessibilityLabel(\"\\(agentType.displayName) agent\"). AgentTypePill body ends with .accessibilityLabel(\"\\(agentType.displayName) agent\")."
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-013",
+      "title": "DiscoveryView server rows show correct agent badges",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Read DiscoveryView serverRow function for AgentBadgeView usage",
+          "expected": "Server row references AgentBadgeView for detected agent types and can display multiple badges",
+          "observed": "serverRow function in DiscoveryView.swift computes detectedAgentTypes from server.agentTypes via discoveryAgentTypes(). When count > 1 or first != .codex, it shows a horizontal ScrollView with ForEach over detectedAgentTypes, rendering AgentBadgeView(agentType:size:showsLabel:) for each. This correctly displays multiple agent badges for servers with multiple detected agent types."
+        }
+      ],
+      "evidence": {
+        "file": "apps/ios/Sources/Litter/Views/DiscoveryView.swift",
+        "relevantLines": "serverRow function (~line 488-498): 'if detectedAgentTypes.count > 1 || detectedAgentTypes.first != .codex { ScrollView(.horizontal) { HStack { ForEach(detectedAgentTypes) { AgentBadgeView(...) } } } }'"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-039",
+      "title": "Agent badge views have meaningful accessibility labels",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Verify accessibility labels on AgentBadgeView, AgentTypePill, and AgentCapabilityBadge",
+          "expected": "All badge views have .accessibilityLabel including agent type name or capability name",
+          "observed": "AgentBadgeView: .accessibilityLabel(\"\\(agentType.displayName) agent\"). AgentTypePill: .accessibilityLabel(\"\\(agentType.displayName) agent\"). AgentCapabilityBadge: .accessibilityLabel(labelForCapability + \" capability\"). All use dynamic, provider-agnostic strings."
+        }
+      ],
+      "evidence": {
+        "file": "apps/ios/Sources/Litter/Views/AgentBadgeView.swift",
+        "relevantLines": "AgentBadgeView .accessibilityLabel at ~line 83. AgentTypePill .accessibilityLabel at ~line 100. AgentCapabilityBadge .accessibilityLabel at ~line 153."
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-040",
+      "title": "Agent picker rows are accessible",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Search InlineAgentSelectorView and AgentPickerSheet for accessibility modifiers",
+          "expected": "Agent picker rows have accessibility labels and hints",
+          "observed": "InlineAgentSelectorView agentRow: .accessibilityElement(children: .combine), .accessibilityLabel(inlineAgentRowAccessibilityLabel(...)), .accessibilityHint(...), .accessibilityAddTraits(...). The label includes displayName, transport, and selection state. AgentPickerSheet rows: .accessibilityLabel(pickerSheetRowLabel(...)), .accessibilityHint(...). ACP profile rows have .accessibilityLabel(\"ACP profile: \\(profile.displayName)\"), .accessibilityHint(...), .accessibilityValue(...)."
+        }
+      ],
+      "evidence": {
+        "file": "apps/ios/Sources/Litter/Views/AgentPickerView.swift",
+        "relevantLines": "InlineAgentSelectorView.agentRow: .accessibilityElement(children: .combine), .accessibilityLabel(...). AgentPickerSheet body: .accessibilityLabel(pickerSheetRowLabel(...)), .accessibilityHint(...). ACP profile rows: .accessibilityLabel(\"ACP profile: \\(profile.displayName)\")."
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-041",
+      "title": "Session filter accessibility describes active agent filter",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Search SessionsScreen sessionFilterRow for agent type filter accessibility",
+          "expected": "Agent type filter chip has accessibility label describing current filter state",
+          "observed": "SessionsScreen sessionFilterRow includes the agent type filter Menu with .accessibilityLabel(\"Filter by agent type, currently \\(agentTypeFilter?.displayName ?? \"All agents\")\"). This dynamically describes the active filter. The Menu items use Button with Label(displayName, systemImage: type.icon)."
+        }
+      ],
+      "evidence": {
+        "file": "apps/ios/Sources/Litter/Views/SessionsScreen.swift",
+        "relevantLines": "sessionFilterRow agent type Menu: .accessibilityLabel(\"Filter by agent type, currently \\(agentTypeFilter?.displayName ?? \"All agents\")\")."
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-042",
+      "title": "Conversation turn accessibility summary is provider-agnostic",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Read ConversationView accessibilitySummary computed property",
+          "expected": "accessibilitySummary does not include provider-specific names like 'Codex'",
+          "observed": "The accessibilitySummary computed property builds a string from turn.preview.primaryText, secondaryPreviewText, durationText, toolCallCount, widgetCount, eventCount, and imageCount. None of these fields contain provider names — they are all generic summary text (duration, tool calls, widgets, events, images). No hardcoded 'Codex' or any provider name appears in the accessibility summary."
+        }
+      ],
+      "evidence": {
+        "file": "apps/ios/Sources/Litter/Views/ConversationView.swift",
+        "relevantLines": "Lines 1107-1118: accessibilitySummary builds from turn.preview data (primaryText, secondaryPreviewText, durationText, toolCallCount, widgetCount, eventCount, imageCount). No provider names."
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 13 assertions: all 13 passed. No hardcoded 'Codex' strings found in any user-facing views (voice call, live activity, discovery, connection dialogs). All agent badge views have proper accessibility labels using dynamic displayName. Voice call UI uses generic 'Agent'/'You' speaker labels. Connection dialogs use 'Agent' instead of 'Codex'. Live Activity content is fully dynamic from session/thread attributes."
+}

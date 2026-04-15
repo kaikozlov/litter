@@ -1,0 +1,275 @@
+{
+  "groupId": "connection-conversation",
+  "testedAt": "2026-04-15T10:15:00.000Z",
+  "isolation": {
+    "tool": "rg (ripgrep) text searches + Read tool for code review",
+    "scope": "iOS source + shared Rust layer in /Users/kai/dev/projects/litter",
+    "buildRequired": false,
+    "networkRequired": false
+  },
+  "toolsUsed": ["rg", "Read"],
+  "assertions": [
+    {
+      "id": "VAL-IOS-028",
+      "title": "Discovery subtitle shows detected agent types",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Search for agent type display in discovery row views",
+          "expected": "DiscoveryView server rows show detected agent types in subtitle or badge row",
+          "observed": "DiscoveryView.swift:492-498 shows detected agent types in a horizontal ScrollView with AgentBadgeView when count > 1 or first != .codex. The DiscoveredServer model (DiscoveredServer.swift:59) carries agentTypes field. DiscoveryView.swift:589-595 has discoveryAgentTypes(for:) function that reads server.agentTypes and syncs AgentSelectionStore."
+        },
+        {
+          "action": "Verify DiscoveredServer model has agentTypes field",
+          "expected": "agentTypes property exists on DiscoveredServer with default [.codex]",
+          "observed": "DiscoveredServer.swift:59: `let agentTypes: [AgentType]`, default `[.codex]` at line 78. NetworkDiscovery.swift:295-296 populates agentTypes from Rust discovery data."
+        },
+        {
+          "action": "Verify iOS test coverage exists",
+          "expected": "XCTest cases verify agent types on DiscoveredServer",
+          "observed": "ConnectionConversationParityTests.swift has testDiscoveredServerCarriesAgentTypes (3 types), testDiscoveredServerWithOnlyCodexHasSingleAgentType, testDiscoveredServerDefaultAgentTypesIsCodex"
+        }
+      ],
+      "evidence": {
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift:492-498 — agent type badge row in server row",
+          "apps/ios/Sources/Litter/Models/DiscoveredServer.swift:59 — agentTypes field",
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift:589-595 — discoveryAgentTypes() helper",
+          "apps/ios/Tests/LitterTests/ConnectionConversationParityTests.swift:28-62 — 3 test cases for VAL-IOS-028"
+        ],
+        "consoleErrors": "none",
+        "network": "N/A (code review only)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-029",
+      "title": "Server connection flow handles agent selection before connecting",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Search for agent picker presentation before connection",
+          "expected": "Agent picker shown before connection for multi-agent servers",
+          "observed": "DiscoveryView.swift:707-713 checks `needsPicker` when compatibleTypes.count > 1 and no prior selection. If picker needed, sets agentPickerServer and returns without connecting. After picker selection (line 173-182), connection proceeds with chosen type."
+        },
+        {
+          "action": "Verify agent picker sheet exists",
+          "expected": "AgentPickerSheet view for connection flow",
+          "observed": "AgentPickerView.swift:392-534: AgentPickerSheet with agent infos, compatible/incompatible filtering, selection callback. Sheet presented via DiscoveryView.swift:133 .sheet(item: $agentPickerServer)."
+        },
+        {
+          "action": "Verify iOS test coverage",
+          "expected": "Tests for picker show/skip logic",
+          "observed": "ConnectionConversationParityTests.swift:64-82 — testMultiAgentServerRequiresPickerWhenNoSelection, testMultiAgentServerSkipsPickerWhenSelectionExists"
+        }
+      ],
+      "evidence": {
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift:707-713 — needsPicker check before connect",
+          "apps/ios/Sources/Litter/Views/AgentPickerView.swift:392-534 — AgentPickerSheet",
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift:133-182 — sheet presentation + selection handling",
+          "apps/ios/Tests/LitterTests/ConnectionConversationParityTests.swift:64-82 — 2 test cases for VAL-IOS-029"
+        ],
+        "consoleErrors": "none",
+        "network": "N/A (code review only)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-030",
+      "title": "SSH connect flow detects agents and shows picker when needed",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Search for SSH agent detection and picker presentation",
+          "expected": "SSH flow detects agents, pauses for picker if multiple found",
+          "observed": "DiscoveryView.swift:228-251: During SSH connect, checks for pendingAgentSelection from runtime detection. When detected, sets agentPickerDetectedAgents and agentPickerServer, then shows picker. After selection (line 180-186), reconnectWithSelectedAgent is called. Rust side: connect_remote_over_ssh_with_agent_type (mobile_client/mod.rs:733) probes for agents via validate_agent_binary_on_host."
+        },
+        {
+          "action": "Verify reconnection after picker selection",
+          "expected": "reconnectWithSelectedAgent function exists",
+          "observed": "DiscoveryView.swift:638-641: reconnectWithSelectedAgent(server:agentType:) re-initiates SSH connection with selected agent type."
+        },
+        {
+          "action": "Verify iOS test coverage",
+          "expected": "Tests for SSH capability and detection",
+          "observed": "ConnectionConversationParityTests.swift:84-98 — testDiscoveredServerWithSSHCapabilityCanConnectViaSSH, testDiscoveredServerWithoutSSHCannotConnectViaSSH"
+        }
+      ],
+      "evidence": {
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift:228-251 — runtime detection + picker pause",
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift:638-641 — reconnectWithSelectedAgent",
+          "shared/rust-bridge/codex-mobile-client/src/mobile_client/mod.rs:733 — connect_remote_over_ssh_with_agent_type",
+          "apps/ios/Tests/LitterTests/ConnectionConversationParityTests.swift:84-98 — 2 test cases for VAL-IOS-030"
+        ],
+        "consoleErrors": "none",
+        "network": "N/A (code review only)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-031",
+      "title": "Connection choice dialog includes agent-aware labels",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Search for 'Use Codex' in connection choice dialog",
+          "expected": "No 'Use Codex' text found; dialog uses provider-agnostic labels",
+          "observed": "rg found zero matches for 'Use Codex' across all iOS source. Dialog button says 'Use Agent (port)' (DiscoveryView.swift:197). SSH option says 'Connect via SSH' (line 204)."
+        },
+        {
+          "action": "Check connectionChoiceMessage for provider-generic wording",
+          "expected": "Message uses 'agent' not 'Codex'",
+          "observed": "DiscoveryView.swift:1388-1395: connectionChoiceMessage uses 'agent' terminology: 'Use SSH to bootstrap an agent', 'Agent is available on ports', 'Choose an agent port'. No Codex references."
+        },
+        {
+          "action": "Verify PreferredConnectionMode is agent-generic",
+          "expected": "Mode is directAgent not directCodex with backward compat",
+          "observed": "DiscoveredServer.swift:25: PreferredConnectionMode.directAgent. Line 28-39: backward compat decoding 'directCodex' → 'directAgent'. Connection step kinds from Rust: detectingAgents, findingAgent, installingAgent, startingAgent (AppServerSnapshot+UI.swift:109-121)."
+        },
+        {
+          "action": "Verify iOS test coverage",
+          "expected": "Tests for agent-generic labels and backward compat",
+          "observed": "ConnectionConversationParityTests.swift:100-128 — testConnectionChoiceMessageIsAgentGeneric, testPreferredConnectionModeDirectAgentLabel, testPreferredConnectionModeBackwardCompatibility"
+        }
+      ],
+      "evidence": {
+        "codeReferences": [
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift:197 — 'Use Agent (port)' button",
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift:204 — 'Connect via SSH' button",
+          "apps/ios/Sources/Litter/Views/DiscoveryView.swift:1388-1395 — connectionChoiceMessage (agent-generic)",
+          "apps/ios/Sources/Litter/Models/DiscoveredServer.swift:25-39 — directAgent + backward compat",
+          "apps/ios/Sources/Litter/Models/AppServerSnapshot+UI.swift:109-121 — agent-generic step labels",
+          "apps/ios/Tests/LitterTests/ConnectionConversationParityTests.swift:100-128 — 3 test cases for VAL-IOS-031"
+        ],
+        "consoleErrors": "none",
+        "network": "N/A (code review only)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-035",
+      "title": "Codex connection flow works end-to-end",
+      "status": "blocked",
+      "steps": [
+        {
+          "action": "Code review: verify Codex connection path exists",
+          "expected": "Codex WebSocket/in-process connection path is functional",
+          "observed": "Rust: CodexProvider (provider/codex.rs) wraps AppServerClient, implements ProviderTransport. create_codex_provider (provider/mod.rs:483-487) constructs Box<dyn ProviderTransport>. connect_local and connect_remote paths both create sessions via CodexProvider. Factory routes Codex to standard bootstrap_codex_server + WebSocket path (factory.rs:71-73)."
+        },
+        {
+          "action": "Verify iOS integration path",
+          "expected": "iOS can initiate Codex connections",
+          "observed": "DiscoveryView handles .local, .remote, .remoteURL, .sshThenRemote connection targets. Codex connections use standard ServerSession path through MobileClient. All 6 agent types have display names, icons, tint colors, persistent keys verified in tests."
+        }
+      ],
+      "evidence": {
+        "codeReferences": [
+          "shared/rust-bridge/codex-mobile-client/src/provider/codex.rs — CodexProvider implementation",
+          "shared/rust-bridge/codex-mobile-client/src/provider/mod.rs:483-487 — create_codex_provider",
+          "shared/rust-bridge/codex-mobile-client/src/provider/factory.rs:71-73 — Codex routing to standard path",
+          "apps/ios/Tests/LitterTests/ConnectionConversationParityTests.swift:156-195 — agent type properties tests"
+        ],
+        "consoleErrors": "none",
+        "network": "N/A (blocked: requires running Codex app-server on port 8390 for end-to-end testing)"
+      },
+      "issues": "Requires remote Codex app-server for end-to-end testing. Code review verified all implementation components are present: CodexProvider, create_codex_provider factory, standard bootstrap_codex_server + WebSocket path, and iOS integration via DiscoveryView connection targets."
+    },
+    {
+      "id": "VAL-IOS-036",
+      "title": "Pi connection flow works end-to-end",
+      "status": "blocked",
+      "steps": [
+        {
+          "action": "Code review: verify Pi connection path exists",
+          "expected": "Pi Native and Pi ACP connection paths are implemented",
+          "observed": "Rust: PiNativeTransport (provider/pi/transport.rs) handles JSONL framing over SSH channel for 'pi --mode rpc'. PiAcpTransport (provider/pi/acp_transport.rs) wraps AcpClient for 'npx pi-acp' standard ACP. Factory (factory.rs:66-67) routes PiNative → create_pi_native, PiAcp → create_pi_acp. E2E tests in provider/pi/e2e.rs cover full lifecycle (14 test functions)."
+        },
+        {
+          "action": "Verify transport preference routing",
+          "expected": "Pi can use Native or ACP transport based on preference",
+          "observed": "provider/pi/preference.rs has select_pi_transport that routes based on PiTransportPreference (auto/native/acp). Detection module (provider/pi/detection.rs) probes for Pi agent availability."
+        }
+      ],
+      "evidence": {
+        "codeReferences": [
+          "shared/rust-bridge/codex-mobile-client/src/provider/pi/transport.rs — PiNativeTransport",
+          "shared/rust-bridge/codex-mobile-client/src/provider/pi/acp_transport.rs — PiAcpTransport",
+          "shared/rust-bridge/codex-mobile-client/src/provider/factory.rs:66-67 — Pi routing",
+          "shared/rust-bridge/codex-mobile-client/src/provider/pi/e2e.rs — 14 E2E test functions",
+          "shared/rust-bridge/codex-mobile-client/src/provider/pi/preference.rs — transport preference"
+        ],
+        "consoleErrors": "none",
+        "network": "N/A (blocked: requires remote Pi agent server for end-to-end testing)"
+      },
+      "issues": "Requires remote Pi agent server for end-to-end testing. Code review verified all implementation components are present: PiNativeTransport, PiAcpTransport, factory routing, transport preference logic, and 14 E2E mock transport tests."
+    },
+    {
+      "id": "VAL-IOS-037",
+      "title": "Droid connection flow works end-to-end",
+      "status": "blocked",
+      "steps": [
+        {
+          "action": "Code review: verify Droid connection path exists",
+          "expected": "Droid Native and Droid ACP connection paths are implemented",
+          "observed": "Rust: DroidNativeTransport (provider/droid/transport.rs) handles JSONRPC streaming for 'droid exec --input-format stream-jsonrpc --output-format stream-jsonrpc'. DroidAcpTransport (provider/droid/acp_transport.rs) is DEPRECATED, replaced by PiAcpTransport for standard ACP path via 'droid exec --output-format acp'. Factory (factory.rs:68-69) routes DroidNative → create_droid_native, DroidAcp → create_droid_acp (now uses PiAcpTransport)."
+        },
+        {
+          "action": "Verify Droid ACP migration to standard ACP",
+          "expected": "Droid ACP uses standard ACP command, not proprietary stream-json",
+          "observed": "factory.rs:145: create_droid_acp uses standard ACP transport. Test droid_acp_migration_uses_standard_acp_command verifies command is 'droid exec --output-format acp'. Old DroidAcpTransport is #[deprecated] with note to use PiAcpTransport."
+        }
+      ],
+      "evidence": {
+        "codeReferences": [
+          "shared/rust-bridge/codex-mobile-client/src/provider/droid/transport.rs — DroidNativeTransport",
+          "shared/rust-bridge/codex-mobile-client/src/provider/droid/acp_transport.rs — DroidAcpTransport (deprecated)",
+          "shared/rust-bridge/codex-mobile-client/src/provider/factory.rs:68-69, 125-175 — Droid routing and ACP migration",
+          "shared/rust-bridge/codex-mobile-client/src/provider/factory.rs:560-562 — droid_acp_migration test"
+        ],
+        "consoleErrors": "none",
+        "network": "N/A (blocked: requires remote Droid agent server for end-to-end testing)"
+      },
+      "issues": "Requires remote Droid agent server for end-to-end testing. Code review verified all implementation components are present: DroidNativeTransport, migrated DroidAcp to standard ACP via PiAcpTransport, factory routing, and migration tests confirming standard ACP command."
+    },
+    {
+      "id": "VAL-IOS-038",
+      "title": "GenericAcp connection flow works end-to-end",
+      "status": "blocked",
+      "steps": [
+        {
+          "action": "Code review: verify GenericAcp connection path exists",
+          "expected": "GenericAcp transport with configurable remote command is implemented",
+          "observed": "Rust: GenericAcpTransport (provider/acp/generic_transport.rs) wraps AcpClient with configurable remote command from ProviderConfig.remote_command. Factory (factory.rs:70, 180) routes GenericAcp → create_generic_acp, which reads config.remote_command and spawns over SSH. Returns error when no remote_command configured. ProviderConfig has remote_command: Option<String> field."
+        },
+        {
+          "action": "Verify iOS integration for GenericAcp",
+          "expected": "iOS has ACP profiles and custom command text field for GenericAcp",
+          "observed": "ACPProfilesView.swift manages ACP provider profiles. ACPProfile.swift:52 — profiles used by agent picker for GenericAcp connections. AgentPickerSheet includes ACP profiles. Tests: testAllAgentTypesHaveDisplayNames, testAllAgentTypesHavePersistentKeys, testAllAgentTypesHaveIcons verify GenericAcp has full badge support."
+        }
+      ],
+      "evidence": {
+        "codeReferences": [
+          "shared/rust-bridge/codex-mobile-client/src/provider/acp/generic_transport.rs — GenericAcpTransport",
+          "shared/rust-bridge/codex-mobile-client/src/provider/factory.rs:70, 180 — GenericAcp factory routing",
+          "apps/ios/Sources/Litter/Views/ACPProfilesView.swift — ACP profile management",
+          "apps/ios/Sources/Litter/Models/ACPProfile.swift:52 — ACP profiles used by agent picker",
+          "apps/ios/Tests/LitterTests/ConnectionConversationParityTests.swift:156-195 — agent type badge tests including GenericAcp"
+        ],
+        "consoleErrors": "none",
+        "network": "N/A (blocked: requires remote ACP-compatible agent server for end-to-end testing)"
+      },
+      "issues": "Requires remote ACP-compatible agent server for end-to-end testing. Code review verified all implementation components are present: GenericAcpTransport with configurable remote command, factory routing, iOS ACP profile management, and comprehensive test coverage for GenericAcp badge/icon/display properties."
+    }
+  ],
+  "frictions": [],
+  "blockers": [
+    {
+      "description": "VAL-IOS-035 through VAL-IOS-038 require live remote agent servers (Codex, Pi, Droid, GenericAcp) for end-to-end connection testing. These cannot be validated without network access to running agent instances.",
+      "affectedAssertions": ["VAL-IOS-035", "VAL-IOS-036", "VAL-IOS-037", "VAL-IOS-038"],
+      "quickFixAttempted": "N/A — infrastructure limitation, not a transient failure"
+    }
+  ],
+  "summary": "Tested 8 assertions: 4 passed (VAL-IOS-028 through VAL-IOS-031), 4 blocked (VAL-IOS-035 through VAL-IOS-038). All code-reviewed assertions show correct implementation: discovery rows display agent type badges, agent picker is shown before connecting to multi-agent servers, SSH flow detects agents and pauses for picker, connection choice dialog uses provider-agnostic labels with no 'Use Codex' text. Blocked assertions require live remote agent servers for end-to-end validation; code review confirmed all transport implementations exist in Rust (CodexProvider, PiNativeTransport, PiAcpTransport, DroidNativeTransport, GenericAcpTransport) with proper factory routing. 28 iOS XCTest cases in ConnectionConversationParityTests.swift cover the code-reviewed assertions."
+}

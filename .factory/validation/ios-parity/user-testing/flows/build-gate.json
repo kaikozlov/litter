@@ -1,0 +1,209 @@
+{
+  "groupId": "build-gate",
+  "testedAt": "2026-04-15T12:00:00Z",
+  "isolation": {
+    "machine": "darwin 25.4.0",
+    "repoRoot": "/Users/kai/dev/projects/litter",
+    "exclusiveAccess": "iOS build — no concurrent builds"
+  },
+  "toolsUsed": ["rg", "make rust-check", "make rust-test", "make ios-sim-fast"],
+  "assertions": [
+    {
+      "id": "VAL-IOS-006",
+      "title": "CodexTurnAttributes renamed to TurnAttributes",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "rg \"CodexTurnAttributes\" apps/ios/Sources/",
+          "expected": "Zero results — old name fully removed",
+          "observed": "Zero results (ripgrep returned no matches)"
+        },
+        {
+          "action": "rg \"TurnAttributes\" apps/ios/Sources/",
+          "expected": "New struct and all call sites present",
+          "observed": "Found TurnAttributes in TurnAttributes.swift (struct definition), TurnLiveActivityController.swift (8+ call sites), TurnLiveActivity.swift (14+ references), LockScreenCardView.swift, LiveActivityPreview.swift"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A — code review",
+        "files": [
+          "apps/ios/Sources/Litter/Models/TurnAttributes.swift",
+          "apps/ios/Sources/Litter/Models/TurnLiveActivityController.swift",
+          "apps/ios/Sources/LitterLiveActivity/TurnLiveActivity.swift"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-007",
+      "title": "CodexVoiceCallAttributes renamed to VoiceCallAttributes",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "rg \"CodexVoiceCallAttributes\" apps/ios/Sources/",
+          "expected": "Zero results — old name fully removed",
+          "observed": "Zero results (ripgrep returned no matches)"
+        },
+        {
+          "action": "rg \"VoiceCallAttributes\" apps/ios/Sources/",
+          "expected": "New struct and all call sites present",
+          "observed": "Found VoiceCallAttributes in VoiceCallAttributes.swift (struct definition), VoiceRuntimeController.swift (3+ call sites), VoiceSessionModels.swift (3+ call sites), VoiceCallLiveActivity.swift, VoiceCallLockScreenCardView.swift"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A — code review",
+        "files": [
+          "apps/ios/Sources/Litter/Models/VoiceCallAttributes.swift",
+          "apps/ios/Sources/Litter/Models/VoiceRuntimeController.swift",
+          "apps/ios/Sources/Litter/Models/VoiceSessionModels.swift"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-010",
+      "title": "AgentBadgeView renders correctly for all agent types",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Read apps/ios/Sources/Litter/Views/AgentBadgeView.swift",
+          "expected": "AgentBadgeView uses AgentType icon/tint/displayName extensions covering all 6 variants",
+          "observed": "AgentType extension defines icon, tintColor, displayName switch statements with exhaustive cases: .codex → terminal.fill/green, .piAcp/.piNative → brain/purple, .droidAcp/.droidNative → robot/orange, .genericAcp → gearshape.fill/gray. Preview iterates all 6 AgentType variants."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A — code review",
+        "files": ["apps/ios/Sources/Litter/Views/AgentBadgeView.swift"]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-011",
+      "title": "AgentTypePill renders correctly for all agent types",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Read AgentTypePill in AgentBadgeView.swift",
+          "expected": "AgentTypePill uses AgentType extensions covering all 6 variants with icon + label",
+          "observed": "AgentTypePill struct uses agentType.icon and agentType.displayName from the AgentType extension, which has exhaustive switch statements for all 6 variants (codex, piAcp, piNative, droidAcp, droidNative, genericAcp). Preview includes all 6 variants."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A — code review",
+        "files": ["apps/ios/Sources/Litter/Views/AgentBadgeView.swift"]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-032",
+      "title": "Conversation view renders messages identically for all agent types",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "rg agentType/AgentType/codex/Codex in MessageBubbleView.swift and ConversationView.swift",
+          "expected": "No agent-type-specific branching in message rendering code",
+          "observed": "Zero matches for agentType, agent_type, AgentType, codex, Codex, provider, or Provider in MessageBubbleView.swift. Zero matches in ConversationView.swift. Message rendering is agent-type-agnostic."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A — code review",
+        "files": [
+          "apps/ios/Sources/Litter/Views/MessageBubbleView.swift",
+          "apps/ios/Sources/Litter/Views/ConversationView.swift"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-033",
+      "title": "Turn timeline shows agent-agnostic status",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "rg thinking/status text in ConversationView.swift and SubagentCardView.swift",
+          "expected": "Status text uses generic terms like 'Thinking...', 'is thinking' — not agent-specific like 'Codex is thinking'",
+          "observed": "ConversationView.swift line 2847: Text(\"Thinking\") — generic. SubagentCardView.swift line 230: .running returns \"is thinking\" — generic. LockScreenCardView.swift line 95: .thinking returns \"Thinking...\" — generic. No agent-type-prefixed status text found anywhere."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A — code review",
+        "files": [
+          "apps/ios/Sources/Litter/Views/ConversationView.swift",
+          "apps/ios/Sources/Litter/Views/SubagentCardView.swift",
+          "apps/ios/Sources/Litter/Views/LockScreenCardView.swift"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-IOS-034",
+      "title": "Subagent breadcrumb bar is provider-agnostic",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Read SubagentBreadcrumbBar in ConversationView.swift",
+          "expected": "Breadcrumb bar uses generic labels like 'Agent' — no default to 'Codex' or 'Codex Agent'",
+          "observed": "SubagentBreadcrumbBar (ConversationView.swift line 2901) uses thread.agentDisplayLabel ?? \"Agent\" as fallback. No reference to 'Codex' or 'Codex Agent' anywhere in the component. SubagentCardView.swift also has zero references to 'Codex'."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A — code review",
+        "files": [
+          "apps/ios/Sources/Litter/Views/ConversationView.swift",
+          "apps/ios/Sources/Litter/Views/SubagentCardView.swift"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CROSS-010",
+      "title": "Full build gate",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "make rust-check",
+          "expected": "Exit code 0",
+          "observed": "Exit code 0. Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.18s"
+        },
+        {
+          "action": "make rust-test",
+          "expected": "Exit code 0, all tests pass",
+          "observed": "Exit code 0. 1291 passed; 0 failed; 9 ignored; finished in 62.02s"
+        },
+        {
+          "action": "make ios-sim-fast",
+          "expected": "Exit code 0, BUILD SUCCEEDED",
+          "observed": "Exit code 0. ** BUILD SUCCEEDED **"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A — build commands",
+        "files": [
+          "ios-parity/build-gate/rust-check-output.txt",
+          "ios-parity/build-gate/rust-test-output.txt",
+          "ios-parity/build-gate/ios-sim-fast-output.txt"
+        ]
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 8 assertions: all 8 passed. Code review confirms CodexTurnAttributes/CodexVoiceCallAttributes fully renamed, AgentBadgeView/AgentTypePill handle all 6 agent types, message rendering is agent-type-agnostic, status text uses generic terms, breadcrumb bar is provider-agnostic. Build gate clean: rust-check, rust-test (1291 passed), and ios-sim-fast all exit 0."
+}
