@@ -110,11 +110,11 @@ extension AppServerSnapshot {
             return "connecting"
         case .detectingAgents:
             return "detecting agents"
-        case .findingCodex:
-            return "finding codex"
-        case .installingCodex:
+        case .findingAgent:
+            return "finding agent"
+        case .installingAgent:
             return "installing"
-        case .startingAppServer:
+        case .startingAgent:
             return "starting"
         case .openingTunnel:
             return "tunneling"

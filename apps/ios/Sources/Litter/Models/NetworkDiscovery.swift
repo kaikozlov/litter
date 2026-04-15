@@ -116,13 +116,13 @@ final class NetworkDiscovery {
         let name: String
         let hostname: String
         let port: UInt16?
-        let codexPorts: [UInt16]?
+        let agentPorts: [UInt16]?
         let sshPort: UInt16?
         let source: ServerSource
-        let hasCodexServer: Bool
+        let hasAgentServer: Bool
         let wakeMAC: String?
         let preferredConnectionMode: PreferredConnectionMode?
-        let preferredCodexPort: UInt16?
+        let preferredAgentPort: UInt16?
         let lastSeenAt: TimeInterval
         let os: String?
         let sshBanner: String?
@@ -148,7 +148,7 @@ final class NetworkDiscovery {
             hostname: "127.0.0.1",
             port: nil,
             source: .local,
-            hasCodexServer: true
+            hasAgentServer: true
         ))
 
         initialLoadTask = Task { [weak self] in
@@ -280,16 +280,16 @@ final class NetworkDiscovery {
             id: id.isEmpty ? "network-\(host)" : id,
             name: name.isEmpty ? host : name,
             hostname: host,
-            port: rust.codexPort,
-            codexPorts: rust.codexPorts,
+            port: rust.agentPort,
+            agentPorts: rust.agentPorts,
             sshPort: rust.sshPort,
             source: ServerSource(rust.source),
-            hasCodexServer: rust.codexPort != nil || !rust.codexPorts.isEmpty,
+            hasAgentServer: rust.agentPort != nil || !rust.agentPorts.isEmpty,
             wakeMAC: existing?.wakeMAC,
             sshPortForwardingEnabled: false,
             websocketURL: existing?.websocketURL,
             preferredConnectionMode: existing?.preferredConnectionMode,
-            preferredCodexPort: existing?.preferredCodexPort,
+            preferredAgentPort: existing?.preferredAgentPort,
             os: rust.sshBanner != nil ? rust.os : (rust.os ?? existing?.os),
             sshBanner: rust.sshBanner ?? existing?.sshBanner,
             agentTypes: rust.agentTypes,
@@ -341,8 +341,8 @@ final class NetworkDiscovery {
             displayName: server.name,
             host: server.hostname,
             port: server.port ?? server.resolvedSSHPort,
-            codexPort: server.port,
-            codexPorts: server.codexPorts,
+            agentPort: server.port,
+            agentPorts: server.agentPorts,
             sshPort: server.sshPort,
             source: {
                 switch server.source {
@@ -358,7 +358,7 @@ final class NetworkDiscovery {
                     return .manual
                 }
             }(),
-            reachable: server.hasCodexServer || server.sshPort != nil,
+            reachable: server.hasAgentServer || server.sshPort != nil,
             os: server.os,
             sshBanner: server.sshBanner,
             agentTypes: server.agentTypes,
@@ -388,13 +388,13 @@ final class NetworkDiscovery {
                 name: entry.name,
                 hostname: entry.hostname,
                 port: entry.port,
-                codexPorts: entry.codexPorts ?? (entry.port.map { [ $0 ] } ?? []),
+                agentPorts: entry.agentPorts ?? (entry.port.map { [ $0 ] } ?? []),
                 sshPort: entry.sshPort,
                 source: entry.source,
-                hasCodexServer: entry.hasCodexServer,
+                hasAgentServer: entry.hasAgentServer,
                 wakeMAC: entry.wakeMAC,
                 preferredConnectionMode: entry.preferredConnectionMode,
-                preferredCodexPort: entry.preferredCodexPort,
+                preferredAgentPort: entry.preferredAgentPort,
                 os: entry.os,
                 sshBanner: entry.sshBanner
             )
@@ -421,13 +421,13 @@ final class NetworkDiscovery {
                     name: server.name,
                     hostname: server.hostname,
                     port: server.port,
-                    codexPorts: server.codexPorts,
+                    agentPorts: server.agentPorts,
                     sshPort: server.sshPort,
                     source: server.source,
-                    hasCodexServer: server.hasCodexServer,
+                    hasAgentServer: server.hasAgentServer,
                     wakeMAC: server.wakeMAC,
                     preferredConnectionMode: server.preferredConnectionMode,
-                    preferredCodexPort: server.preferredCodexPort,
+                    preferredAgentPort: server.preferredAgentPort,
                     lastSeenAt: lastSeen.timeIntervalSince1970,
                     os: server.os,
                     sshBanner: server.sshBanner

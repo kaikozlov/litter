@@ -193,9 +193,9 @@ struct DiscoveryView: View {
             titleVisibility: .visible
         ) {
             if let server = connectionChoiceServer {
-                ForEach(server.availableDirectCodexPorts, id: \.self) { port in
-                    Button("Use Codex (\(port))") {
-                        let preferredServer = server.withConnectionPreference(.directCodex, codexPort: port)
+                ForEach(server.availableDirectAgentPorts, id: \.self) { port in
+                    Button("Use Agent (\(port))") {
+                        let preferredServer = server.withConnectionPreference(.directAgent, agentPort: port)
                         connectionChoiceServer = nil
                         Task { await connectToServer(preferredServer) }
                     }
@@ -289,13 +289,13 @@ struct DiscoveryView: View {
                         name: newName,
                         hostname: server.hostname,
                         port: server.port,
-                        codexPorts: server.codexPorts,
+                        agentPorts: server.agentPorts,
                         sshPort: server.sshPort,
                         source: server.source,
-                        hasCodexServer: server.hasCodexServer,
+                        hasAgentServer: server.hasAgentServer,
                         wakeMAC: server.wakeMAC,
                         preferredConnectionMode: server.preferredConnectionMode,
-                        preferredCodexPort: server.preferredCodexPort,
+                        preferredAgentPort: server.preferredAgentPort,
                         os: server.os,
                         sshBanner: server.sshBanner
                     ))
@@ -305,13 +305,13 @@ struct DiscoveryView: View {
                             name: newName,
                             hostname: server.hostname,
                             port: server.port,
-                            codexPorts: server.codexPorts,
+                            agentPorts: server.agentPorts,
                             sshPort: server.sshPort,
                             source: server.source,
-                            hasCodexServer: server.hasCodexServer,
+                            hasAgentServer: server.hasAgentServer,
                             wakeMAC: server.wakeMAC,
                             preferredConnectionMode: server.preferredConnectionMode,
-                            preferredCodexPort: server.preferredCodexPort,
+                            preferredAgentPort: server.preferredAgentPort,
                             os: server.os,
                             sshBanner: server.sshBanner
                         )
@@ -323,7 +323,7 @@ struct DiscoveryView: View {
             Text("Enter a new name for this server.")
         }
         .alert(
-            "Install Codex?",
+            "Install Agent?",
             isPresented: pendingInstallPresented,
             presenting: pendingInstallServerSnapshot
         ) { snapshot in
@@ -362,7 +362,7 @@ struct DiscoveryView: View {
                 }
             }
         } message: { snapshot in
-            Text(snapshot.connectionProgressDetail ?? "Codex was not found on the remote host. Install the latest stable release into ~/.litter?")
+            Text(snapshot.connectionProgressDetail ?? "The agent was not found on the remote host. Install the latest stable release into ~/.litter?")
         }
     }
 
@@ -478,7 +478,7 @@ struct DiscoveryView: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: serverIconName(for: server))
-                    .foregroundColor(server.hasCodexServer ? LitterTheme.accent : LitterTheme.textSecondary)
+                    .foregroundColor(server.hasAgentServer ? LitterTheme.accent : LitterTheme.textSecondary)
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(server.name)
@@ -534,7 +534,7 @@ struct DiscoveryView: View {
     }
 
     private func serverRowAccessibilityIdentifier(for server: DiscoveredServer) -> String {
-        let kind = server.hasCodexServer ? "codex" : "ssh"
+        let kind = server.hasAgentServer ? "agent" : "ssh"
         let host = server.hostname
             .lowercased()
             .replacingOccurrences(of: ".", with: "_")
@@ -557,9 +557,9 @@ struct DiscoveryView: View {
         if let os = server.os {
             parts.append(" - \(os)")
         }
-        let directPorts = server.availableDirectCodexPorts.map(String.init)
+        let directPorts = server.availableDirectAgentPorts.map(String.init)
         if !directPorts.isEmpty {
-            parts.append(" - codex \(directPorts.joined(separator: ", "))")
+            parts.append(" - agent \(directPorts.joined(separator: ", "))")
         }
         if server.canConnectViaSSH {
             parts.append(" - ssh \(server.resolvedSSHPort)")
@@ -626,7 +626,7 @@ struct DiscoveryView: View {
 
         if server.requiresConnectionChoice {
             connectionChoiceServer = server
-        } else if server.hasCodexServer, server.connectionTarget != nil {
+        } else if server.hasAgentServer, server.connectionTarget != nil {
             await connectToServer(server)
         } else if server.canConnectViaSSH {
             sshServer = server.withConnectionPreference(.ssh)
@@ -720,7 +720,7 @@ struct DiscoveryView: View {
 
         if prepared.server.requiresConnectionChoice {
             connectionChoiceServer = prepared.server
-        } else if prepared.server.hasCodexServer, prepared.server.connectionTarget != nil {
+        } else if prepared.server.hasAgentServer, prepared.server.connectionTarget != nil {
             await connectToServer(prepared.server)
         } else if prepared.canAttemptSSH {
             sshServer = prepared.server.withConnectionPreference(.ssh)
@@ -739,28 +739,28 @@ struct DiscoveryView: View {
 
         let wakeResult = await waitForWakeSignal(
             host: server.hostname,
-            preferredCodexPort: server.hasCodexServer ? server.port : nil,
+            preferredAgentPort: server.hasAgentServer ? server.port : nil,
             preferredSSHPort: server.sshPort,
-            timeout: server.hasCodexServer ? 12.0 : 18.0,
+            timeout: server.hasAgentServer ? 12.0 : 18.0,
             wakeMAC: server.wakeMAC
         )
 
         switch wakeResult {
-        case .codex(let port):
+        case .agent(let port):
             return (
                 DiscoveredServer(
                     id: server.id,
                     name: server.name,
                     hostname: server.hostname,
                     port: port,
-                    codexPorts: [port] + server.codexPorts.filter { $0 != port },
+                    agentPorts: [port] + server.agentPorts.filter { $0 != port },
                     sshPort: server.sshPort,
                     source: server.source,
-                    hasCodexServer: true,
+                    hasAgentServer: true,
                     wakeMAC: server.wakeMAC,
                     sshPortForwardingEnabled: server.sshPortForwardingEnabled,
                     preferredConnectionMode: server.preferredConnectionMode,
-                    preferredCodexPort: port
+                    preferredAgentPort: port
                 ),
                 true
             )
@@ -771,10 +771,10 @@ struct DiscoveryView: View {
                     name: server.name,
                     hostname: server.hostname,
                     port: nil,
-                    codexPorts: server.codexPorts,
+                    agentPorts: server.agentPorts,
                     sshPort: sshPort,
                     source: server.source,
-                    hasCodexServer: false,
+                    hasAgentServer: false,
                     wakeMAC: server.wakeMAC,
                     sshPortForwardingEnabled: server.sshPortForwardingEnabled,
                     preferredConnectionMode: .ssh
@@ -789,19 +789,19 @@ struct DiscoveryView: View {
     }
 
     private enum WakeSignalResult {
-        case codex(UInt16)
+        case agent(UInt16)
         case ssh(UInt16)
         case none
     }
 
     private func waitForWakeSignal(
         host: String,
-        preferredCodexPort: UInt16?,
+        preferredAgentPort: UInt16?,
         preferredSSHPort: UInt16?,
         timeout: TimeInterval,
         wakeMAC: String?
     ) async -> WakeSignalResult {
-        let codexPorts = orderedCodexPorts(preferred: preferredCodexPort)
+        let agentPorts = orderedAgentPorts(preferred: preferredAgentPort)
         let sshPorts = orderedSSHPorts(preferred: preferredSSHPort)
         let deadline = Date().addingTimeInterval(max(timeout, 0.5))
         var lastWakePacketAt = Date.distantPast
@@ -812,9 +812,9 @@ struct DiscoveryView: View {
                 lastWakePacketAt = Date()
             }
 
-            for port in codexPorts {
+            for port in agentPorts {
                 if await isPortOpen(host: host, port: port, timeout: 0.7) {
-                    return .codex(port)
+                    return .agent(port)
                 }
             }
 
@@ -830,7 +830,7 @@ struct DiscoveryView: View {
         return .none
     }
 
-    private func orderedCodexPorts(preferred: UInt16?) -> [UInt16] {
+    private func orderedAgentPorts(preferred: UInt16?) -> [UInt16] {
         var ports = [UInt16]()
         if let preferred {
             ports.append(preferred)
@@ -998,7 +998,7 @@ struct DiscoveryView: View {
                     host: host,
                     port: port
                 )
-                SavedServerStore.remember(server.withConnectionPreference(.directCodex, codexPort: port))
+                SavedServerStore.remember(server.withConnectionPreference(.directAgent, agentPort: port))
             case .remoteURL(let url):
                 startedAsyncBootstrap = false
                 connectedServerId = try await appModel.serverBridge.connectRemoteUrlServer(
@@ -1229,7 +1229,7 @@ struct DiscoveryView: View {
                 port: nil,
                 sshPort: 22,
                 source: .ssh,
-                hasCodexServer: false,
+                hasAgentServer: false,
                 sshPortForwardingEnabled: false,
                 preferredConnectionMode: .ssh
             )
@@ -1289,13 +1289,13 @@ struct DiscoveryView: View {
                 name: host,
                 hostname: host,
                 port: port,
-                codexPorts: port.map { [$0] } ?? [],
+                agentPorts: port.map { [$0] } ?? [],
                 sshPort: nil,
                 source: .manual,
-                hasCodexServer: true,
+                hasAgentServer: true,
                 websocketURL: raw,
-                preferredConnectionMode: .directCodex,
-                preferredCodexPort: port
+                preferredConnectionMode: .directAgent,
+                preferredAgentPort: port
             )
             showManualEntry = false
             Task { await connectToServer(server) }
@@ -1323,12 +1323,12 @@ struct DiscoveryView: View {
             name: host,
             hostname: host,
             port: port,
-            codexPorts: [port],
+            agentPorts: [port],
             sshPort: nil,
             source: .manual,
-            hasCodexServer: true,
-            preferredConnectionMode: .directCodex,
-            preferredCodexPort: port
+            hasAgentServer: true,
+            preferredConnectionMode: .directAgent,
+            preferredAgentPort: port
         )
         showManualEntry = false
         Task { await connectToServer(server) }
@@ -1356,7 +1356,7 @@ struct DiscoveryView: View {
             port: nil,
             sshPort: sshPort,
             source: .manual,
-            hasCodexServer: false,
+            hasAgentServer: false,
             wakeMAC: normalizedWakeMAC,
             preferredConnectionMode: .ssh
         )
@@ -1386,14 +1386,14 @@ struct DiscoveryView: View {
     }
 
     private func connectionChoiceMessage(for server: DiscoveredServer) -> String {
-        let directPorts = server.availableDirectCodexPorts.map(String.init)
+        let directPorts = server.availableDirectAgentPorts.map(String.init)
         if directPorts.isEmpty {
-            return "Use SSH to bootstrap Codex on \(server.hostname)."
+            return "Use SSH to bootstrap an agent on \(server.hostname)."
         }
         if server.canConnectViaSSH {
-            return "Codex is available on ports \(directPorts.joined(separator: ", ")) and SSH is also available on port \(server.resolvedSSHPort)."
+            return "Agent is available on ports \(directPorts.joined(separator: ", ")) and SSH is also available on port \(server.resolvedSSHPort)."
         }
-        return "Choose a Codex app-server port on \(server.hostname)."
+        return "Choose an agent port on \(server.hostname)."
     }
 
     private func progressTag(

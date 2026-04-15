@@ -89,7 +89,7 @@ final class HomeDashboardSupportTests: XCTestCase {
         XCTAssertNil(discovered.port)
         XCTAssertEqual(discovered.sshPort, 8390)
         XCTAssertEqual(discovered.resolvedSSHPort, 8390)
-        XCTAssertFalse(discovered.hasCodexServer)
+        XCTAssertFalse(discovered.hasAgentServer)
     }
 
     func testHomeDashboardModelRefreshesWhenObservedSnapshotChanges() async {

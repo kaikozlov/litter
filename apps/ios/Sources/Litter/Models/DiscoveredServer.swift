@@ -22,8 +22,22 @@ enum ServerSource: String, Codable, Hashable {
 }
 
 enum PreferredConnectionMode: String, Codable, Hashable {
-    case directCodex
+    case directAgent
     case ssh
+
+    /// Backward compatibility: decode old `directCodex` value as `directAgent`.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        switch rawValue {
+        case "directCodex", "directAgent":
+            self = .directAgent
+        case "ssh":
+            self = .ssh
+        default:
+            self = .directAgent
+        }
+    }
 }
 
 struct DiscoveredServer: Identifiable, Hashable {
@@ -31,15 +45,15 @@ struct DiscoveredServer: Identifiable, Hashable {
     let name: String
     let hostname: String
     let port: UInt16?
-    let codexPorts: [UInt16]
+    let agentPorts: [UInt16]
     let sshPort: UInt16?
     let source: ServerSource
-    let hasCodexServer: Bool
+    let hasAgentServer: Bool
     let wakeMAC: String?
     let sshPortForwardingEnabled: Bool
     let websocketURL: String?
     let preferredConnectionMode: PreferredConnectionMode?
-    let preferredCodexPort: UInt16?
+    let preferredAgentPort: UInt16?
     let os: String?
     let sshBanner: String?
     let agentTypes: [AgentType]
@@ -50,48 +64,48 @@ struct DiscoveredServer: Identifiable, Hashable {
         name: String,
         hostname: String,
         port: UInt16?,
-        codexPorts: [UInt16] = [],
+        agentPorts: [UInt16] = [],
         sshPort: UInt16? = nil,
         source: ServerSource,
-        hasCodexServer: Bool,
+        hasAgentServer: Bool,
         wakeMAC: String? = nil,
         sshPortForwardingEnabled: Bool = false,
         websocketURL: String? = nil,
         preferredConnectionMode: PreferredConnectionMode? = nil,
-        preferredCodexPort: UInt16? = nil,
+        preferredAgentPort: UInt16? = nil,
         os: String? = nil,
         sshBanner: String? = nil,
         agentTypes: [AgentType] = [.codex],
         agentInfos: [AgentInfo] = []
     ) {
-        let normalizedCodexPorts = Self.normalizedPorts(codexPorts, fallback: port)
+        let normalizedAgentPorts = Self.normalizedPorts(agentPorts, fallback: port)
         let resolvedPreferredMode = Self.resolvedPreferredConnectionMode(
             preferredConnectionMode,
-            codexPorts: normalizedCodexPorts,
+            agentPorts: normalizedAgentPorts,
             sshPort: sshPort,
             websocketURL: websocketURL
         )
-        let resolvedPreferredCodexPort = Self.resolvedPreferredCodexPort(
+        let resolvedPreferredAgentPort = Self.resolvedPreferredAgentPort(
             preferredConnectionMode: resolvedPreferredMode,
-            preferredCodexPort: preferredCodexPort,
-            codexPorts: normalizedCodexPorts
+            preferredAgentPort: preferredAgentPort,
+            agentPorts: normalizedAgentPorts
         )
 
         self.id = id
         self.name = name
         self.hostname = hostname
-        self.port = resolvedPreferredCodexPort
-            ?? (normalizedCodexPorts.contains(port ?? 0) ? port : nil)
-            ?? normalizedCodexPorts.first
-        self.codexPorts = normalizedCodexPorts
+        self.port = resolvedPreferredAgentPort
+            ?? (normalizedAgentPorts.contains(port ?? 0) ? port : nil)
+            ?? normalizedAgentPorts.first
+        self.agentPorts = normalizedAgentPorts
         self.sshPort = sshPort
         self.source = source
-        self.hasCodexServer = hasCodexServer || !normalizedCodexPorts.isEmpty || websocketURL != nil
+        self.hasAgentServer = hasAgentServer || !normalizedAgentPorts.isEmpty || websocketURL != nil
         self.wakeMAC = Self.normalizeWakeMAC(wakeMAC)
         self.sshPortForwardingEnabled = sshPortForwardingEnabled
         self.websocketURL = websocketURL
         self.preferredConnectionMode = resolvedPreferredMode
-        self.preferredCodexPort = resolvedPreferredCodexPort
+        self.preferredAgentPort = resolvedPreferredAgentPort
         self.os = os
         self.sshBanner = sshBanner
         self.agentTypes = agentTypes
@@ -104,7 +118,7 @@ struct DiscoveredServer: Identifiable, Hashable {
         if preferredConnectionMode == .ssh {
             return nil
         }
-        if let port = resolvedDirectCodexPort, !requiresConnectionChoice {
+        if let port = resolvedDirectAgentPort, !requiresConnectionChoice {
             return .remote(host: hostname, port: port)
         }
         return nil
@@ -114,18 +128,18 @@ struct DiscoveredServer: Identifiable, Hashable {
         sshPort ?? 22
     }
 
-    var availableDirectCodexPorts: [UInt16] {
-        codexPorts
+    var availableDirectAgentPorts: [UInt16] {
+        agentPorts
     }
 
-    var resolvedDirectCodexPort: UInt16? {
-        if preferredConnectionMode == .directCodex, let preferredCodexPort {
-            return preferredCodexPort
+    var resolvedDirectAgentPort: UInt16? {
+        if preferredConnectionMode == .directAgent, let preferredAgentPort {
+            return preferredAgentPort
         }
-        if let port, availableDirectCodexPorts.contains(port) {
+        if let port, availableDirectAgentPorts.contains(port) {
             return port
         }
-        return availableDirectCodexPorts.first
+        return availableDirectAgentPorts.first
     }
 
     var canConnectViaSSH: Bool {
@@ -139,28 +153,28 @@ struct DiscoveredServer: Identifiable, Hashable {
     var requiresConnectionChoice: Bool {
         guard source != .local, websocketURL == nil else { return false }
         guard preferredConnectionMode == nil else { return false }
-        let directCount = availableDirectCodexPorts.count
+        let directCount = availableDirectAgentPorts.count
         return directCount > 1 || (directCount > 0 && canConnectViaSSH)
     }
 
     func withConnectionPreference(
         _ mode: PreferredConnectionMode?,
-        codexPort: UInt16? = nil
+        agentPort: UInt16? = nil
     ) -> DiscoveredServer {
         DiscoveredServer(
             id: id,
             name: name,
             hostname: hostname,
-            port: codexPort ?? port,
-            codexPorts: codexPorts,
+            port: agentPort ?? port,
+            agentPorts: agentPorts,
             sshPort: sshPort,
             source: source,
-            hasCodexServer: hasCodexServer,
+            hasAgentServer: hasAgentServer,
             wakeMAC: wakeMAC,
             sshPortForwardingEnabled: sshPortForwardingEnabled,
             websocketURL: websocketURL,
             preferredConnectionMode: mode,
-            preferredCodexPort: mode == .directCodex ? (codexPort ?? resolvedDirectCodexPort) : nil,
+            preferredAgentPort: mode == .directAgent ? (agentPort ?? resolvedDirectAgentPort) : nil,
             os: os,
             sshBanner: sshBanner,
             agentTypes: agentTypes,
@@ -215,13 +229,13 @@ struct DiscoveredServer: Identifiable, Hashable {
 
     private static func resolvedPreferredConnectionMode(
         _ mode: PreferredConnectionMode?,
-        codexPorts: [UInt16],
+        agentPorts: [UInt16],
         sshPort: UInt16?,
         websocketURL: String?
     ) -> PreferredConnectionMode? {
         switch mode {
-        case .directCodex:
-            return !codexPorts.isEmpty || websocketURL != nil ? .directCodex : nil
+        case .directAgent:
+            return !agentPorts.isEmpty || websocketURL != nil ? .directAgent : nil
         case .ssh:
             return sshPort != nil ? .ssh : nil
         case nil:
@@ -229,14 +243,14 @@ struct DiscoveredServer: Identifiable, Hashable {
         }
     }
 
-    private static func resolvedPreferredCodexPort(
+    private static func resolvedPreferredAgentPort(
         preferredConnectionMode: PreferredConnectionMode?,
-        preferredCodexPort: UInt16?,
-        codexPorts: [UInt16]
+        preferredAgentPort: UInt16?,
+        agentPorts: [UInt16]
     ) -> UInt16? {
-        guard preferredConnectionMode == .directCodex else { return nil }
-        guard let preferredCodexPort, codexPorts.contains(preferredCodexPort) else { return nil }
-        return preferredCodexPort
+        guard preferredConnectionMode == .directAgent else { return nil }
+        guard let preferredAgentPort, agentPorts.contains(preferredAgentPort) else { return nil }
+        return preferredAgentPort
     }
 
     private static func normalizedHostKey(_ raw: String) -> String {

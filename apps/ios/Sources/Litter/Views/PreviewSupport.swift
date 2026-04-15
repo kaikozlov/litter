@@ -11,13 +11,13 @@ enum LitterPreviewData {
         name: "Newspaper Solver",
         hostname: "192.168.1.228",
         port: 8390,
-        codexPorts: [8390, 9234],
+        agentPorts: [8390, 9234],
         source: .manual,
-        hasCodexServer: true,
+        hasAgentServer: true,
         wakeMAC: "12:18:c7:14:74:e3",
         sshPortForwardingEnabled: true,
-        preferredConnectionMode: .directCodex,
-        preferredCodexPort: 8390
+        preferredConnectionMode: .directAgent,
+        preferredAgentPort: 8390
     )
 
     static let sampleSSHServer = DiscoveredServer(
@@ -27,7 +27,7 @@ enum LitterPreviewData {
         port: nil,
         sshPort: 22,
         source: .ssh,
-        hasCodexServer: false,
+        hasAgentServer: false,
         wakeMAC: "aa:bb:cc:dd:ee:ff",
         sshPortForwardingEnabled: true,
         preferredConnectionMode: .ssh
@@ -38,9 +38,9 @@ enum LitterPreviewData {
         name: "Kitchen iMac",
         hostname: "imac.local",
         port: 8390,
-        codexPorts: [8390],
+        agentPorts: [8390],
         source: .bonjour,
-        hasCodexServer: true
+        hasAgentServer: true
     )
 
     static let sampleModels: [ModelInfo] = [
