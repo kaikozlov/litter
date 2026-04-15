@@ -157,6 +157,7 @@ targets:
         GENERATE_INFOPLIST_FILE: true
         CODE_SIGNING_ALLOWED: false
         CODE_SIGNING_REQUIRED: false
+        SWIFT_STRICT_CONCURRENCY: minimal
   LitterUITests:
     type: bundle.ui-testing
     platform: iOS

@@ -28,7 +28,6 @@ struct SessionsScreen: View {
     @State private var pendingActiveSessionScroll = false
     @State private var sessionSearchDebounceTask: Task<Void, Never>?
     @State private var hasLoadedInitialSessions = false
-    @State private var agentTypeFilter: AgentType?
     private let autoLoadSessions: Bool
     private let onOpenConversation: (ThreadKey) -> Void
     private let onInfo: (() -> Void)?
@@ -151,8 +150,8 @@ struct SessionsScreen: View {
             .onChange(of: debouncedSessionSearchQuery) { _, next in
                 sessionsModel.updateSearchQuery(next)
             }
-            .onChange(of: agentTypeFilter) { _, next in
-                sessionsModel.updateAgentTypeFilter(next)
+            .onChange(of: appState.sessionsAgentTypeFilter) { _, _ in
+                sessionsModel.updateAgentTypeFilter(agentTypeFilter)
             }
             .onChange(of: derived.workspaceGroupIDs) { _, ids in
                 let idSet: Set<String> = Set(ids)
@@ -277,6 +276,15 @@ struct SessionsScreen: View {
     private var showOnlyForks: Bool {
         get { appState.sessionsShowOnlyForks }
         nonmutating set { appState.sessionsShowOnlyForks = newValue }
+    }
+
+    private var agentTypeFilter: AgentType? {
+        get {
+            appState.sessionsAgentTypeFilter.flatMap { AgentType.fromPersistentKey($0) }
+        }
+        nonmutating set {
+            appState.sessionsAgentTypeFilter = newValue?.persistentKey
+        }
     }
 
     private var workspaceSortMode: WorkspaceSortMode {
@@ -510,9 +518,10 @@ struct SessionsScreen: View {
                 Button("All agents") { agentTypeFilter = nil }
                 Divider()
                 ForEach([
+                    (AgentType.codex, "Codex"),
                     (AgentType.piNative, "Pi"),
                     (AgentType.droidNative, "Droid"),
-                    (AgentType.codex, "Codex"),
+                    (AgentType.genericAcp, "ACP"),
                 ], id: \.0.id) { type, label in
                     Button {
                         agentTypeFilter = type
@@ -528,6 +537,7 @@ struct SessionsScreen: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Filter by agent type, currently \(agentTypeFilter?.displayName ?? "All agents")")
 
             Menu {
                 ForEach(WorkspaceSortMode.allCases) { mode in

@@ -3,6 +3,7 @@ import XCTest
 
 // MARK: - AgentBadgeView / AgentTypePill Tests (VAL-IOS-010, VAL-IOS-011, VAL-IOS-012)
 
+@MainActor
 final class AgentBadgePickerTests: XCTestCase {
 
     // MARK: - VAL-IOS-010: AgentBadgeView renders correctly for all agent types

@@ -29,6 +29,18 @@ final class AppState {
     var showSettings = false
     var showAgentPicker = false
     var pendingThreadNavigation: ThreadKey?
+
+    /// Persisted agent type filter for the sessions screen.
+    /// nil means "All agents".
+    var sessionsAgentTypeFilter: String? {
+        didSet {
+            if let value = sessionsAgentTypeFilter {
+                UserDefaults.standard.set(value, forKey: "litter.sessionsAgentTypeFilter")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "litter.sessionsAgentTypeFilter")
+            }
+        }
+    }
     private var threadPermissionOverrides: [String: ThreadPermissionOverride] = [:]
     var approvalPolicy: String {
         didSet {
@@ -44,6 +56,7 @@ final class AppState {
     init() {
         approvalPolicy = UserDefaults.standard.string(forKey: Self.approvalPolicyKey) ?? "inherit"
         sandboxMode = UserDefaults.standard.string(forKey: Self.sandboxModeKey) ?? "inherit"
+        sessionsAgentTypeFilter = UserDefaults.standard.string(forKey: "litter.sessionsAgentTypeFilter")
     }
 
     func toggleSessionFolder(_ folderPath: String) {
