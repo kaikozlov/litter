@@ -42,7 +42,7 @@ enum VoiceSessionPhase: String, Equatable {
         case .thinking:
             return "Thinking"
         case .speaking:
-            return "Codex Speaking"
+            return "Agent Speaking"
         case .handoff:
             return "Executing Tools"
         case .error:
@@ -155,7 +155,7 @@ struct VoiceSessionState: Identifiable, Equatable {
         VoiceSessionState(
             threadKey: threadKey,
             threadTitle: threadTitle.isEmpty ? "Voice Session" : threadTitle,
-            model: model.isEmpty ? "Codex" : model,
+            model: model.isEmpty ? "Agent" : model,
             startedAt: Date(),
             sessionId: nil,
             phase: .connecting,

@@ -450,7 +450,7 @@ private struct SettingsConnectionAccountSection: View {
                                 .litterFont(.caption)
                                 .foregroundColor(LitterTheme.textSecondary)
                         } else if isChatGPTAccount {
-                            Text("Save an API key in the local Codex environment.")
+                            Text("Save an API key in the local agent environment.")
                                 .litterFont(.caption)
                                 .foregroundColor(LitterTheme.textSecondary)
                         }

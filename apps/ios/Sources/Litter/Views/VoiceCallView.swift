@@ -80,7 +80,7 @@ struct VoiceCallView: View {
                 )
 
                 CompactSpeakerIndicator(
-                    title: "Codex",
+                    title: "Agent",
                     level: visualWaveformLevel(
                         session.outputLevel,
                         active: session.phase == .speaking || session.isSpeaking
@@ -615,9 +615,9 @@ private struct VoiceTranscriptEntry: Identifiable, Equatable {
         guard !text.isEmpty else { return nil }
         let speaker = session.transcriptSpeaker?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             ? session.transcriptSpeaker!
-            : (session.phase == .speaking ? "Codex" : "You")
-        let kind: VoiceTranscriptEntryKind = speaker == "Codex" ? .liveAssistant : .liveUser
-        let title = speaker == "Codex" ? "CODEX LIVE" : "YOU LIVE"
+            : (session.phase == .speaking ? "Agent" : "You")
+        let kind: VoiceTranscriptEntryKind = speaker == "Agent" ? .liveAssistant : .liveUser
+        let title = speaker == "Agent" ? "AGENT LIVE" : "YOU LIVE"
         return VoiceTranscriptEntry(
             id: "live-\(speaker.lowercased())",
             kind: kind,

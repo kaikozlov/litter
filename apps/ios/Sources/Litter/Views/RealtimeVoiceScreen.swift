@@ -94,7 +94,7 @@ struct RealtimeVoiceScreen: View {
 
         let speaker = session.transcriptSpeaker?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             ? session.transcriptSpeaker!
-            : (session.phase == .speaking ? "Codex" : "You")
+            : (session.phase == .speaking ? "Agent" : "You")
         let liveId = session.transcriptLiveMessageID ?? "live-\(speaker.lowercased())"
         let timestamp = entries.first(where: { $0.id == liveId })?.timestamp ?? Date()
         let entry = VoiceSessionTranscriptEntry(
@@ -322,7 +322,7 @@ struct RealtimeVoiceScreen: View {
                 .font(LitterFont.styled(.headline, weight: .semibold))
                 .foregroundColor(primaryTextColor)
 
-            Text("Enter your OpenAI API key for this device. Litter will store it in the local Codex environment as OPENAI_API_KEY.")
+            Text("Enter your OpenAI API key for this device. Litter will store it in the local agent environment as OPENAI_API_KEY.")
                 .font(LitterFont.styled(.caption))
                 .foregroundColor(secondaryTextColor)
                 .fixedSize(horizontal: false, vertical: true)

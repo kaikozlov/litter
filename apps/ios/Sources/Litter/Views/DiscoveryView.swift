@@ -1173,7 +1173,7 @@ struct DiscoveryView: View {
                             .foregroundColor(LitterTheme.textSecondary)
                     } footer: {
                         if manualConnectionMode == .codex {
-                            Text("Run: codex app-server --listen ws://0.0.0.0:8390\nFor reverse proxies: wss://example.com/ws?token=SECRET\nDo not expose directly to the internet unless you know what you are doing.")
+                            Text("Run: codex app-server --listen ws://0.0.0.0:8390\nFor reverse proxies: wss://example.com/ws?token=SECRET\nDo not expose the server directly to the internet unless you know what you are doing.")
                                 .litterFont(.caption2)
                                 .foregroundColor(LitterTheme.textMuted)
                         }
@@ -1454,7 +1454,7 @@ private enum ManualConnectionMode: String, CaseIterable, Identifiable {
     var formHeader: String {
         switch self {
         case .codex:
-            return "Codex Server"
+            return "App Server"
         case .ssh:
             return "SSH Bootstrap"
         }

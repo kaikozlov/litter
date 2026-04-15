@@ -2133,9 +2133,9 @@ enum ComposerSlashCommand: CaseIterable {
         switch self {
         case .plan: return "switch collaboration mode"
         case .model: return "choose what model and reasoning effort to use"
-        case .permissions: return "choose what Codex is allowed to do"
+        case .permissions: return "choose what the agent is allowed to do"
         case .experimental: return "toggle experimental features"
-        case .skills: return "use skills to improve how Codex performs specific tasks"
+        case .skills: return "use skills to improve how the agent performs specific tasks"
         case .review: return "review my current changes and find issues"
         case .rename: return "rename the current thread"
         case .new: return "start a new chat during a conversation"

@@ -41,7 +41,7 @@ struct AnimatedSplashView: View {
             if !compact {
                 VStack {
                     Spacer()
-                    Text("codex on your phone")
+                    Text("agents on your phone")
                         .litterMonoFont(size: 14, weight: .regular)
                         .foregroundColor(LitterTheme.textMuted)
                         .padding(.bottom, 80)

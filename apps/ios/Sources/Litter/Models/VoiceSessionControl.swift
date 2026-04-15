@@ -3,7 +3,7 @@ import Foundation
 
 enum VoiceSessionControl {
     static let realtimeFeatureName = "realtime_conversation"
-    static let defaultPrompt = "You are Codex in a live voice conversation inside Litter. Keep responses short, spoken, and conversational. Avoid markdown and code formatting unless explicitly asked."
+    static let defaultPrompt = "You are an AI agent in a live voice conversation inside Litter. Keep responses short, spoken, and conversational. Avoid markdown and code formatting unless explicitly asked."
 
     /// Build a voice prompt that includes awareness of available servers.
     static func buildPrompt(remoteServers: [(name: String, hostname: String)]) -> String {
@@ -15,7 +15,7 @@ enum VoiceSessionControl {
 
         Available servers:
         \(serverList)
-        When using the codex tool, you MUST specify the "server" parameter. \
+        When using the agent tool, you MUST specify the "server" parameter. \
         IMPORTANT: Use the local discovery tools for server and session lookup. \
         The "local" server has special tools that can see sessions across ALL connected servers in one call. \
         After calling `list_servers` or `list_sessions`, always give the user a short spoken summary of what you found. Do not stop after the tool result alone. \

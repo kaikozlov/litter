@@ -249,7 +249,7 @@ struct ConversationComposerModalCoordinator<Content: View>: View {
 
                     permissionSection(
                         title: "Approval policy",
-                        subtitle: "Choose when Codex asks for approval"
+                        subtitle: "Choose when the agent asks for approval"
                     ) {
                         permissionDropdown(
                             title: selectedApprovalLabel,
@@ -273,7 +273,7 @@ struct ConversationComposerModalCoordinator<Content: View>: View {
 
                     permissionSection(
                         title: "Sandbox settings",
-                        subtitle: "Choose how much Codex can do when running commands"
+                        subtitle: "Choose how much the agent can do when running commands"
                     ) {
                         permissionDropdown(
                             title: selectedSandboxLabel,

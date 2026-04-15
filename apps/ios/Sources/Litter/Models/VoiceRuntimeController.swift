@@ -262,7 +262,7 @@ final class VoiceRuntimeController: VoiceActions {
         activeVoiceSession = VoiceSessionState.initial(
             threadKey: resolvedKey,
             threadTitle: threadTitle,
-            model: resolvedModel.isEmpty ? (model ?? "Codex") : resolvedModel
+            model: resolvedModel.isEmpty ? (model ?? "Agent") : resolvedModel
         )
         syncVoiceCallActivity()
 
@@ -919,7 +919,7 @@ private extension VoiceRuntimeController {
         case .user:
             return "You"
         case .assistant:
-            return "Codex"
+            return "Agent"
         }
     }
 

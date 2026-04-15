@@ -164,7 +164,7 @@ private struct AccountConnectionView: View {
                             .foregroundColor(LitterTheme.textSecondary)
                             .padding(.horizontal, 16)
                     } else if isChatGPTAccount {
-                        Text("Save an OpenAI API key in the local Codex environment.")
+                        Text("Save an OpenAI API key in the local agent environment.")
                             .litterFont(.caption)
                             .foregroundColor(LitterTheme.textSecondary)
                             .padding(.horizontal, 16)
