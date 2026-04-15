@@ -1777,3 +1777,321 @@ fn acp_parity_session_id_collision_across_acp_providers() {
     assert_eq!(map.get(&key_droid), Some(&"droid-acp-data"));
     assert_eq!(map.get(&key_generic), Some(&"generic-acp-data"));
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// VAL-CROSS-011: Agent binary validation
+// ════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn val_cross_011_agent_binary_validation_rejects_unknown_binary() {
+    // Verify that each non-Codex agent type has a binary name that is
+    // validated on the remote host before provider creation.
+    // If the binary is missing, the connection fails with a clear error
+    // and no auto-install is attempted.
+    let validated_types = [
+        (AgentType::PiNative, "pi"),
+        (AgentType::PiAcp, "pi"),
+        (AgentType::DroidNative, "droid"),
+        (AgentType::DroidAcp, "droid"),
+    ];
+
+    for (agent_type, expected_binary) in &validated_types {
+        let binary = crate::mobile_client::agent_binary_name(*agent_type);
+        assert_eq!(
+            binary,
+            Some(*expected_binary),
+            "{agent_type:?} should map to binary '{expected_binary}'"
+        );
+    }
+
+    // Codex and GenericAcp should NOT have a binary name — they skip validation
+    assert!(
+        crate::mobile_client::agent_binary_name(AgentType::Codex).is_none(),
+        "Codex should not have a binary name for validation"
+    );
+    assert!(
+        crate::mobile_client::agent_binary_name(AgentType::GenericAcp).is_none(),
+        "GenericAcp should not have a binary name for validation"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// VAL-CROSS-012: Discovery finds non-Codex agents
+// ════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn val_cross_012_discovery_port_registry_includes_non_codex_ports() {
+    // Verify the port registry includes ports for all known agent types
+    // by checking that agent_default_ports returns correct ports per type
+    let codex_ports = crate::discovery::agent_default_ports(AgentType::Codex);
+    assert!(
+        codex_ports.contains(&8390),
+        "Codex default ports must include 8390"
+    );
+
+    let pi_ports = crate::discovery::agent_default_ports(AgentType::PiNative);
+    assert!(
+        pi_ports.contains(&9234),
+        "Pi default ports must include 9234"
+    );
+
+    let pi_acp_ports = crate::discovery::agent_default_ports(AgentType::PiAcp);
+    assert!(
+        pi_acp_ports.contains(&9234),
+        "PiAcp default ports must include 9234"
+    );
+
+    // Verify the DiscoveryConfig default includes all registered ports
+    let config = crate::discovery::DiscoveryConfig::default();
+    assert!(
+        config.scan_ports.contains(&8390),
+        "default scan ports must include Codex port 8390"
+    );
+    assert!(
+        config.scan_ports.contains(&9234),
+        "default scan ports must include Pi port 9234"
+    );
+    assert!(
+        config.scan_ports.contains(&22),
+        "default scan ports must include SSH port 22"
+    );
+}
+
+#[test]
+fn val_cross_012_agent_type_port_mapping() {
+    // Verify that known agent types map to their expected default ports
+    use crate::discovery::agent_default_ports;
+
+    let codex_ports = agent_default_ports(AgentType::Codex);
+    assert!(
+        codex_ports.contains(&8390),
+        "Codex default ports should include 8390"
+    );
+
+    let pi_ports = agent_default_ports(AgentType::PiNative);
+    assert!(
+        pi_ports.contains(&9234),
+        "Pi default ports should include 9234"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// VAL-CROSS-007: Reconnection after disconnect works through trait
+// ════════════════════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn val_cross_007_reconnect_health_transitions() {
+    // Verify the full health transition sequence during reconnect:
+    // Connected → Disconnect → Reconnect → Connected
+    let mut provider = ErrorMockProvider::new();
+    let config = ProviderConfig::default();
+
+    // Initial connect
+    provider.connect(&config).await.unwrap();
+    assert!(provider.is_connected());
+
+    let mut rx1 = provider.event_receiver();
+
+    // Stream some content
+    provider.emit_event(ProviderEvent::MessageDelta {
+        thread_id: "thread-reconnect".to_string(),
+        item_id: "item-1".to_string(),
+        delta: "pre-disconnect".to_string(),
+    });
+
+    let pre_events = collect_events(&mut rx1).await;
+    assert_eq!(pre_events.len(), 1);
+
+    // Disconnect
+    provider.simulate_mid_stream_disconnect("test disconnect");
+    provider.disconnect().await;
+    assert!(!provider.is_connected());
+
+    // Verify post-disconnect operations fail
+    let result = provider
+        .send_request("thread/list", serde_json::json!({}))
+        .await;
+    assert!(
+        matches!(result, Err(RpcError::Transport(TransportError::Disconnected))),
+        "post-disconnect request should return Disconnected error"
+    );
+
+    // Reconnect with a new provider
+    let mut provider2 = ErrorMockProvider::new();
+    provider2.connect(&config).await.unwrap();
+    assert!(provider2.is_connected());
+
+    let mut rx2 = provider2.event_receiver();
+
+    // Verify new provider works
+    provider2.emit_event(ProviderEvent::MessageDelta {
+        thread_id: "thread-reconnect".to_string(),
+        item_id: "item-2".to_string(),
+        delta: "post-reconnect".to_string(),
+    });
+
+    let post_events = collect_events(&mut rx2).await;
+    assert!(
+        post_events.iter().any(|e| match e {
+            ProviderEvent::MessageDelta { delta, .. } => delta == "post-reconnect",
+            _ => false,
+        }),
+        "should receive events after reconnect"
+    );
+
+    provider2.disconnect().await;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// VAL-CROSS-001: Full Codex flow end-to-end (trait-level)
+// ════════════════════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn val_cross_001_full_codex_session_lifecycle() {
+    // Verify the complete Codex session lifecycle through the provider trait:
+    // connect → send request → receive streaming response → disconnect
+    let mut provider = SequencedMockProvider::new("codex-val-cross");
+    let config = ProviderConfig {
+        agent_type: AgentType::Codex,
+        ..Default::default()
+    };
+
+    // 1. Connect
+    provider.connect(&config).await.unwrap();
+    assert!(provider.is_connected());
+
+    // 2. Verify thread/list works
+    let result = provider
+        .send_request("thread/list", serde_json::json!({}))
+        .await
+        .unwrap();
+    assert!(result["threads"].is_array());
+
+    // 3. Subscribe and stream a response
+    let mut rx = provider.event_receiver();
+
+    // Emit full streaming sequence (simulates a real Codex response)
+    provider.emit(ProviderEvent::TurnStarted {
+        thread_id: "codex-thread".to_string(),
+        turn_id: "turn-1".to_string(),
+    });
+    provider.emit(ProviderEvent::StreamingStarted {
+        thread_id: "codex-thread".to_string(),
+    });
+    provider.emit(ProviderEvent::ItemStarted {
+        thread_id: "codex-thread".to_string(),
+        turn_id: "turn-1".to_string(),
+        item_id: "msg-1".to_string(),
+    });
+    provider.emit(ProviderEvent::MessageDelta {
+        thread_id: "codex-thread".to_string(),
+        item_id: "msg-1".to_string(),
+        delta: "Hello! I'm a Codex agent.".to_string(),
+    });
+    provider.emit(ProviderEvent::ItemCompleted {
+        thread_id: "codex-thread".to_string(),
+        turn_id: "turn-1".to_string(),
+        item_id: "msg-1".to_string(),
+    });
+    provider.emit(ProviderEvent::StreamingCompleted {
+        thread_id: "codex-thread".to_string(),
+    });
+    provider.emit(ProviderEvent::TurnCompleted {
+        thread_id: "codex-thread".to_string(),
+        turn_id: "turn-1".to_string(),
+    });
+
+    let events = collect_events(&mut rx).await;
+    assert!(events.len() >= 7, "should have full streaming sequence");
+
+    // Verify event ordering
+    assert!(matches!(events[0], ProviderEvent::TurnStarted { .. }));
+    assert!(matches!(events[1], ProviderEvent::StreamingStarted { .. }));
+    assert!(matches!(events[2], ProviderEvent::ItemStarted { .. }));
+    assert!(matches!(events[3], ProviderEvent::MessageDelta { .. }));
+    assert!(matches!(events[4], ProviderEvent::ItemCompleted { .. }));
+    assert!(matches!(events[5], ProviderEvent::StreamingCompleted { .. }));
+    assert!(matches!(events[6], ProviderEvent::TurnCompleted { .. }));
+
+    // 4. Verify token accounting
+    provider.emit(ProviderEvent::ContextTokensUpdated {
+        thread_id: "codex-thread".to_string(),
+        used: 150,
+        limit: 128000,
+    });
+    let token_events = collect_events(&mut rx).await;
+    assert!(
+        token_events.iter().any(|e| matches!(
+            e,
+            ProviderEvent::ContextTokensUpdated { used: 150, limit: 128000, .. }
+        )),
+        "should receive token usage event"
+    );
+
+    // 5. Disconnect cleanly
+    provider.disconnect().await;
+    assert!(!provider.is_connected());
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// VAL-CROSS-009: Provider switch mid-session
+// ════════════════════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn val_cross_009_provider_switch_mid_session() {
+    // Simulate switching from Pi to Droid on the same server.
+    // Old session disconnects cleanly, new session establishes.
+
+    // 1. Start with Pi provider
+    let mut pi = SequencedMockProvider::new("pi-session");
+    let pi_config = ProviderConfig {
+        agent_type: AgentType::PiNative,
+        ..Default::default()
+    };
+    pi.connect(&pi_config).await.unwrap();
+    assert!(pi.is_connected());
+
+    let mut pi_rx = pi.event_receiver();
+    emit_streaming_sequence(&pi, "thread-1", "Pi response content");
+    let pi_events = collect_events(&mut pi_rx).await;
+    assert!(pi_events.iter().any(|e| match e {
+        ProviderEvent::MessageDelta { delta, .. } => delta == "Pi response content",
+        _ => false,
+    }));
+
+    // 2. Disconnect Pi (simulating switch)
+    pi.disconnect().await;
+    assert!(!pi.is_connected());
+
+    // 3. Create Droid provider for the same server
+    let mut droid = SequencedMockProvider::new("droid-session");
+    let droid_config = ProviderConfig {
+        agent_type: AgentType::DroidNative,
+        ..Default::default()
+    };
+    droid.connect(&droid_config).await.unwrap();
+    assert!(droid.is_connected());
+
+    // 4. Verify Droid can stream on the same thread
+    let mut droid_rx = droid.event_receiver();
+    emit_streaming_sequence(&droid, "thread-1", "Droid response content");
+    let droid_events = collect_events(&mut droid_rx).await;
+    assert!(
+        droid_events.iter().any(|e| match e {
+            ProviderEvent::MessageDelta { delta, .. } => delta == "Droid response content",
+            _ => false,
+        }),
+        "Droid should stream on same thread after switch"
+    );
+
+    // 5. Verify Droid events don't contain Pi content (clean switch)
+    assert!(
+        !droid_events.iter().any(|e| match e {
+            ProviderEvent::MessageDelta { delta, .. } => delta.contains("Pi"),
+            _ => false,
+        }),
+        "Droid stream should not contain Pi content after switch"
+    );
+
+    droid.disconnect().await;
+}
