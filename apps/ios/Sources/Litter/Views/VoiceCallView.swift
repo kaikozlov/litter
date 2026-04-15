@@ -422,7 +422,7 @@ private struct VoiceTranscriptEntry: Identifiable, Equatable {
             let label = AgentLabelFormatter.format(
                 nickname: data.agentNickname,
                 role: data.agentRole
-            ) ?? "CODEX"
+            ) ?? "Agent"
             self = VoiceTranscriptEntry(
                 id: item.id,
                 kind: .assistant,

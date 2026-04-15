@@ -2,6 +2,7 @@ import SwiftUI
 
 struct InlineVoiceStatusStrip: View {
     let session: VoiceSessionState
+    let agentLabel: String
     let onToggleSpeaker: () -> Void
 
     private var inputLevel: Float {
@@ -29,7 +30,7 @@ struct InlineVoiceStatusStrip: View {
                 Circle()
                     .fill(session.isSpeaking ? LitterTheme.warning : LitterTheme.textMuted.opacity(0.4))
                     .frame(width: 5, height: 5)
-                Text("CODEX")
+                Text(agentLabel)
                     .font(LitterFont.monospaced(.caption2, weight: .bold))
                     .foregroundColor(session.isSpeaking ? LitterTheme.textPrimary : LitterTheme.textMuted)
                 AudioWaveformView(level: outputLevel, tint: LitterTheme.warning)
