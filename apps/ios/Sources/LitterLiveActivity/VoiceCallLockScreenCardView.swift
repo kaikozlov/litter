@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct VoiceCallLockScreenCardView: View {
-    let attributes: CodexVoiceCallAttributes
-    let state: CodexVoiceCallAttributes.ContentState
+    let attributes: VoiceCallAttributes
+    let state: VoiceCallAttributes.ContentState
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -87,7 +87,7 @@ struct VoiceCallLockScreenCardView: View {
         case .connecting: return "Connecting"
         case .listening: return "Listening"
         case .thinking: return "Thinking"
-        case .speaking: return "Codex speaking"
+        case .speaking: return "Agent speaking"
         case .error: return "Session ended"
         }
     }

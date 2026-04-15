@@ -1,7 +1,7 @@
 import ActivityKit
 import Foundation
 
-struct CodexTurnAttributes: ActivityAttributes {
+struct TurnAttributes: ActivityAttributes {
     let threadId: String
     let model: String
     let cwd: String

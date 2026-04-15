@@ -2,9 +2,9 @@ import ActivityKit
 import SwiftUI
 import WidgetKit
 
-struct CodexVoiceCallLiveActivity: Widget {
+struct VoiceCallLiveActivity: Widget {
     var body: some WidgetConfiguration {
-        ActivityConfiguration(for: CodexVoiceCallAttributes.self) { context in
+        ActivityConfiguration(for: VoiceCallAttributes.self) { context in
             VoiceCallLockScreenCardView(attributes: context.attributes, state: context.state)
         } dynamicIsland: { context in
             DynamicIsland {

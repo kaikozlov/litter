@@ -4,7 +4,7 @@ struct LockScreenCardView: View {
     let prompt: String
     let model: String
     let cwd: String
-    let state: CodexTurnAttributes.ContentState
+    let state: TurnAttributes.ContentState
     let timerContent: AnyView
 
     @Environment(\.colorScheme) private var colorScheme

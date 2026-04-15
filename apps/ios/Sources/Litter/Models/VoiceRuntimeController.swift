@@ -22,7 +22,7 @@ final class VoiceRuntimeController: VoiceActions {
     @ObservationIgnored private var updateSubscription: AppStoreSubscription?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private var handoffActionPollTask: Task<Void, Never>?
-    @ObservationIgnored private var voiceCallActivity: Activity<CodexVoiceCallAttributes>?
+    @ObservationIgnored private var voiceCallActivity: Activity<VoiceCallAttributes>?
     @ObservationIgnored private var voiceInputDecayToken: UUID?
     @ObservationIgnored private var voiceOutputDecayToken: UUID?
     @ObservationIgnored private var voiceStopRequestedThreadKey: ThreadKey?
@@ -696,7 +696,7 @@ final class VoiceRuntimeController: VoiceActions {
             return
         }
         if voiceCallActivity == nil {
-            let attributes = CodexVoiceCallAttributes(
+            let attributes = VoiceCallAttributes(
                 threadId: session.threadKey.threadId,
                 threadTitle: session.threadTitle,
                 model: session.model,

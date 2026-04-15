@@ -50,7 +50,7 @@ enum VoiceSessionPhase: String, Equatable {
         }
     }
 
-    var activityPhase: CodexVoiceCallAttributes.ContentState.Phase {
+    var activityPhase: VoiceCallAttributes.ContentState.Phase {
         switch self {
         case .connecting: .connecting
         case .listening: .listening
@@ -142,8 +142,8 @@ struct VoiceSessionState: Identifiable, Equatable {
         return phase.displayTitle
     }
 
-    var activityContentState: CodexVoiceCallAttributes.ContentState {
-        CodexVoiceCallAttributes.ContentState(
+    var activityContentState: VoiceCallAttributes.ContentState {
+        VoiceCallAttributes.ContentState(
             phase: phase.activityPhase,
             routeLabel: route.label,
             transcriptText: transcriptText,

@@ -1,7 +1,7 @@
 #if DEBUG
 import SwiftUI
 
-private let allCards: [(String, CodexTurnAttributes.ContentState, String)] = [
+private let allCards: [(String, TurnAttributes.ContentState, String)] = [
     (
         "explore the project structure and find bugs",
         .init(phase: .thinking, elapsedSeconds: 35, toolCallCount: 9, activeThreadCount: 1,

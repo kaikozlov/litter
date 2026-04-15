@@ -50,7 +50,7 @@ targets:
         excludes:
           - Bridge/AecBridge.swift
           - "**/*.h"
-      - path: Sources/LitterLiveActivity/CodexTurnLiveActivity.swift
+      - path: Sources/LitterLiveActivity/TurnLiveActivity.swift
     resources:
       - path: Sources/Litter/Resources/ios_system/commandDictionary.plist
       - path: Sources/Litter/Resources/ios_system/extraCommandsDictionary.plist
@@ -120,8 +120,8 @@ targets:
           - group.com.sigkitten.litter
     sources:
       - path: Sources/LitterLiveActivity
-      - path: Sources/Litter/Models/CodexTurnAttributes.swift
-      - path: Sources/Litter/Models/CodexVoiceCallAttributes.swift
+      - path: Sources/Litter/Models/TurnAttributes.swift
+      - path: Sources/Litter/Models/VoiceCallAttributes.swift
       - path: Sources/Litter/Models/LitterPalette.swift
       - path: Sources/Litter/Models/VoiceSessionControl.swift
       - path: Sources/Litter/Views/LockScreenCardView.swift

@@ -1,7 +1,7 @@
 import ActivityKit
 import Foundation
 
-struct CodexVoiceCallAttributes: ActivityAttributes {
+struct VoiceCallAttributes: ActivityAttributes {
     let threadId: String
     let threadTitle: String
     let model: String

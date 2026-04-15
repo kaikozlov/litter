@@ -3,7 +3,7 @@ import Foundation
 
 @MainActor
 final class TurnLiveActivityController {
-    private var activity: Activity<CodexTurnAttributes>?
+    private var activity: Activity<TurnAttributes>?
     private var activeKey: ThreadKey?
     private var startDate: Date?
     private var outputSnippet: String?
@@ -14,8 +14,8 @@ final class TurnLiveActivityController {
     private func cleanupStaleActivities() {
         guard !didCleanupStaleActivities else { return }
         didCleanupStaleActivities = true
-        for stale in Activity<CodexTurnAttributes>.activities {
-            let state = CodexTurnAttributes.ContentState(
+        for stale in Activity<TurnAttributes>.activities {
+            let state = TurnAttributes.ContentState(
                 phase: .completed, elapsedSeconds: 0, toolCallCount: 0,
                 activeThreadCount: 0, fileChangeCount: 0, contextPercent: 0
             )
@@ -60,14 +60,14 @@ final class TurnLiveActivityController {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
         let now = Date()
-        let attributes = CodexTurnAttributes(
+        let attributes = TurnAttributes(
             threadId: thread.key.threadId,
             model: thread.resolvedModel,
             cwd: thread.info.cwd ?? "",
             startDate: now,
             prompt: String(thread.resolvedPreview.prefix(120))
         )
-        let state = CodexTurnAttributes.ContentState(
+        let state = TurnAttributes.ContentState(
             phase: .thinking,
             elapsedSeconds: 0,
             toolCallCount: 0,
@@ -99,7 +99,7 @@ final class TurnLiveActivityController {
             outputSnippet = snapshot.snippet
         }
 
-        let state = CodexTurnAttributes.ContentState(
+        let state = TurnAttributes.ContentState(
             phase: .thinking,
             elapsedSeconds: Int(Date().timeIntervalSince(startDate ?? Date())),
             toolCallCount: 0,
@@ -122,7 +122,7 @@ final class TurnLiveActivityController {
             outputSnippet = snapshot.snippet
         }
 
-        let state = CodexTurnAttributes.ContentState(
+        let state = TurnAttributes.ContentState(
             phase: .thinking,
             elapsedSeconds: Int(Date().timeIntervalSince(startDate ?? Date())),
             toolCallCount: 0,
@@ -138,10 +138,10 @@ final class TurnLiveActivityController {
         }
     }
 
-    func endCurrent(phase: CodexTurnAttributes.ContentState.Phase, snapshot: AppSnapshotRecord?) {
+    func endCurrent(phase: TurnAttributes.ContentState.Phase, snapshot: AppSnapshotRecord?) {
         guard let activity else { return }
         let thread = activeKey.flatMap { snapshot?.threadSnapshot(for: $0) }
-        let state = CodexTurnAttributes.ContentState(
+        let state = TurnAttributes.ContentState(
             phase: phase,
             elapsedSeconds: Int(Date().timeIntervalSince(startDate ?? Date())),
             toolCallCount: 0,

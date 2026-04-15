@@ -2,7 +2,7 @@ import ActivityKit
 import SwiftUI
 import WidgetKit
 
-struct CodexTurnLiveActivity: Widget {
+struct TurnLiveActivity: Widget {
     // Dynamic Island is always dark — resolve palette colors once for .dark scheme
     private var warningColor: Color { LitterPalette.warning.color(for: .dark) }
     private var dangerColor: Color { LitterPalette.danger.color(for: .dark) }
@@ -11,7 +11,7 @@ struct CodexTurnLiveActivity: Widget {
     private var mutedText: Color { LitterPalette.textMuted.color(for: .dark) }
 
     var body: some WidgetConfiguration {
-        ActivityConfiguration(for: CodexTurnAttributes.self) { context in
+        ActivityConfiguration(for: TurnAttributes.self) { context in
             lockScreenView(context: context)
         } dynamicIsland: { context in
             DynamicIsland {
@@ -59,7 +59,7 @@ struct CodexTurnLiveActivity: Widget {
 
     // MARK: - Lock Screen
 
-    private func lockScreenView(context: ActivityViewContext<CodexTurnAttributes>) -> some View {
+    private func lockScreenView(context: ActivityViewContext<TurnAttributes>) -> some View {
         LockScreenCardView(
             prompt: context.attributes.prompt,
             model: context.attributes.model,
@@ -81,14 +81,14 @@ struct CodexTurnLiveActivity: Widget {
             .frame(width: size, height: size)
     }
 
-    private func displayText(_ state: CodexTurnAttributes.ContentState) -> String {
+    private func displayText(_ state: TurnAttributes.ContentState) -> String {
         if let snippet = state.outputSnippet, !snippet.isEmpty {
             return snippet
         }
         return statusText(state)
     }
 
-    private func snippetColor(_ state: CodexTurnAttributes.ContentState) -> Color {
+    private func snippetColor(_ state: TurnAttributes.ContentState) -> Color {
         if state.outputSnippet != nil {
             return secondaryText
         }
@@ -99,7 +99,7 @@ struct CodexTurnLiveActivity: Widget {
         }
     }
 
-    private func phaseBadge(_ state: CodexTurnAttributes.ContentState) -> some View {
+    private func phaseBadge(_ state: TurnAttributes.ContentState) -> some View {
         Text(phaseBadgeText(state))
             .font(.system(size: 10, weight: .medium, design: LitterPalette.fontDesign))
             .foregroundStyle(phaseColor(state))
@@ -137,7 +137,7 @@ struct CodexTurnLiveActivity: Widget {
     }
 
     @ViewBuilder
-    private func liveTimer(context: ActivityViewContext<CodexTurnAttributes>, size: CGFloat) -> some View {
+    private func liveTimer(context: ActivityViewContext<TurnAttributes>, size: CGFloat) -> some View {
         if isActive(context.state) {
             Text(timerInterval: context.attributes.startDate...Date.distantFuture, countsDown: false)
                 .font(.system(size: size, design: LitterPalette.fontDesign))
@@ -151,7 +151,7 @@ struct CodexTurnLiveActivity: Widget {
         }
     }
 
-    private func compactTimer(context: ActivityViewContext<CodexTurnAttributes>) -> some View {
+    private func compactTimer(context: ActivityViewContext<TurnAttributes>) -> some View {
         Text(compactElapsedText(context: context))
             .font(.system(size: 10, weight: .medium, design: LitterPalette.fontDesign))
             .monospacedDigit()
@@ -163,11 +163,11 @@ struct CodexTurnLiveActivity: Widget {
 
     // MARK: - Helpers
 
-    private func isActive(_ state: CodexTurnAttributes.ContentState) -> Bool {
+    private func isActive(_ state: TurnAttributes.ContentState) -> Bool {
         state.phase == .thinking || state.phase == .toolCall
     }
 
-    private func statusText(_ state: CodexTurnAttributes.ContentState) -> String {
+    private func statusText(_ state: TurnAttributes.ContentState) -> String {
         switch state.phase {
         case .thinking: return "Thinking..."
         case .toolCall: return state.toolName ?? "Running tool..."
@@ -176,7 +176,7 @@ struct CodexTurnLiveActivity: Widget {
         }
     }
 
-    private func phaseBadgeText(_ state: CodexTurnAttributes.ContentState) -> String {
+    private func phaseBadgeText(_ state: TurnAttributes.ContentState) -> String {
         switch state.phase {
         case .thinking: return "thinking"
         case .toolCall: return "tool"
@@ -185,7 +185,7 @@ struct CodexTurnLiveActivity: Widget {
         }
     }
 
-    private func phaseColor(_ state: CodexTurnAttributes.ContentState) -> Color {
+    private func phaseColor(_ state: TurnAttributes.ContentState) -> Color {
         switch state.phase {
         case .thinking, .toolCall: return warningColor
         case .completed: return secondaryText
@@ -193,7 +193,7 @@ struct CodexTurnLiveActivity: Widget {
         }
     }
 
-    private func phaseBgColor(_ state: CodexTurnAttributes.ContentState) -> Color {
+    private func phaseBgColor(_ state: TurnAttributes.ContentState) -> Color {
         switch state.phase {
         case .thinking, .toolCall: return warningColor.opacity(0.12)
         case .completed: return primaryText.opacity(0.06)
@@ -219,7 +219,7 @@ struct CodexTurnLiveActivity: Widget {
         return String(format: "%d:%02d", m, s)
     }
 
-    private func compactElapsedText(context: ActivityViewContext<CodexTurnAttributes>) -> String {
+    private func compactElapsedText(context: ActivityViewContext<TurnAttributes>) -> String {
         if isActive(context.state) {
             let elapsed = max(0, Int(Date().timeIntervalSince(context.attributes.startDate)))
             return compactDurationText(elapsed)
@@ -245,7 +245,7 @@ struct CodexTurnLiveActivity: Widget {
 // MARK: - Adaptive timer for lock screen (respects color scheme)
 
 private struct AdaptiveLiveTimer: View {
-    let context: ActivityViewContext<CodexTurnAttributes>
+    let context: ActivityViewContext<TurnAttributes>
     @Environment(\.colorScheme) private var colorScheme
 
     private var isActive: Bool {
