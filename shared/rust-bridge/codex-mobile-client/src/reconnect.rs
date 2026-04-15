@@ -173,9 +173,18 @@ fn can_connect_via_ssh(server: &SavedServerRecord) -> bool {
         || server.ssh_port_forwarding_enabled == Some(true)
 }
 
+/// Whether the resolved connection mode indicates a direct (non-SSH) connection.
+///
+/// Accepts both the new `"direct"` mode string and the legacy `"directCodex"`
+/// string for cross-platform migration compatibility. Older iOS/Android builds
+/// may have persisted `"directCodex"` in saved server configs.
+fn is_direct_mode(mode: Option<&str>) -> bool {
+    matches!(mode, Some("direct") | Some("directCodex"))
+}
+
 /// Resolve the preferred agent port for direct mode.
 fn resolved_preferred_agent_port(server: &SavedServerRecord) -> Option<u16> {
-    if resolved_preferred_connection_mode(server).as_deref() != Some("directCodex") {
+    if !is_direct_mode(resolved_preferred_connection_mode(server).as_deref()) {
         return None;
     }
     let ports = available_direct_agent_ports(server);
@@ -606,6 +615,17 @@ mod tests {
     fn direct_agent_port_preferred_agent_port_in_direct_mode() {
         let mut s = base_server();
         s.preferred_connection_mode = Some("directCodex".into());
+        s.agent_ports = vec![9090, 9091];
+        s.preferred_agent_port = Some(9091);
+        assert_eq!(direct_agent_port(&s), Some(9091));
+    }
+
+    #[test]
+    fn direct_agent_port_preferred_agent_port_with_new_direct_mode() {
+        // Cross-platform migration compat: new "direct" mode string must work
+        // identically to legacy "directCodex".
+        let mut s = base_server();
+        s.preferred_connection_mode = Some("direct".into());
         s.agent_ports = vec![9090, 9091];
         s.preferred_agent_port = Some(9091);
         assert_eq!(direct_agent_port(&s), Some(9091));

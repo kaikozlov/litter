@@ -1180,6 +1180,12 @@ fn merge_server(existing: &mut DiscoveredServer, candidate: DiscoveredServer) {
         existing.agent_port = candidate.agent_port;
     }
     merge_agent_ports(existing, &candidate, prefer_candidate);
+    // Re-classify agent_types from the merged agent_ports so the list
+    // reflects all agent types reachable on this host.
+    let classified = classify_agent_ports(&existing.agent_ports);
+    if !classified.is_empty() {
+        existing.agent_types = classified;
+    }
     if candidate.ssh_port.is_some() && (existing.ssh_port.is_none() || prefer_candidate) {
         existing.ssh_port = candidate.ssh_port;
     }
@@ -2050,6 +2056,19 @@ mod tests {
         let reconciled = reconcile_discovered_servers(vec![server_8390, server_9234]);
         assert_eq!(reconciled.len(), 1);
         assert_eq!(reconciled[0].agent_ports, vec![8390, 9234]);
+        // agent_types must be re-classified from the merged agent_ports
+        assert!(
+            reconciled[0].agent_types.contains(&crate::provider::AgentType::Codex),
+            "merged agent_types should contain Codex (port 8390)"
+        );
+        assert!(
+            reconciled[0].agent_types.contains(&crate::provider::AgentType::PiNative),
+            "merged agent_types should contain PiNative (port 9234)"
+        );
+        assert!(
+            reconciled[0].agent_types.contains(&crate::provider::AgentType::PiAcp),
+            "merged agent_types should contain PiAcp (port 9234)"
+        );
         // Bonjour is preferred source
         assert_eq!(reconciled[0].source, DiscoverySource::Bonjour);
         assert_eq!(reconciled[0].display_name, "Studio");
