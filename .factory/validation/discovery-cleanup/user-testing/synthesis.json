@@ -1,0 +1,83 @@
+{
+  "milestone": "discovery-cleanup",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 36,
+    "passed": 36,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-DISC-001",
+    "VAL-DISC-002",
+    "VAL-DISC-003",
+    "VAL-DISC-004",
+    "VAL-DISC-005",
+    "VAL-DISC-006",
+    "VAL-DISC-007",
+    "VAL-DISC-008",
+    "VAL-DISC-009",
+    "VAL-DISC-010",
+    "VAL-DISC-011",
+    "VAL-DISC-012",
+    "VAL-DISC-013",
+    "VAL-DISC-014",
+    "VAL-DISC-015",
+    "VAL-DISC-016",
+    "VAL-DISC-017",
+    "VAL-DISC-018",
+    "VAL-DISC-019",
+    "VAL-DISC-020",
+    "VAL-DISC-021",
+    "VAL-DISC-022",
+    "VAL-DISC-023",
+    "VAL-DISC-024",
+    "VAL-DISC-025",
+    "VAL-DISC-026",
+    "VAL-DISC-027",
+    "VAL-DISC-028",
+    "VAL-DISC-029",
+    "VAL-DISC-030",
+    "VAL-DISC-031",
+    "VAL-DISC-032",
+    "VAL-DISC-033",
+    "VAL-DISC-034",
+    "VAL-DISC-035",
+    "VAL-DISC-036"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null,
+  "verificationNotes": {
+    "rustCheck": "make rust-check exits 0 (0 errors, only webrtc-audio-processing-sys C warnings)",
+    "rustTest": "1285 tests passed, 0 failed, 9 ignored",
+    "namingRenames": {
+      "discoveryRs": "Zero references to codex_port/codex_ports in discovery.rs and discovery_uniffi.rs",
+      "reconnectRs": "Zero references to codex_port/codex_ports/has_codex_server/preferred_codex in reconnect.rs",
+      "ffiReconnectRs": "Zero old names in ffi/reconnect.rs",
+      "connectionStepKind": "Zero references to FindingCodex/InstallingCodex/StartingAppServer in Rust src/",
+      "mergeHelper": "merge_codex_ports replaced with merge_agent_ports",
+      "scanPorts": "DEFAULT_SCAN_PORTS replaced with agent-type-aware port registry",
+      "sshProbing": "detect_all_agents probes for Pi, Droid, and Codex agents"
+    },
+    "iosNamingRenames": {
+      "directCodex": "Only in backward-compat Codable decoder (expected)",
+      "hasCodexServer": "Only in backward-compat Codable decoder in SavedServer.swift (expected)",
+      "codexPorts": "Only in backward-compat Codable decoder in SavedServer.swift (expected)",
+      "discoveryView": "Zero old names in DiscoveryView.swift",
+      "networkDiscovery": "Zero old names in NetworkDiscovery.swift",
+      "previewSupport": "Zero old names in PreviewSupport.swift"
+    },
+    "androidNamingRenames": {
+      "mainSource": "Old names only in backward-compat JSON parsing in SavedServerStore.kt (expected)",
+      "tests": "Zero old names in Android test files",
+      "stepKinds": "Zero old step kind variant names in Android source"
+    },
+    "uniffiBindings": {
+      "swift": "Generated Swift bindings contain agentPort/agentPorts (no codexPort/codexPorts)",
+      "kotlin": "Generated Kotlin bindings use renamed fields"
+    }
+  }
+}
